@@ -9,11 +9,12 @@ from PyQt6.QtWidgets import (
     QGridLayout, QLabel, QCheckBox, QPushButton,
     QListWidget, QListWidgetItem, QAbstractItemView
 )
-from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtCore import pyqtSignal, Qt, QThread
 from PyQt6.QtGui import QImage, QPixmap, QIcon
 
 
-def _frame_to_pixmap(frame: np.ndarray, size: int = 80) -> QPixmap:
+def _frame_to_rgb(frame: np.ndarray, size: int = 80):
+    """numpy RGB 배열 생성 (스레드 안전 - QPixmap 생성 없음)"""
     try:
         f = frame.astype(np.float64)
         vmin, vmax = f.min(), f.max()
@@ -29,14 +30,64 @@ def _frame_to_pixmap(frame: np.ndarray, size: int = 80) -> QPixmap:
         th, tw = max(1, int(h * scale)), max(1, int(w * scale))
         row_idx = np.linspace(0, h - 1, th).astype(int)
         col_idx = np.linspace(0, w - 1, tw).astype(int)
-        thumb = np.ascontiguousarray(rgb[np.ix_(row_idx, col_idx)])
-        img = QImage(thumb.data, tw, th, tw * 3, QImage.Format.Format_RGB888)
+        return np.ascontiguousarray(rgb[np.ix_(row_idx, col_idx)])
+    except Exception:
+        return None
+
+
+def _rgb_to_pixmap(rgb: np.ndarray) -> QPixmap:
+    """numpy RGB 배열 → QPixmap (GUI 스레드에서만 호출)"""
+    try:
+        th, tw = rgb.shape[:2]
+        img = QImage(rgb.data, tw, th, tw * 3, QImage.Format.Format_RGB888)
         return QPixmap.fromImage(img.copy())
-    except Exception as e:
-        print(f"Thumbnail error: {e}")
+    except Exception:
+        px = QPixmap(80, 80)
+        px.fill(Qt.GlobalColor.darkGray)
+        return px
+
+
+def _frame_to_pixmap(frame: np.ndarray, size: int = 80) -> QPixmap:
+    """하위 호환용 래퍼"""
+    rgb = _frame_to_rgb(frame, size)
+    if rgb is None:
         px = QPixmap(size, size)
         px.fill(Qt.GlobalColor.darkGray)
         return px
+    return _rgb_to_pixmap(rgb)
+
+
+class ThumbnailWorker(QThread):
+    """백그라운드에서 썸네일 RGB 배열 생성 후 시그널로 전달"""
+    thumb_ready = pyqtSignal(str, int, str, object)  # filepath, frame_idx, label, rgb_ndarray
+
+    def __init__(self, spe_obj, filepath: str, num_frames: int, filename: str, parent=None):
+        super().__init__(parent)
+        self._spe_obj = spe_obj
+        self._filepath = filepath
+        self._num_frames = num_frames
+        self._filename = filename
+
+    def run(self):
+        for i in range(self._num_frames):
+            frame = self._get_frame(self._spe_obj, i)
+            if frame is None:
+                continue
+            label = self._filename if self._num_frames == 1 else f"{self._filename}_{i}"
+            rgb = _frame_to_rgb(frame, size=80)
+            self.thumb_ready.emit(self._filepath, i, label, rgb)
+
+    def _get_frame(self, spe_obj, idx: int):
+        try:
+            if hasattr(spe_obj, 'frame'):
+                return spe_obj.frame(idx)
+            if hasattr(spe_obj, 'data'):
+                data = spe_obj.data
+                if isinstance(data, np.ndarray):
+                    return data[idx] if data.ndim == 3 else data
+            return None
+        except Exception:
+            return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -146,6 +197,9 @@ class FrameGridPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._thumb_items: list[FrameThumbItem] = []
+        self._thumb_map: dict[tuple, FrameThumbItem] = {}  # O(1) 조회용
+        self._selected_key: tuple | None = None            # 현재 선택된 (filepath, frame_idx)
+        self._thumb_workers: list[ThumbnailWorker] = []    # 실행 중인 워커 참조 유지
         self._list_data: list[tuple] = []
         self._mode = 'thumb'
         self._focused_idx = -1   # 키보드 포커스 인덱스
@@ -292,37 +346,58 @@ class FrameGridPanel(QWidget):
     # ─────────────────────────────────────────
 
     def add_file(self, spe_obj, filepath: str, num_frames: int, filename: str):
+        # 리스트 아이템 동기 추가 (텍스트만이라 빠름)
         for i in range(num_frames):
-            frame = self._get_frame(spe_obj, i)
-            if frame is None:
-                continue
-
             label = filename if num_frames == 1 else f"{filename}_{i}"
-            pixmap = _frame_to_pixmap(frame, size=80)
-
-            # 썸네일 그리드에 추가
-            thumb = FrameThumbItem(filepath, i, label, pixmap)
-            thumb.clicked.connect(self._on_thumb_clicked)
-            thumb.toggled.connect(self._on_thumb_toggled)
-            total = len(self._thumb_items)
-            row, col = divmod(total, self.COLS)
-            self.grid_layout.addWidget(thumb, row, col)
-            self._thumb_items.append(thumb)
-
-            # 리스트에도 추가
             list_item = QListWidgetItem(f"  {label}")
             list_item.setData(Qt.ItemDataRole.UserRole, (filepath, i))
             list_item.setFlags(list_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             list_item.setCheckState(Qt.CheckState.Unchecked)
             self.list_widget.addItem(list_item)
 
+        # 썸네일 비동기 생성 (백그라운드 스레드)
+        worker = ThumbnailWorker(spe_obj, filepath, num_frames, filename)
+        worker.thumb_ready.connect(self._on_thumb_ready)
+        worker.finished.connect(
+            lambda: self._thumb_workers.remove(worker) if worker in self._thumb_workers else None
+        )
+        self._thumb_workers.append(worker)
+        worker.start()
+
+    def _on_thumb_ready(self, filepath: str, frame_idx: int, label: str, rgb):
+        """ThumbnailWorker 결과 수신 → GUI 스레드에서 QPixmap 생성 및 위젯 추가"""
+        if rgb is not None:
+            pixmap = _rgb_to_pixmap(rgb)
+        else:
+            pixmap = QPixmap(80, 80)
+            pixmap.fill(Qt.GlobalColor.darkGray)
+
+        thumb = FrameThumbItem(filepath, frame_idx, label, pixmap)
+        thumb.clicked.connect(self._on_thumb_clicked)
+        thumb.toggled.connect(self._on_thumb_toggled)
+        total = len(self._thumb_items)
+        row, col = divmod(total, self.COLS)
+        self.grid_layout.addWidget(thumb, row, col)
+        self._thumb_items.append(thumb)
+        self._thumb_map[(filepath, frame_idx)] = thumb
+
+        # 이미 선택된 키라면 선택 표시
+        if self._selected_key == (filepath, frame_idx):
+            thumb.set_selected(True)
+
     def remove_file(self, filepath: str):
         # 썸네일 제거
         to_remove = [t for t in self._thumb_items if t.filepath == filepath]
         for t in to_remove:
+            key = (t.filepath, t.frame_idx)
             self.grid_layout.removeWidget(t)
             t.deleteLater()
             self._thumb_items.remove(t)
+            self._thumb_map.pop(key, None)
+
+        if self._selected_key and self._selected_key[0] == filepath:
+            self._selected_key = None
+
         self._rebuild_grid()
 
         # 리스트에서 제거
@@ -333,11 +408,24 @@ class FrameGridPanel(QWidget):
                 self.list_widget.takeItem(i)
 
     def set_current_frame(self, filepath: str, frame_idx: int):
-        for item in self._thumb_items:
-            item.set_selected(
-                item.filepath == filepath and item.frame_idx == frame_idx
-            )
-        # 리스트도 선택 동기화
+        new_key = (filepath, frame_idx)
+        if self._selected_key == new_key:
+            return
+
+        # 이전 선택만 해제 (전체 순회 없음 - O(1))
+        if self._selected_key is not None:
+            old_thumb = self._thumb_map.get(self._selected_key)
+            if old_thumb is not None:
+                old_thumb.set_selected(False)
+
+        # 새 선택 적용
+        new_thumb = self._thumb_map.get(new_key)
+        if new_thumb is not None:
+            new_thumb.set_selected(True)
+
+        self._selected_key = new_key
+
+        # 리스트 동기화
         for i in range(self.list_widget.count()):
             item = self.list_widget.item(i)
             fp, fi = item.data(Qt.ItemDataRole.UserRole)
@@ -354,10 +442,17 @@ class FrameGridPanel(QWidget):
         ]
 
     def clear(self):
+        for w in self._thumb_workers:
+            w.quit()
+            w.wait()
+        self._thumb_workers.clear()
+
         for item in self._thumb_items:
             self.grid_layout.removeWidget(item)
             item.deleteLater()
         self._thumb_items.clear()
+        self._thumb_map.clear()
+        self._selected_key = None
         self.list_widget.clear()
 
     # ─────────────────────────────────────────

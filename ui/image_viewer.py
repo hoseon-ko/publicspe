@@ -7,7 +7,7 @@ ROI를 마우스 드래그로 직접 그리기
 import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox
-from PyQt6.QtCore import pyqtSignal, Qt, QPointF
+from PyQt6.QtCore import pyqtSignal, Qt, QPointF, QTimer
 
 
 class ImageViewer(QWidget):
@@ -26,6 +26,11 @@ class ImageViewer(QWidget):
         self._box_item = None
         self._roi_line_pts = None
         self._roi_box_pts = None
+
+        self._resize_timer = QTimer()
+        self._resize_timer.setSingleShot(True)
+        self._resize_timer.setInterval(50)
+        self._resize_timer.timeout.connect(self._on_resize_timeout)
 
         self._setup_ui()
 
@@ -152,8 +157,12 @@ class ImageViewer(QWidget):
         )
 
     def resizeEvent(self, event):
-        """뷰어 크기 변경 시 이미지 자동 fit"""
+        """빰어 크기 변경 시 이미지 자동 fit (50ms 디바운싱)"""
         super().resizeEvent(event)
+        if self._current_image is not None:
+            self._resize_timer.start()
+
+    def _on_resize_timeout(self):
         if self._current_image is not None:
             self._fit_to_view(self._current_image)
 
