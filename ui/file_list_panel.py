@@ -4,63 +4,142 @@ file_list_panel.py
 """
 
 import os
+import xml.etree.ElementTree as ET
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QListWidget, QListWidgetItem, QLabel,
     QPushButton, QSlider, QAbstractItemView, QFrame,
-    QDialog, QTextEdit, QTabWidget, QApplication
+    QDialog, QTextEdit, QTabWidget, QApplication,
+    QTreeWidget, QTreeWidgetItem, QLineEdit, QSizePolicy
 )
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtGui import QFont, QColor, QBrush
+
+
+_DIALOG_QSS = """
+    QDialog {
+        background: #1a1a2e;
+        color: #e0e0e0;
+    }
+    QTabWidget::pane {
+        border: 1px solid #0f3460;
+        background: #16213e;
+    }
+    QTabBar::tab {
+        background: #16213e;
+        color: #a0a0b0;
+        padding: 6px 18px;
+        border: 1px solid #0f3460;
+        font-size: 11px;
+    }
+    QTabBar::tab:selected {
+        background: #0f3460;
+        color: #e94560;
+        font-weight: bold;
+    }
+    QTextEdit {
+        background: #16213e;
+        color: #d0d0e0;
+        border: none;
+        font-family: Consolas, monospace;
+        font-size: 11px;
+        selection-background-color: #e94560;
+    }
+    QTreeWidget {
+        background: #16213e;
+        color: #d0d0e0;
+        border: none;
+        font-family: Consolas, monospace;
+        font-size: 11px;
+        alternate-background-color: #1c2444;
+        outline: none;
+    }
+    QTreeWidget::item {
+        padding: 2px 4px;
+        border: none;
+    }
+    QTreeWidget::item:selected {
+        background: #0f3460;
+        color: #e0e0e0;
+    }
+    QTreeWidget::item:hover {
+        background: #0f3460;
+    }
+    QHeaderView::section {
+        background: #0f3460;
+        color: #e94560;
+        font-weight: bold;
+        font-size: 11px;
+        padding: 4px;
+        border: none;
+        border-right: 1px solid #1a1a2e;
+    }
+    QLineEdit {
+        background: #16213e;
+        color: #e0e0e0;
+        border: 1px solid #0f3460;
+        border-radius: 4px;
+        padding: 4px 8px;
+        font-size: 11px;
+        selection-background-color: #e94560;
+    }
+    QLineEdit:focus { border-color: #e94560; }
+    QPushButton {
+        background: #0f3460;
+        color: #e0e0e0;
+        border: 1px solid #e94560;
+        border-radius: 4px;
+        padding: 4px 14px;
+        font-size: 11px;
+    }
+    QPushButton:hover { background: #e94560; color: #ffffff; }
+    QScrollBar:vertical {
+        background: #1a1a2e; width: 8px; margin: 0;
+    }
+    QScrollBar::handle:vertical {
+        background: #0f3460; border-radius: 4px; min-height: 20px;
+    }
+    QScrollBar::handle:vertical:hover { background: #e94560; }
+    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+"""
 
 
 class SpeInfoDialog(QDialog):
     """
     SPE 파일 메타정보 / XML 조회 다이얼로그.
-    SPE 3.0 파일이면 [Metadata] 탭 + [XML] 탭 두 개,
-    SPE 2.x 이면 [Metadata] 탭만 표시.
+    - [Metadata] 탭 : 파스된 key/value 표시
+    - [XML Tree] 탭  : 계층형 트리 덼 (SPE 3.0 전용)
     """
 
     def __init__(self, spe_item, parent=None):
         super().__init__(parent)
-        spe_obj = spe_item.spe_obj
+        spe_obj  = spe_item.spe_obj
         filename = os.path.basename(spe_item.filepath)
         self.setWindowTitle(f"SPE Info — {filename}")
-        self.resize(700, 520)
-        self.setStyleSheet("""
-            QDialog       { background: #1a1a2e; color: #e0e0e0; }
-            QTabWidget::pane { border: 1px solid #0f3460; }
-            QTabBar::tab  { background: #16213e; color: #a0a0b0;
-                            padding: 5px 16px; border: 1px solid #0f3460; }
-            QTabBar::tab:selected { background: #0f3460; color: #e94560; font-weight: bold; }
-            QTextEdit     { background: #16213e; color: #d0d0e0;
-                            border: none; font-family: Consolas, monospace; font-size: 11px; }
-            QPushButton   { background: #0f3460; color: #e0e0e0;
-                            border: 1px solid #e94560; border-radius: 4px;
-                            padding: 4px 14px; font-size: 11px; }
-            QPushButton:hover { background: #e94560; color: #ffffff; }
-        """)
+        self.resize(800, 620)
+        self.setStyleSheet(_DIALOG_QSS)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(8)
 
-        tabs = QTabWidget()
-        layout.addWidget(tabs)
+        self._tabs = QTabWidget()
+        layout.addWidget(self._tabs)
 
         # ―― Metadata 탭 ――
         meta_text = QTextEdit()
         meta_text.setReadOnly(True)
         meta_text.setPlainText(self._format_meta(spe_obj))
-        tabs.addTab(meta_text, "Metadata")
+        self._tabs.addTab(meta_text, "Metadata")
 
-        # ―― XML 탭 (SPE 3.0만) ――
+        # ―― XML Tree 탭 (SPE 3.0만) ――
         xml_str = getattr(spe_obj, '_xml', None)
+        self._xml_str = xml_str
+        self._tree_widget = None
+        self._all_items: list[QTreeWidgetItem] = []
         if xml_str:
-            xml_text = QTextEdit()
-            xml_text.setReadOnly(True)
-            xml_text.setPlainText(self._format_xml(xml_str))
-            tabs.addTab(xml_text, "XML Footer")
+            xml_tab = self._build_xml_tab(xml_str)
+            self._tabs.addTab(xml_tab, "XML Tree")
 
         # ―― 하단 버튼 ――
         btn_row = QHBoxLayout()
@@ -72,7 +151,7 @@ class SpeInfoDialog(QDialog):
 
         if xml_str:
             btn_copy_xml = QPushButton("Copy XML")
-            btn_copy_xml.clicked.connect(lambda: QApplication.clipboard().setText(xml_text.toPlainText()))
+            btn_copy_xml.clicked.connect(self._copy_xml)
             btn_row.addWidget(btn_copy_xml)
 
         btn_close = QPushButton("Close")
@@ -80,12 +159,164 @@ class SpeInfoDialog(QDialog):
         btn_row.addWidget(btn_close)
         layout.addLayout(btn_row)
 
+    # ――――――――――――――――――――――――――――――――
+    # XML Tree 탭 빌더
+    # ――――――――――――――――――――――――――――――――
+
+    def _build_xml_tab(self, xml_str: str) -> QWidget:
+        container = QWidget()
+        vbox = QVBoxLayout(container)
+        vbox.setContentsMargins(0, 6, 0, 0)
+        vbox.setSpacing(6)
+
+        # 검색란
+        search_row = QHBoxLayout()
+        self._search_box = QLineEdit()
+        self._search_box.setPlaceholderText("Search tag / value...")
+        self._search_box.textChanged.connect(self._on_search_changed)
+        search_row.addWidget(self._search_box)
+
+        btn_expand = QPushButton("Expand All")
+        btn_expand.setFixedWidth(90)
+        btn_expand.clicked.connect(lambda: self._tree_widget.expandAll())
+        search_row.addWidget(btn_expand)
+
+        btn_collapse = QPushButton("Collapse")
+        btn_collapse.setFixedWidth(80)
+        btn_collapse.clicked.connect(lambda: self._tree_widget.collapseAll())
+        search_row.addWidget(btn_collapse)
+        vbox.addLayout(search_row)
+
+        # 트리 위젯
+        self._tree_widget = QTreeWidget()
+        self._tree_widget.setColumnCount(2)
+        self._tree_widget.setHeaderLabels(["Element / Attribute", "Value"])
+        self._tree_widget.setAlternatingRowColors(True)
+        self._tree_widget.setColumnWidth(0, 340)
+        self._tree_widget.setAnimated(True)
+        self._tree_widget.header().setStretchLastSection(True)
+        vbox.addWidget(self._tree_widget)
+
+        try:
+            root = ET.fromstring(xml_str.encode('utf-8'))
+            top = QTreeWidgetItem(self._tree_widget)
+            top.setText(0, self._tag(root))
+            top.setForeground(0, QBrush(QColor("#e94560")))
+            top.setFont(0, QFont("Consolas", 11, QFont.Weight.Bold))
+            self._all_items.append(top)
+            self._populate_tree(top, root)
+            self._tree_widget.addTopLevelItem(top)
+            top.setExpanded(True)
+            # 첫 두 레벨만 펼치기
+            for i in range(top.childCount()):
+                top.child(i).setExpanded(True)
+        except Exception as e:
+            err = QTreeWidgetItem(self._tree_widget, ["Parse error", str(e)])
+
+        # 검색 디바운싱 타이머
+        self._search_timer = QTimer()
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(250)
+        self._search_timer.timeout.connect(self._run_search)
+
+        return container
+
+    def _populate_tree(self, parent_item: QTreeWidgetItem, elem):
+        # 속성은 하위 로우로
+        ns_stripped = self._strip_ns
+        for attr_name, attr_val in elem.attrib.items():
+            attr_item = QTreeWidgetItem(parent_item)
+            attr_item.setText(0, f"@{ns_stripped(attr_name)}")
+            attr_item.setText(1, attr_val)
+            attr_item.setForeground(0, QBrush(QColor("#7ec8e3")))
+            self._all_items.append(attr_item)
+
+        # 텍스트 콘텐츠
+        text = (elem.text or "").strip()
+        if text:
+            parent_item.setText(1, text)
+            parent_item.setForeground(1, QBrush(QColor("#a8e6a3")))
+
+        # 자식 요소
+        for child in elem:
+            child_item = QTreeWidgetItem(parent_item)
+            child_item.setText(0, self._tag(child))
+            child_item.setForeground(0, QBrush(QColor("#c9b1ff")))
+            self._all_items.append(child_item)
+            self._populate_tree(child_item, child)
+
+    @staticmethod
+    def _tag(elem) -> str:
+        tag = elem.tag
+        if '}' in tag:
+            tag = tag.split('}', 1)[1]
+        return tag
+
+    @staticmethod
+    def _strip_ns(name: str) -> str:
+        if '}' in name:
+            return name.split('}', 1)[1]
+        return name
+
+    # ――――――――――――――――――――――――――――――――
+    # 검색
+    # ――――――――――――――――――――――――――――――――
+
+    def _on_search_changed(self, text: str):
+        self._search_timer.start()
+
+    def _run_search(self):
+        keyword = self._search_box.text().strip().lower()
+        _HIGHLIGHT = QBrush(QColor("#e94560"))
+        _NORMAL_TAG = QBrush(QColor("#c9b1ff"))
+        _NORMAL_ATTR = QBrush(QColor("#7ec8e3"))
+        _NORMAL_ROOT = QBrush(QColor("#e94560"))
+
+        for item in self._all_items:
+            col0 = item.text(0)
+            col1 = item.text(1)
+            match = keyword and (keyword in col0.lower() or keyword in col1.lower())
+
+            if match:
+                item.setBackground(0, _HIGHLIGHT)
+                item.setBackground(1, _HIGHLIGHT)
+                # 부모를 접으면서 스크롤도
+                p = item.parent()
+                while p:
+                    p.setExpanded(True)
+                    p = p.parent()
+            else:
+                item.setBackground(0, QBrush())
+                item.setBackground(1, QBrush())
+
+        if keyword:
+            # 첫 번째 매치 항목으로 스크롤
+            for item in self._all_items:
+                if item.background(0).color() == QColor("#e94560"):
+                    self._tree_widget.scrollToItem(item)
+                    break
+
+    # ――――――――――――――――――――――――――――――――
+    # 유틸 / 복사
+    # ――――――――――――――――――――――――――――――――
+
+    def _copy_xml(self):
+        if not self._xml_str:
+            return
+        try:
+            import xml.dom.minidom
+            dom = xml.dom.minidom.parseString(self._xml_str.encode('utf-8'))
+            pretty = dom.toprettyxml(indent='  ')
+        except Exception:
+            pretty = self._xml_str
+        QApplication.clipboard().setText(pretty)
+
     @staticmethod
     def _format_meta(spe_obj) -> str:
+        import numpy as np
         meta = getattr(spe_obj, 'meta', {})
         lines = []
         for k, v in meta.items():
-            import numpy as np
             if k == 'wavelengths_nm' and isinstance(v, np.ndarray):
                 if len(v) > 8:
                     preview = ', '.join(f"{x:.4f}" for x in v[:4])
@@ -98,16 +329,6 @@ class SpeInfoDialog(QDialog):
             else:
                 lines.append(f"{k:<32}  {v}")
         return '\n'.join(lines) if lines else '(no metadata)'
-
-    @staticmethod
-    def _format_xml(xml_str: str) -> str:
-        """간단한 XML 인덴팅 (minidom 없으면 raw 반환)"""
-        try:
-            import xml.dom.minidom
-            dom = xml.dom.minidom.parseString(xml_str.encode('utf-8'))
-            return dom.toprettyxml(indent='  ')
-        except Exception:
-            return xml_str
 
 
 class SpeFileItem:
