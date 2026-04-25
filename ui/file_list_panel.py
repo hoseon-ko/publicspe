@@ -7,10 +7,107 @@ import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QListWidget, QListWidgetItem, QLabel,
-    QPushButton, QSlider, QAbstractItemView, QFrame
+    QPushButton, QSlider, QAbstractItemView, QFrame,
+    QDialog, QTextEdit, QTabWidget, QApplication
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
+
+
+class SpeInfoDialog(QDialog):
+    """
+    SPE 파일 메타정보 / XML 조회 다이얼로그.
+    SPE 3.0 파일이면 [Metadata] 탭 + [XML] 탭 두 개,
+    SPE 2.x 이면 [Metadata] 탭만 표시.
+    """
+
+    def __init__(self, spe_item, parent=None):
+        super().__init__(parent)
+        spe_obj = spe_item.spe_obj
+        filename = os.path.basename(spe_item.filepath)
+        self.setWindowTitle(f"SPE Info — {filename}")
+        self.resize(700, 520)
+        self.setStyleSheet("""
+            QDialog       { background: #1a1a2e; color: #e0e0e0; }
+            QTabWidget::pane { border: 1px solid #0f3460; }
+            QTabBar::tab  { background: #16213e; color: #a0a0b0;
+                            padding: 5px 16px; border: 1px solid #0f3460; }
+            QTabBar::tab:selected { background: #0f3460; color: #e94560; font-weight: bold; }
+            QTextEdit     { background: #16213e; color: #d0d0e0;
+                            border: none; font-family: Consolas, monospace; font-size: 11px; }
+            QPushButton   { background: #0f3460; color: #e0e0e0;
+                            border: 1px solid #e94560; border-radius: 4px;
+                            padding: 4px 14px; font-size: 11px; }
+            QPushButton:hover { background: #e94560; color: #ffffff; }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+
+        tabs = QTabWidget()
+        layout.addWidget(tabs)
+
+        # ―― Metadata 탭 ――
+        meta_text = QTextEdit()
+        meta_text.setReadOnly(True)
+        meta_text.setPlainText(self._format_meta(spe_obj))
+        tabs.addTab(meta_text, "Metadata")
+
+        # ―― XML 탭 (SPE 3.0만) ――
+        xml_str = getattr(spe_obj, '_xml', None)
+        if xml_str:
+            xml_text = QTextEdit()
+            xml_text.setReadOnly(True)
+            xml_text.setPlainText(self._format_xml(xml_str))
+            tabs.addTab(xml_text, "XML Footer")
+
+        # ―― 하단 버튼 ――
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        btn_copy_meta = QPushButton("Copy Metadata")
+        btn_copy_meta.clicked.connect(lambda: QApplication.clipboard().setText(meta_text.toPlainText()))
+        btn_row.addWidget(btn_copy_meta)
+
+        if xml_str:
+            btn_copy_xml = QPushButton("Copy XML")
+            btn_copy_xml.clicked.connect(lambda: QApplication.clipboard().setText(xml_text.toPlainText()))
+            btn_row.addWidget(btn_copy_xml)
+
+        btn_close = QPushButton("Close")
+        btn_close.clicked.connect(self.accept)
+        btn_row.addWidget(btn_close)
+        layout.addLayout(btn_row)
+
+    @staticmethod
+    def _format_meta(spe_obj) -> str:
+        meta = getattr(spe_obj, 'meta', {})
+        lines = []
+        for k, v in meta.items():
+            import numpy as np
+            if k == 'wavelengths_nm' and isinstance(v, np.ndarray):
+                if len(v) > 8:
+                    preview = ', '.join(f"{x:.4f}" for x in v[:4])
+                    tail    = ', '.join(f"{x:.4f}" for x in v[-4:])
+                    lines.append(f"{'wavelengths_nm':<32}  [{preview}, ..., {tail}]  ({len(v)} pts)")
+                else:
+                    lines.append(f"{k:<32}  {v}")
+            elif v is None or v == '' or v == []:
+                lines.append(f"{k:<32}  —")
+            else:
+                lines.append(f"{k:<32}  {v}")
+        return '\n'.join(lines) if lines else '(no metadata)'
+
+    @staticmethod
+    def _format_xml(xml_str: str) -> str:
+        """간단한 XML 인덴팅 (minidom 없으면 raw 반환)"""
+        try:
+            import xml.dom.minidom
+            dom = xml.dom.minidom.parseString(xml_str.encode('utf-8'))
+            return dom.toprettyxml(indent='  ')
+        except Exception:
+            return xml_str
 
 
 class SpeFileItem:
@@ -153,6 +250,7 @@ class FileListPanel(QWidget):
             QListWidget::item:hover { background: #0f3460; }
         """)
         self.list_widget.currentItemChanged.connect(self._on_item_changed)
+        self.list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
         layout.addWidget(self.list_widget)
 
         # ── 구분선 ──
@@ -240,6 +338,12 @@ class FileListPanel(QWidget):
     # ─────────────────────────────────────────
     # Private
     # ─────────────────────────────────────────
+
+    def _on_item_double_clicked(self, item: QListWidgetItem):
+        spe_item: SpeFileItem = item.data(Qt.ItemDataRole.UserRole)
+        if spe_item is not None:
+            dlg = SpeInfoDialog(spe_item, parent=self)
+            dlg.exec()
 
     def _on_item_changed(self, current, previous):
         if current is None:
