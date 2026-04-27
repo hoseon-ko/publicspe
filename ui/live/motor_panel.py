@@ -589,11 +589,10 @@ class MotorPanel(QWidget):
         return [None, None, None, None]
 
     def move(self, motor_num: int, steps: int) -> bool:
-        """외부에서 모터 이동 명령 (가중치 적용 포함). ScanWorker 등에서 호출."""
+        """외부(ScanWorker 등 백그라운드 스레드)에서 모터 이동 명령.
+        flash_moving()은 UI 조작이므로 여기서 호출하지 않는다."""
         if self._ctrl is None or not self._ctrl.is_connected:
             return False
-        card = self.motor_cards[motor_num - 1]
-        card.flash_moving(steps)
         try:
             if steps == 0:
                 self._ctrl.zero(motor_num)

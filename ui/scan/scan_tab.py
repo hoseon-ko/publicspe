@@ -11,7 +11,6 @@ import csv
 import os
 from datetime import datetime
 from typing import Optional
-from xml.sax.saxutils import escape
 
 import numpy as np
 from PyQt6.QtCore import (
@@ -23,7 +22,6 @@ from PyQt6.QtWidgets import (
     QComboBox, QLineEdit, QFileDialog,
     QProgressBar, QTextEdit, QTableWidget,
     QTableWidgetItem, QHeaderView, QScrollArea,
-    QSizePolicy,
 )
 
 from core.image_processor import ImageProcessor
@@ -126,18 +124,25 @@ class _ScanWorker(QThread):
 
             # ── 모터 위치 읽기 ─────────────────────────────────────────
             positions = self._motor.get_positions() if self._motor else [None]*4
+            _pos = [p if p is not None else 0 for p in positions]
+            _cx = f"{result.centroid_x:.3f}" if result.centroid_x is not None else "N/A"
+            _cy = f"{result.centroid_y:.3f}" if result.centroid_y is not None else "N/A"
+
+            # ── exposure 읽기 (메타데이터용) ───────────────────────────
+            try:
+                exp_ms = self._cam.get_exposure_ms()
+            except Exception:
+                exp_ms = 0.0
 
             # ── SPE 저장 (프레임 + XML 메타데이터) ────────────────────
             spe_name = f"{self._scan_name}_{ts}_step{i+1:04d}.spe"
             spe_path = os.path.join(self._save_dir, spe_name)
             try:
-                _cx = f"{result.centroid_x:.3f}" if result.centroid_x is not None else "N/A"
-                _cy = f"{result.centroid_y:.3f}" if result.centroid_y is not None else "N/A"
-                _pos = [p if p is not None else 0 for p in positions]
                 save_spe(
                     spe_path,
                     raw,
                     camera_name=cam_name,
+                    exposure_ms=exp_ms,
                     creator="ScanTab",
                     extra_metadata={
                         "Scan": {
@@ -538,22 +543,18 @@ class ScanTab(QWidget):
             self._table.setItem(row, col, QTableWidgetItem(v))
         self._table.scrollToBottom()
 
-        # 플롯 업데이트 (스캔 축 위치 vs centroid X, Y)
+        # 플롯 업데이트 — centroid None이면 0으로 채워 길이 항상 일치
         motor_num = int(self.combo_motor.currentText()[1])
-        motor_pos = p[motor_num - 1]
-        self._plot_x.append(motor_pos)
-        if result.centroid_x is not None:
-            self._plot_cx.append(result.centroid_x)
-        if result.centroid_y is not None:
-            self._plot_cy.append(result.centroid_y)
+        self._plot_x.append(p[motor_num - 1])
+        self._plot_cx.append(result.centroid_x if result.centroid_x is not None else 0.0)
+        self._plot_cy.append(result.centroid_y if result.centroid_y is not None else 0.0)
 
-        if len(self._plot_cx) == len(self._plot_x):
-            self.plot_panel.plot_two_lines(
-                np.array(self._plot_cx),
-                np.array(self._plot_cy),
-                "Centroid X",
-                "Centroid Y",
-            )
+        self.plot_panel.plot_two_lines(
+            np.array(self._plot_cx),
+            np.array(self._plot_cy),
+            "Centroid X",
+            "Centroid Y",
+        )
 
     def _on_progress(self, current: int, total: int):
         self.progress_bar.setValue(current)
