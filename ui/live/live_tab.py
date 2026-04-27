@@ -262,6 +262,7 @@ class LiveTab(QMainWindow):
             Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
         )
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_cam)
+        self.dock_cam.setObjectName("dock_cam")
 
         # ── Dock: Motors (좌측 하단) ──────────────────────────────────
         self.motor_panel = MotorPanel()
@@ -278,6 +279,7 @@ class LiveTab(QMainWindow):
         )
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_motor)
         self.splitDockWidget(self.dock_cam, self.dock_motor, Qt.Orientation.Vertical)
+        self.dock_motor.setObjectName("dock_motor")
 
         # ── Dock: Profile Plot (하단 좌) ──────────────────────────────
         self.plot_panel = PlotPanel("Profile")
@@ -285,6 +287,7 @@ class LiveTab(QMainWindow):
         self.dock_plot.setWidget(self.plot_panel)
         self.dock_plot.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_plot)
+        self.dock_plot.setObjectName("dock_plot")
 
         # ── Dock: Histogram (하단 우) ─────────────────────────────────
         self.hist_panel = HistogramPanel()
@@ -293,6 +296,7 @@ class LiveTab(QMainWindow):
         self.dock_hist.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_hist)
         self.splitDockWidget(self.dock_plot, self.dock_hist, Qt.Orientation.Horizontal)
+        self.dock_hist.setObjectName("dock_hist")
 
         # ── Dock: System Log (우측) ── #1 타임스탬프 #2 클리어버튼 ────
         log_container = QWidget()
@@ -335,11 +339,15 @@ class LiveTab(QMainWindow):
             Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
         )
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_log)
+        self.dock_log.setObjectName("dock_log")
 
         # 기본 크기 힌트
         self.resizeDocks(
             [self.dock_cam, self.dock_motor], [350, 350], Qt.Orientation.Vertical
         )
+        self.dock_cam.setMinimumWidth(500)
+        self.dock_motor.setMinimumWidth(500)
+
         self.resizeDocks([self.dock_plot], [220], Qt.Orientation.Vertical)
         self.resizeDocks([self.dock_log], [240], Qt.Orientation.Horizontal)
 
