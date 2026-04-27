@@ -787,7 +787,7 @@ class ImageViewer(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._current_image: np.ndarray | None = None
-        self._current_cmap = 'jet'
+        self._current_cmap = 'off'
         self._crosshair_color = '#ff0000'
         self._last_click_info = None  # (ix, iy, val)
         self._roi_line_pts = None
