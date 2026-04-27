@@ -16,6 +16,7 @@ from PyQt6.QtGui import QAction, QIcon
 from ui.live.live_tab import LiveTab
 from ui.acquisition.acquisition_tab import AcquisitionTab
 from ui.analysis.analysis_tab import AnalysisTab
+from ui.scan.scan_tab import ScanTab
 
 
 class MainWindow(QMainWindow):
@@ -77,7 +78,20 @@ class MainWindow(QMainWindow):
         # Acquisition 시작 시 Live 스트림 자동 정지
         self.acq_tab.acquisition_starting.connect(self.live_tab.stop_live)
 
-        # ── Tab 3: Analysis ───────────────────────────────────────────
+        # ── Tab 3: Auto Scan ──────────────────────────────────────────
+        self.scan_tab = ScanTab()
+        self.scan_tab.log_message.connect(self._on_status)
+        self.tabs.addTab(self.scan_tab, "🔄  AUTO SCAN")
+
+        # 카메라 공유: Live ↔ Scan
+        self.live_tab.camera_connected.connect(self.scan_tab.set_shared_camera)
+        self.live_tab.camera_disconnected.connect(self.scan_tab.clear_shared_camera)
+        self.scan_tab.scan_starting.connect(self.live_tab.stop_live)
+
+        # 모터 패널 공유: Live 탭의 motor_panel → Scan 탭
+        self.scan_tab.set_motor_panel(self.live_tab.motor_panel)
+
+        # ── Tab 4: Analysis ───────────────────────────────────────────
         self.analysis_tab = AnalysisTab(spe_class=self._spe_class)
         self.analysis_tab.status_message.connect(self._on_status)
         self.tabs.addTab(self.analysis_tab, "📊  SPE ANALYSIS")
@@ -105,4 +119,5 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         self.live_tab.cleanup()
         self.acq_tab.cleanup()
+        self.scan_tab.cleanup()
         super().closeEvent(event)

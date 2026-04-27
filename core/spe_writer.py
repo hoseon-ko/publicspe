@@ -192,10 +192,26 @@ def save_spe(
 
     # ── GeneralInformation XML ────────────────────────────────────────
     creator_attr = f' creator="{escape(creator)}"' if creator else ""
+
+    # extra_metadata → <CustomData> 섹션
+    custom_xml = ""
+    if extra_metadata:
+        def _dict_to_xml(d: dict) -> str:
+            parts = []
+            for k, v in d.items():
+                tag = str(k).replace(" ", "_")
+                if isinstance(v, dict):
+                    parts.append(f"<{tag}>{_dict_to_xml(v)}</{tag}>")
+                else:
+                    parts.append(f"<{tag}>{escape(str(v))}</{tag}>")
+            return "".join(parts)
+        custom_xml = f"<CustomData>{_dict_to_xml(extra_metadata)}</CustomData>"
+
     general_info_xml = (
         "<GeneralInformation>"
         f'<FileInformation{creator_attr} created="{escape(created_str)}"'
         f' lastModified="{escape(created_str)}" />'
+        f"{custom_xml}"
         "</GeneralInformation>"
     )
 

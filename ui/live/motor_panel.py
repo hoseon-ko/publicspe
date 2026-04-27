@@ -588,6 +588,26 @@ class MotorPanel(QWidget):
                 pass
         return [None, None, None, None]
 
+    def move(self, motor_num: int, steps: int) -> bool:
+        """외부에서 모터 이동 명령 (가중치 적용 포함). ScanWorker 등에서 호출."""
+        if self._ctrl is None or not self._ctrl.is_connected:
+            return False
+        card = self.motor_cards[motor_num - 1]
+        card.flash_moving(steps)
+        try:
+            if steps == 0:
+                self._ctrl.zero(motor_num)
+                return True
+            actual = self._apply_weight(motor_num, steps)
+            return bool(self._ctrl.move_relative(motor_num, actual))
+        except Exception as e:
+            self.log_message.emit(f"Motor {motor_num} 이동 오류: {e}")
+            return False
+
+    @property
+    def is_connected(self) -> bool:
+        return self._ctrl is not None and self._ctrl.is_connected
+
     def cleanup(self):
         self._save_step_settings()   # #18
         if self._ctrl:
