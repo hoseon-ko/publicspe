@@ -104,6 +104,28 @@ class _ConnectWorker(QObject):
 
 # ── 이미지 처리 백그라운드 워커 ─────────────────────────────────────────────────
 
+def _build_rgb(result, cmap: str, show_binary: bool) -> np.ndarray:
+    """ProcessedFrame → display RGB. 백그라운드 스레드에서 호출됨."""
+    disp = result.display
+    if cmap and cmap != 'off' and disp.ndim == 2 and not show_binary:
+        from ui.image_viewer import apply_colormap
+        rgba = apply_colormap(disp, cmap)
+        rgb  = rgba[:, :, :3].copy()
+    elif disp.ndim == 2:
+        rgb = cv2.cvtColor(disp, cv2.COLOR_GRAY2RGB) if _CV2_OK else \
+              np.stack([disp, disp, disp], axis=-1)
+    else:
+        rgb = disp.copy()
+
+    if result.has_centroid and _CV2_OK:
+        ix, iy = int(round(result.centroid_x)), int(round(result.centroid_y))
+        cv2.drawMarker(rgb, (ix, iy), (78, 205, 196), cv2.MARKER_CROSS, 40, 2)
+        cv2.putText(rgb,
+            f"({result.centroid_x:.1f}, {result.centroid_y:.1f})",
+            (ix + 12, iy - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (233, 69, 96), 1)
+    return rgb
+
+
 class _ProcessWorker(QObject):
     """
     Python daemon thread + QObject 시그널 브리지 구조.
@@ -112,12 +134,14 @@ class _ProcessWorker(QObject):
     - daemon=True → 앱 종료 시 스레드 자동 소멸.
     - submit()은 즉시 반환; 처리 중 새 프레임이 오면 자동 드롭(최신 프레임 유지).
     - result_ready는 메인 스레드 QObject에 정의되어 queued connection으로 GUI에 전달.
+    - colormap 적용도 여기서 처리 — 메인 스레드 블로킹 없음.
     """
-    result_ready = pyqtSignal(object)   # ProcessedFrame → GUI 스레드 (queued)
+    result_ready = pyqtSignal(object, object)   # (ProcessedFrame, rgb ndarray) → GUI
 
     def __init__(self, proc: ImageProcessor, parent=None):
         super().__init__(parent)
         self._proc   = proc
+        self._cmap   = 'off'   # GIL로 보호되는 단순 str 대입 — 스레드 안전
         self._latest_raw: Optional[np.ndarray] = None
         self._lock   = threading.Lock()
         self._event  = threading.Event()
@@ -133,6 +157,10 @@ class _ProcessWorker(QObject):
             self._latest_raw = raw
         self._event.set()
 
+    def set_cmap(self, cmap: str):
+        """메인 스레드에서 호출 — 다음 프레임부터 반영."""
+        self._cmap = cmap
+
     def _run(self):
         while not self._stop.is_set():
             if not self._event.wait(timeout=0.1):
@@ -143,7 +171,10 @@ class _ProcessWorker(QObject):
                 self._latest_raw = None
             if raw is not None:
                 try:
-                    self.result_ready.emit(self._proc.process(raw))
+                    result = self._proc.process(raw)
+                    show_binary = getattr(self._proc, 'show_binary', False)
+                    rgb = _build_rgb(result, self._cmap, show_binary)
+                    self.result_ready.emit(result, rgb)
                 except Exception as e:
                     print(f"[ProcessWorker] {e}")
 
@@ -612,11 +643,15 @@ class LiveTab(QMainWindow):
         """카메라 스레드에서 호출 — 즉시 반환, 처리는 _ProcessWorker가 담당."""
         self._proc_worker.submit(raw)
 
-    def _on_processed(self, result):
+    def _on_processed(self, result, rgb: np.ndarray):
         """처리 워커 → GUI 스레드 (queued signal).
         centroid/raw 데이터는 항상 갱신, 화면 표시는 30fps 캡.
         """
         import time
+        # cmap을 워커에 동기 (다음 프레임부터 적용)
+        self._proc_worker.set_cmap(
+            getattr(self.image_viewer, '_current_cmap', 'off')
+        )
         # centroid / 저장용 데이터는 프레임 드롭 없이 항상 최신 유지
         self._last_raw     = result.raw
         self._last_display = result.display
@@ -631,7 +666,7 @@ class LiveTab(QMainWindow):
         if now - self._last_display_t < 0.033:
             return
         self._last_display_t = now
-        self._show_frame(self._make_display_rgb(result), result.display)
+        self._show_frame(rgb, result.display)
 
     def _show_frame(self, rgb: np.ndarray, raw_display: Optional[np.ndarray] = None):
         """#4 Freeze: 고정 중이면 표시 갱신 안 함. #5 AutoFIT: 첫 프레임만 fit.
@@ -650,29 +685,6 @@ class LiveTab(QMainWindow):
         if raw_display is not None:
             self.image_viewer.set_source_image(raw_display)
         self._first_frame = False
-
-    def _make_display_rgb(self, result) -> np.ndarray:
-        disp = result.display
-        cmap = getattr(self.image_viewer, '_current_cmap', 'off')
-        # 이진화 표시 중에는 colormap 적용 안 함 — binary(0/255)에 cmap 입히면 의미 없음
-        show_binary = getattr(self._proc, 'show_binary', False)
-        if cmap and cmap != 'off' and disp.ndim == 2 and not show_binary:
-            from ui.image_viewer import apply_colormap
-            rgba = apply_colormap(disp, cmap)
-            rgb  = rgba[:, :, :3].copy()
-        elif disp.ndim == 2:
-            rgb = cv2.cvtColor(disp, cv2.COLOR_GRAY2RGB) if _CV2_OK else \
-                  np.stack([disp, disp, disp], axis=-1)
-        else:
-            rgb = disp.copy()
-
-        if result.has_centroid and _CV2_OK:
-            ix, iy = int(round(result.centroid_x)), int(round(result.centroid_y))
-            cv2.drawMarker(rgb, (ix, iy), (78, 205, 196), cv2.MARKER_CROSS, 40, 2)
-            cv2.putText(rgb,
-                f"({result.centroid_x:.1f}, {result.centroid_y:.1f})",
-                (ix + 12, iy - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (233, 69, 96), 1)
-        return rgb
 
     def _refresh_centroid_labels(self):
         cx, cy, br, fps, snr, mean, sat, sat_r = self._last_centroid
