@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Claude
+.claude/
+
+# 백업/임시
+*복사본*
+ui_preview/
+nuitka-crash-report.xml
+
+# 테스트/스크래치
+picamtest.py
+m2testapp.py
+test1.xml
+test2.xml

@@ -261,6 +261,23 @@ class FrameGridPanel(QWidget):
 
         header_row.addWidget(self.btn_thumb)
         header_row.addWidget(self.btn_list)
+
+        self.btn_clear_checks = QPushButton("Clear")
+        self.btn_clear_checks.setFixedHeight(22)
+        self.btn_clear_checks.setFixedWidth(46)
+        self.btn_clear_checks.setToolTip("Clear all selections")
+        self.btn_clear_checks.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: #606080;
+                border: 1px solid #0f3460;
+                border-radius: 4px;
+                font-size: 10px;
+            }
+            QPushButton:hover { color: #e94560; border-color: #e94560; }
+        """)
+        self.btn_clear_checks.clicked.connect(self._clear_all_checks)
+        header_row.addWidget(self.btn_clear_checks)
         layout.addLayout(header_row)
 
         # ── 썸네일 그리드 뷰 ──
@@ -294,12 +311,25 @@ class FrameGridPanel(QWidget):
         self.list_widget.itemClicked.connect(self._on_list_item_clicked)
         self.list_widget.itemChanged.connect(self._on_list_item_changed)
         self.list_widget.currentItemChanged.connect(self._on_list_current_changed)
+        self.list_widget.installEventFilter(self)  # 리스트 스페이스바 체크/언체크
         self.list_widget.hide()
         layout.addWidget(self.list_widget)
 
     # ─────────────────────────────────────────
     # 모드 전환
     # ─────────────────────────────────────────
+
+    def _clear_all_checks(self):
+        """모든 체크박스 해제"""
+        for thumb in self._thumb_items:
+            thumb.checkbox.blockSignals(True)
+            thumb.checkbox.setChecked(False)
+            thumb.checkbox.blockSignals(False)
+        self.list_widget.blockSignals(True)
+        for i in range(self.list_widget.count()):
+            self.list_widget.item(i).setCheckState(Qt.CheckState.Unchecked)
+        self.list_widget.blockSignals(False)
+        self.checked_frames_changed.emit([])
 
     def _set_mode(self, mode: str):
         self._mode = mode
@@ -513,11 +543,25 @@ class FrameGridPanel(QWidget):
             self.grid_layout.addWidget(item, row, col)
 
     def eventFilter(self, obj, ev):
-        """scroll_thumb 의 키 이벤트를 가로채서 처리"""
+        """키 이벤트 처리"""
         from PyQt6.QtCore import QEvent
-        if obj is self.scroll_thumb and ev.type() == QEvent.Type.KeyPress:
-            self.keyPressEvent(ev)
-            return True
+        if ev.type() == QEvent.Type.KeyPress:
+            # 그리드 모드 - 방향키 + 스페이스바
+            if obj is self.scroll_thumb and self._mode == 'thumb':
+                self.keyPressEvent(ev)
+                return True
+            # 리스트 모드 - 스페이스바로 체크/언체크
+            if obj is self.list_widget and self._mode == 'list':
+                if ev.key() == Qt.Key.Key_Space:
+                    current = self.list_widget.currentItem()
+                    if current is not None:
+                        new_state = (
+                            Qt.CheckState.Unchecked
+                            if current.checkState() == Qt.CheckState.Checked
+                            else Qt.CheckState.Checked
+                        )
+                        current.setCheckState(new_state)
+                    return True
         return super().eventFilter(obj, ev)
 
     def keyPressEvent(self, ev):

@@ -24,6 +24,7 @@ Princeton Instruments / Teledyne LightField 포맷 지원
 """
 
 import struct
+from typing import Union
 import numpy as np
 from pathlib import Path
 
@@ -65,7 +66,7 @@ class SpeFile:
         shape = (num_frames, height, width)
     """
 
-    def __init__(self, path: str | Path):
+    def __init__(self, path: Union[str, Path]):
         self.path = Path(path)
         with open(self.path, "rb") as f:
             self._raw = f.read()

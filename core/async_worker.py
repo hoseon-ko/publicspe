@@ -1,3 +1,74 @@
+import numpy as np
+from PyQt6.QtCore import QThread, pyqtSignal
+
+
+class TempPollerThread(QThread):
+    """온도를 주기적으로 백그라운드에서 읽어 temp_read 시그널로 전달.
+    메인 스레드 블로킹 없이 SDK get_temperature() 를 호출한다."""
+    temp_read = pyqtSignal(object, object, object)  # reading, setpoint, status
+
+    def __init__(self, cam, interval_ms: int = 3000):
+        super().__init__()
+        self._cam = cam
+        self._interval = interval_ms
+
+    def run(self):
+        while not self.isInterruptionRequested():
+            try:
+                reading, setpoint, status = self._cam.get_temperature()
+                self.temp_read.emit(reading, setpoint, status)
+            except Exception:
+                pass
+            # 100ms 단위로 쪼개어 빠른 인터럽트 반응
+            for _ in range(max(1, self._interval // 100)):
+                if self.isInterruptionRequested():
+                    return
+                self.msleep(100)
+
+    def stop(self):
+        self.requestInterruption()
+        self.quit()
+        self.wait(2000)
+
+
+class ColorMapWorker(QThread):
+    """
+    컬러맵 변환을 백그라운드에서 처리하는 워커.
+    입력: 이미지(ndarray), 컬러맵명(str)
+    출력: 변환된 RGBA ndarray (colormap_applied)
+    """
+    colormap_applied = pyqtSignal(object)  # (rgba ndarray)
+
+    def __init__(self, image: np.ndarray, cmap: str, parent=None):
+        super().__init__(parent)
+        self.image = image
+        self.cmap = cmap
+
+    @staticmethod
+    def _to_grayscale_rgba(img: np.ndarray) -> np.ndarray:
+        """임의 dtype grayscale → uint8 RGBA (export/동기 경로용)."""
+        if img.ndim == 2:
+            f = img.astype(np.float64)
+            vmin, vmax = f.min(), f.max()
+            f = (f - vmin) / (vmax - vmin) if vmax > vmin else np.zeros_like(f)
+            ch = (f * 255).astype(np.uint8)
+            return np.stack([ch, ch, ch, np.full_like(ch, 255)], axis=-1)
+        elif img.ndim == 3 and img.shape[2] == 3:
+            h, w = img.shape[:2]
+            rgb8 = img if img.dtype == np.uint8 else (img / img.max() * 255).astype(np.uint8)
+            return np.concatenate([rgb8, np.full((h, w, 1), 255, np.uint8)], axis=2)
+        return img
+
+    def run(self):
+        try:
+            if self.cmap == 'off':
+                self.colormap_applied.emit(self._to_grayscale_rgba(self.image))
+                return
+            from ui.image_viewer import apply_colormap
+            rgba = apply_colormap(self.image, self.cmap)
+            self.colormap_applied.emit(rgba)
+        except Exception as e:
+            print(f"[ColorMapWorker] Error: {e}")
 """
 async_worker.py
 비동기 SPE 로딩 워커 - QThread 기반

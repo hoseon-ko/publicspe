@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QColor, QBrush
-
+from typing import Optional, Union
 
 _DIALOG_QSS = """
     QDialog {
@@ -616,7 +616,7 @@ class FileListPanel(QWidget):
         self.lbl_dirpath.setText("")
         self.lbl_frames.setText("")
 
-    def _update_frame_controls(self, spe_item: SpeFileItem | None):
+    def _update_frame_controls(self, spe_item:Optional[SpeFileItem]):
         if spe_item is None or spe_item.num_frames <= 1:
             self.frame_slider.setEnabled(False)
             self.frame_slider.setMaximum(0)

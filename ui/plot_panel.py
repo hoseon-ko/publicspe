@@ -4,9 +4,16 @@ plot_panel.py
 체크박스로 선택된 프레임들의 프로파일을 겹쳐서 표시
 """
 
+import csv
+import os
+from datetime import datetime
+
 import numpy as np
 import pyqtgraph as pg
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QPushButton, QToolButton, QFileDialog,
+)
 
 
 class PlotPanel(QWidget):
@@ -20,6 +27,7 @@ class PlotPanel(QWidget):
             '#f6e58d', '#ff9ff3'
         ]
         self._color_idx = 0
+        self._frozen = False   # #22 플롯 Freeze
         self._setup_ui()
 
     def _setup_ui(self):
@@ -35,11 +43,44 @@ class PlotPanel(QWidget):
         header_row.addWidget(self.title_label)
         header_row.addStretch()
 
+        # #22 플롯 Freeze 버튼
+        self.btn_freeze = QToolButton()
+        self.btn_freeze.setText("❄")
+        self.btn_freeze.setCheckable(True)
+        self.btn_freeze.setToolTip("플롯 갱신 정지 (현재 그래프 유지)")
+        _tool_style = """
+            QToolButton { background: transparent; color: #4a6a8a;
+                border: 1px solid #1a3050; border-radius: 3px;
+                font-size: 12px; padding: 1px 5px; }
+            QToolButton:checked { background: #0d2040; color: #a0c8ff;
+                border-color: #4080c0; }
+            QToolButton:hover { border-color: #4ecdc4; }
+        """
+        self.btn_freeze.setStyleSheet(_tool_style)
+        self.btn_freeze.toggled.connect(self._on_freeze_toggled)
+        header_row.addWidget(self.btn_freeze)
+
+        # CSV 내보내기 버튼 (P3-1)
+        self.btn_csv = QToolButton()
+        self.btn_csv.setText("💾")
+        self.btn_csv.setToolTip("현재 프로파일 CSV 저장")
+        self.btn_csv.setStyleSheet(_tool_style)
+        self.btn_csv.clicked.connect(self._save_csv)
+        header_row.addWidget(self.btn_csv)
+
         self.btn_clear = QPushButton("Clear")
         self.btn_clear.setFixedWidth(60)
         self.btn_clear.clicked.connect(self.clear)
         header_row.addWidget(self.btn_clear)
         layout.addLayout(header_row)
+
+        # 피크 정보 레이블 (P1-2)
+        self.peak_label = QLabel("")
+        self.peak_label.setStyleSheet(
+            "color: #ffe66d; font-size: 10px; padding: 1px 4px;"
+        )
+        self.peak_label.setWordWrap(True)
+        layout.addWidget(self.peak_label)
 
         self.plot_widget = pg.PlotWidget()
         self.plot_widget.setBackground('#16213e')
@@ -55,17 +96,20 @@ class PlotPanel(QWidget):
     # ─────────────────────────────────────────
 
     def plot_line(self, data: np.ndarray, label: str = "", clear_first: bool = True):
+        if self._frozen: return   # #22
         if clear_first:
             self.clear()
         self._add_line(data, label)
 
     def plot_line_overlay(self, data: np.ndarray, label: str = ""):
         """기존 플롯 위에 겹쳐서 추가 (체크박스 다중 선택용)"""
+        if self._frozen: return   # #22
         self._add_line(data, label)
 
     def plot_two_lines(self, data1: np.ndarray, data2: np.ndarray,
                        label1: str = "X mean", label2: str = "Y mean",
                        clear_first: bool = True):
+        if self._frozen: return   # #22
         if clear_first:
             self.clear()
         self._add_line(data1, label1)
@@ -73,14 +117,104 @@ class PlotPanel(QWidget):
 
     def plot_multi_frames(self, profiles: list, labels: list):
         """여러 프레임 프로파일 한번에 그리기"""
+        if self._frozen: return   # #22
         self.clear()
         for data, label in zip(profiles, labels):
             self._add_line(data, label)
+
+    def _on_freeze_toggled(self, checked: bool):
+        """#22 플롯 Freeze 상태 변경."""
+        self._frozen = checked
+        self.title_label.setStyleSheet(
+            "color: #a0c8ff; font-weight: bold; font-size: 11px; letter-spacing: 1px;"
+            if checked else
+            "color: #e94560; font-weight: bold; font-size: 11px; letter-spacing: 1px;"
+        )
+
+    def _save_csv(self):
+        """현재 플롯된 프로파일 데이터를 CSV로 저장 (P3-1)."""
+        if not self._plot_items:
+            return
+        default_name = (
+            f"profile_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        )
+        path, _ = QFileDialog.getSaveFileName(
+            self, "프로파일 CSV 저장", default_name,
+            "CSV 파일 (*.csv);;모든 파일 (*)"
+        )
+        if not path:
+            return
+        try:
+            cols = []
+            headers = []
+            for i, item in enumerate(self._plot_items):
+                xd, yd = item.getData()
+                if yd is None:
+                    continue
+                if not cols:
+                    cols.append(xd)
+                    headers.append("index")
+                cols.append(yd)
+                name = item.name() or f"profile_{i+1}"
+                headers.append(name)
+
+            with open(path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(headers)
+                n_rows = max(len(c) for c in cols)
+                for r in range(n_rows):
+                    row = []
+                    for c in cols:
+                        row.append(c[r] if r < len(c) else "")
+                    writer.writerow(row)
+        except Exception as e:
+            print(f"[PlotPanel] CSV 저장 오류: {e}")
+
+    def plot_peaks(self, profile: np.ndarray, peaks: list, label: str = ""):
+        """
+        피크 위치를 현재 플롯 위에 오버레이 (P1-2).
+
+        Args:
+            profile: 1D 원본 프로파일
+            peaks:   PeakResult 목록 (core.peak_finder)
+            label:   플롯 범례 레이블
+        """
+        if not peaks:
+            self.peak_label.setText("")
+            return
+        xs = [p.best_center for p in peaks]
+        ys = [float(profile[min(int(round(p.position)), len(profile)-1)])
+              for p in peaks]
+        scatter = self.plot_widget.plot(
+            xs, ys,
+            pen=None,
+            symbol='t',
+            symbolBrush=pg.mkBrush('#ffe66d'),
+            symbolSize=10,
+            name=label or "peaks",
+        )
+        self._plot_items.append(scatter)
+
+        # 피크 정보 텍스트
+        lines = []
+        for i, p in enumerate(peaks[:6]):   # 최대 6개 표시
+            if p.fit_type != "none" and p.fit_fwhm is not None:
+                lines.append(
+                    f"P{i+1}: pos={p.best_center:.1f}  "
+                    f"FWHM={p.fit_fwhm:.1f}  R²={p.fit_r2:.3f}"
+                )
+            else:
+                lines.append(
+                    f"P{i+1}: pos={p.position:.1f}  "
+                    f"FWHM={p.fwhm:.1f}  h={p.height:.1f}"
+                )
+        self.peak_label.setText("\n".join(lines))
 
     def clear(self):
         self.plot_widget.clear()
         self._plot_items.clear()
         self._color_idx = 0
+        self.peak_label.setText("")
         # 범례 재생성
         self.plot_widget.addLegend(offset=(10, 10))
 
@@ -107,3 +241,115 @@ class PlotPanel(QWidget):
             name=label or None
         )
         self._plot_items.append(item)
+        # Y축 범위: 데이터 최소~최대 (5% 여유)
+        self._update_y_range()
+
+    def _update_y_range(self):
+        """모든 플롯 기준 Y축 범위 자동 설정"""
+        all_y = []
+        for item in self._plot_items:
+            y = item.getData()[1]
+            if y is not None and len(y) > 0:
+                all_y.extend(y.tolist())
+        if not all_y:
+            return
+        ymin = min(all_y)
+        ymax = max(all_y)
+        margin = (ymax - ymin) * 0.05 if ymax > ymin else 1.0
+        self.plot_widget.setYRange(ymin - margin, ymax + margin, padding=0)
+
+
+class HistogramPanel(QWidget):
+    """히스토그램 전용 패널 - 현재 프레임 선택 영역만 표시"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._frozen = False   # #22
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
+
+        header_row = QHBoxLayout()
+        self.title_lbl = QLabel("HISTOGRAM")
+        self.title_lbl.setStyleSheet(
+            "color: #4ecdc4; font-weight: bold; font-size: 11px; letter-spacing: 1px;"
+        )
+        header_row.addWidget(self.title_lbl)
+        header_row.addStretch()
+
+        # #22 Freeze 버튼
+        self.btn_freeze = QToolButton()
+        self.btn_freeze.setText("❄")
+        self.btn_freeze.setCheckable(True)
+        self.btn_freeze.setToolTip("히스토그램 갱신 정지")
+        self.btn_freeze.setStyleSheet("""
+            QToolButton { background: transparent; color: #4a6a8a;
+                border: 1px solid #1a3050; border-radius: 3px;
+                font-size: 12px; padding: 1px 5px; }
+            QToolButton:checked { background: #0d2040; color: #a0c8ff;
+                border-color: #4080c0; }
+            QToolButton:hover { border-color: #4ecdc4; }
+        """)
+        self.btn_freeze.toggled.connect(self._on_freeze_toggled)
+        header_row.addWidget(self.btn_freeze)
+
+        self.btn_clear = QPushButton("Clear")
+        self.btn_clear.setFixedWidth(60)
+        self.btn_clear.clicked.connect(self.clear)
+        header_row.addWidget(self.btn_clear)
+        layout.addLayout(header_row)
+
+        self.plot_widget = pg.PlotWidget()
+        self.plot_widget.setBackground('#16213e')
+        self.plot_widget.showGrid(x=True, y=False, alpha=0.3)
+        self.plot_widget.setLabel('bottom', 'Pixel Value')
+        self.plot_widget.setLabel('left', 'Count')
+        for axis in ('bottom', 'left'):
+            self.plot_widget.getAxis(axis).setPen('#0f3460')
+            self.plot_widget.getAxis(axis).setTextPen('#a0a0b0')
+        layout.addWidget(self.plot_widget)
+
+        self._bar_item = None
+
+        # 통계 표시 라벨
+        self.stats_label = QLabel("")
+        self.stats_label.setStyleSheet("color: #a0a0b0; font-size: 10px; padding: 2px 4px;")
+        layout.addWidget(self.stats_label)
+
+    def _on_freeze_toggled(self, checked: bool):
+        self._frozen = checked
+        self.title_lbl.setStyleSheet(
+            "color: #a0c8ff; font-weight: bold; font-size: 11px; letter-spacing: 1px;"
+            if checked else
+            "color: #4ecdc4; font-weight: bold; font-size: 11px; letter-spacing: 1px;"
+        )
+
+    def plot_histogram(self, counts: np.ndarray, bin_edges: np.ndarray):
+        if self._frozen: return   # #22
+        self.clear()
+        # BarGraphItem 으로 히스토그램 표시
+        x = bin_edges[:-1]
+        width = bin_edges[1] - bin_edges[0]
+        self._bar_item = pg.BarGraphItem(
+            x=x, height=counts, width=width * 0.9,
+            brush=pg.mkBrush('#4ecdc4'),
+            pen=pg.mkPen('#16213e', width=0.5)
+        )
+        self.plot_widget.addItem(self._bar_item)
+
+        # 통계
+        total = counts.sum()
+        peak_val = bin_edges[counts.argmax()]
+        mean_val = np.average((bin_edges[:-1] + bin_edges[1:]) / 2, weights=counts)
+        self.stats_label.setText(
+            f"Pixels: {total}  |  Peak: {peak_val:.1f}  |  Mean: {mean_val:.1f}"
+            f"  |  Min: {bin_edges[0]:.1f}  |  Max: {bin_edges[-1]:.1f}"
+        )
+
+    def clear(self):
+        self.plot_widget.clear()
+        self._bar_item = None
+        self.stats_label.setText("")
