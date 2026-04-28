@@ -576,7 +576,9 @@ class CameraControlPanel(QWidget):
         self.btn_flat_toggle.toggled.connect(self._apply_flat)
         self.btn_apply_temp.clicked.connect(self._apply_temperature)
         self.btn_apply_adc.clicked.connect(self._apply_adc)
-        # 시간 축 모드
+        # 시간 축 모드 — 기본값: Live (Single)
+        self.combo_temporal.setCurrentIndex(5)   # TemporalMode.SINGLE
+        self._apply_temporal_mode(5)             # proc에 즉시 반영
         self.combo_temporal.currentIndexChanged.connect(self._apply_temporal_mode)
         self.btn_reset_accum.clicked.connect(lambda: self._proc.reset_accum())
         # centroid 모드
