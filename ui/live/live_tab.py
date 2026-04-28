@@ -206,6 +206,7 @@ class LiveTab(QMainWindow):
         self._proc = ImageProcessor()
         self._last_raw: Optional[np.ndarray] = None
         self._last_display: Optional[np.ndarray] = None
+        self._viewer_raw: Optional[np.ndarray] = None   # 뷰어에 실제 표시된 프레임의 raw
         self._last_centroid = (None, None, 0, 0.0, 0.0, 0.0, False, 0.0)
         self._csv_path = "live_capture_log.csv"
 
@@ -708,6 +709,7 @@ class LiveTab(QMainWindow):
 
     def _on_snap_success(self, raw: np.ndarray):
         self._last_raw = raw
+        self._viewer_raw = raw         # 스냅은 즉시 뷰어에 표시됨
         self._first_frame = True       # snap 결과는 항상 FIT
         self._last_display_t = 0.0     # 30fps 캡 우회 — 즉시 표시
         self._log("✅ SNAP 완료")
@@ -751,6 +753,7 @@ class LiveTab(QMainWindow):
         if now - self._last_display_t < 0.033:
             return
         self._last_display_t = now
+        self._viewer_raw = result.raw   # 뷰어에 실제 그려지는 프레임과 1:1 대응
         self._show_frame(rgb, result.display)
 
     def _show_frame(self, rgb: np.ndarray, raw_display: Optional[np.ndarray] = None):
@@ -892,8 +895,10 @@ class LiveTab(QMainWindow):
     # ── #14 라이브 SPE 저장 ──────────────────────────────────────────
 
     def _save_live_spe(self):
-        if self._last_raw is None:
-            self._log("⚠️ 저장할 프레임 없음"); return
+        # 뷰어에 실제 표시된 프레임 사용 — 카메라 최신 프레임(last_raw)이 아님
+        raw = self._viewer_raw
+        if raw is None:
+            self._log("⚠️ 저장할 프레임 없음 (뷰어에 이미지 없음)"); return
         save_dir = "Live_Captures"
         os.makedirs(save_dir, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -908,7 +913,7 @@ class LiveTab(QMainWindow):
                 except Exception:
                     pass
             save_spe(
-                path, [self._last_raw],
+                path, [raw],
                 exposure_ms=exp_ms,
                 camera_name=cam_name,
                 software="SpeAnalyze-Live",
@@ -920,8 +925,8 @@ class LiveTab(QMainWindow):
     # ── 저장 ─────────────────────────────────────────────────────────
 
     def _save_bundle(self):
-        if self._last_raw is None:
-            self._log("⚠️ 저장할 이미지 없음"); return
+        if self._viewer_raw is None:
+            self._log("⚠️ 저장할 이미지 없음 (뷰어에 이미지 없음)"); return
 
         now = datetime.now()
         ts_full = now.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
@@ -937,8 +942,8 @@ class LiveTab(QMainWindow):
         disp_name = f"D_{ts_file}_X{xstr}_Y{ystr}.bmp"
 
         if _CV2_OK:
-            cv2.imwrite(os.path.join(save_dir, raw_name), self._last_raw)
-            disp_img = self._last_display if self._last_display is not None else self._last_raw
+            cv2.imwrite(os.path.join(save_dir, raw_name), self._viewer_raw)
+            disp_img = self._last_display if self._last_display is not None else self._viewer_raw
             cv2.imwrite(os.path.join(save_dir, disp_name), disp_img)
 
         motor_pos = self.motor_panel.get_positions()
