@@ -151,6 +151,7 @@ class AcquisitionTab(QWidget):
     spe_saved            = pyqtSignal(str)   # 저장된 SPE 경로
     log_message          = pyqtSignal(str)
     acquisition_starting = pyqtSignal()      # 라이브 스트림 정지 요청
+    acquisition_done     = pyqtSignal()      # 획득 완료/오류 — 라이브 재개 요청
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -580,9 +581,11 @@ class AcquisitionTab(QWidget):
         self._log(f"  Frame {cur}/{total}")
 
     def _on_acquired(self, frames: list):
-        self._thread.quit()   # run() 완료 후 자연 종료 — wait() 블로킹 불필요
+        self._thread.quit()
+        self._thread.wait()
         self.progress_bar.setVisible(False)
         self.btn_acquire.setEnabled(self._cam is not None and isinstance(self._cam, PicamCamera))
+        self.acquisition_done.emit()
 
         # #7 총 소요 시간 표시
         elapsed = time.monotonic() - self._acq_start_time
@@ -603,7 +606,9 @@ class AcquisitionTab(QWidget):
 
     def _on_acq_error(self, msg: str):
         self._thread.quit()
+        self._thread.wait()
         self.progress_bar.setVisible(False)
+        self.acquisition_done.emit()
         elapsed = time.monotonic() - self._acq_start_time
         self.lbl_eta.setText(f"❌ 오류  |  {elapsed:.1f}초 후 중단")
         self.btn_acquire.setEnabled(self._cam is not None and isinstance(self._cam, PicamCamera))

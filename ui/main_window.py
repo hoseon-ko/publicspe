@@ -75,8 +75,9 @@ class MainWindow(QMainWindow):
         # Live 탭에서 연결한 카메라를 Acquisition 탭이 그대로 사용
         self.live_tab.camera_connected.connect(self.acq_tab.set_shared_camera)
         self.live_tab.camera_disconnected.connect(self.acq_tab.clear_shared_camera)
-        # Acquisition 시작 시 Live 스트림 자동 정지
+        # Acquisition 시작 시 Live 스트림 자동 정지, 완료 시 재개
         self.acq_tab.acquisition_starting.connect(self.live_tab.stop_live)
+        self.acq_tab.acquisition_done.connect(self.live_tab.resume_live)
 
         # ── Tab 3: Auto Scan ──────────────────────────────────────────
         self.scan_tab = ScanTab()
@@ -87,6 +88,7 @@ class MainWindow(QMainWindow):
         self.live_tab.camera_connected.connect(self.scan_tab.set_shared_camera)
         self.live_tab.camera_disconnected.connect(self.scan_tab.clear_shared_camera)
         self.scan_tab.scan_starting.connect(self.live_tab.stop_live)
+        self.scan_tab.scan_done.connect(self.live_tab.resume_live)
 
         # 모터 패널 공유: Live 탭의 motor_panel → Scan 탭
         self.scan_tab.set_motor_panel(self.live_tab.motor_panel)

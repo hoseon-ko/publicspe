@@ -680,13 +680,22 @@ class LiveTab(QMainWindow):
         self._log("■ 카메라 정지")
 
     def stop_live(self):
-        """외부(Acquisition 탭) 호출 — 동기적으로 완료 보장."""
-        if self._cam is None: return
+        """외부(Acquisition/Scan 탭) 호출 — 동기적으로 완료 보장."""
+        if self._cam is None:
+            self._was_live = False
+            return
+        self._was_live = self.cam_panel.btn_stop.isEnabled()  # grabbing 중이면 True
         try:
             self._cam.stop_live()
         except Exception:
             pass
         self.cam_panel.set_grabbing(False)
+
+    def resume_live(self):
+        """Acquisition/Scan 완료 후 — stop_live() 직전에 grabbing 중이었으면 재개."""
+        if getattr(self, "_was_live", False) and self._cam is not None:
+            self._start_camera()
+        self._was_live = False
 
     def _snap_image(self):
         """단일 프레임 촬영 — 백그라운드 스레드에서 실행."""

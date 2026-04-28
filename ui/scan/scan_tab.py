@@ -465,6 +465,7 @@ class _ScanWorker(QThread):
 
 class ScanTab(QWidget):
     scan_starting = pyqtSignal()   # → MainWindow → live_tab.stop_live()
+    scan_done     = pyqtSignal()   # → MainWindow → live_tab.resume_live()
     log_message   = pyqtSignal(str)
 
     def __init__(self, parent=None):
@@ -1141,11 +1142,13 @@ class ScanTab(QWidget):
             self._log(f"✅ 스캔 완료 — CSV: {csv_path}")
         else:
             self._log("✅ 스캔 완료 (데이터 없음)")
+        self.scan_done.emit()
 
     def _on_scan_error(self, msg: str):
         self._log(f"❌ {msg}")
         self._worker = None
         self._set_controls_locked(False)
+        self.scan_done.emit()
 
     # ── 썸네일 ───────────────────────────────────────────────────────
 
