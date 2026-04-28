@@ -520,6 +520,7 @@ class LiveTab(QMainWindow):
         self.cam_panel.log_message.connect(self._log)
 
         self.motor_panel.log_message.connect(self._log)
+        self.motor_panel.pre_move_info_cb = self._get_pre_move_info
 
         # ImageViewer → 플롯/히스토그램
         self.image_viewer.line_profile_updated.connect(
@@ -877,6 +878,12 @@ class LiveTab(QMainWindow):
         self.image_viewer._view.delete_all_rois()
         self._roi_list_widget.clear()
         self._lbl_roi.setText("ROI: —")
+
+    def _get_pre_move_info(self):
+        """모터 이동 직전 콜백 — (cx, cy, [M1,M2,M3,M4]) 반환."""
+        cx, cy = self._last_centroid[0], self._last_centroid[1]
+        positions = self.motor_panel.get_positions()   # [p1,p2,p3,p4] or None
+        return cx, cy, positions
 
     def _on_roi_size(self, mode: str, pts: list):
         try:

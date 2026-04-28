@@ -213,6 +213,8 @@ class MotorPanel(QWidget):
         self._ctrl: Optional[PicomotorController] = None
         # 가중치 spinbox 저장: {motor_num: (spin_fwd, spin_bwd)}
         self._weight_spins: Dict[int, Tuple[QDoubleSpinBox, QDoubleSpinBox]] = {}
+        # 이동 직전 상태 조회 콜백 — live_tab이 등록, (cx, cy, positions) 반환
+        self.pre_move_info_cb = None
         self._build_ui()
 
     # ── UI 빌드 ───────────────────────────────────────────────────────
@@ -511,6 +513,26 @@ class MotorPanel(QWidget):
     def _on_move_requested(self, motor_num: int, steps: int):
         if self._ctrl is None or not self._ctrl.is_connected:
             return
+
+        # 이동 전 상태 로그 — centroid + 현재 모터 위치
+        if self.pre_move_info_cb is not None:
+            try:
+                cx, cy, positions = self.pre_move_info_cb()
+                cx_s = f"{cx:.2f}" if cx is not None else "N/A"
+                cy_s = f"{cy:.2f}" if cy is not None else "N/A"
+                pos_s = "  ".join(
+                    f"M{i+1}={p if p is not None else '?'}"
+                    for i, p in enumerate(positions)
+                )
+                actual = self._apply_weight(motor_num, steps) if steps != 0 else 0
+                sign = "+" if actual >= 0 else ""
+                self.log_message.emit(
+                    f"▶ M{motor_num} 이동 예정 {sign}{actual}steps  |  "
+                    f"Centroid=({cx_s}, {cy_s})  |  {pos_s}"
+                )
+            except Exception:
+                pass
+
         # #11 이동 피드백: 카드 인디케이터 점등
         card = self.motor_cards[motor_num - 1]
         card.flash_moving(steps)
