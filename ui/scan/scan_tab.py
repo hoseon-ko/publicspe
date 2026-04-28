@@ -26,7 +26,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QIcon, QPixmap, QImage
 
-from core.image_processor import ImageProcessor
+from core.image_processor import ImageProcessor, TemporalMode
 from core.spe_writer import save_spe
 from ui.image_viewer import ImageViewer
 from ui.plot_panel import PlotPanel
@@ -161,6 +161,7 @@ class _CalibWorker(QThread):
         self._motors      = params["motors"]   # e.g. [1, 2, 3]
         self._proc        = ImageProcessor()
         self._proc.centroid_enabled = True
+        self._proc.temporal_mode = TemporalMode.SINGLE  # 이동 후 단일 프레임 측정
         self._stop        = False
 
     def request_stop(self):
@@ -281,6 +282,8 @@ class _ScanWorker(QThread):
         self._scan_name   = params["scan_name"]
         self._proc        = proc if proc is not None else ImageProcessor()
         self._proc.centroid_enabled = True
+        # 스캔 중에는 단일 프레임 스냅 — 이동 중 프레임이 버퍼에 섞이면 안 됨
+        self._proc.temporal_mode = TemporalMode.SINGLE
         self._stop        = False
         self._records: list = []   # CSV 누적
 
@@ -421,7 +424,14 @@ class _ScanWorker(QThread):
                      if self._motor else False
                 if not ok:
                     self.log_message.emit(f"⚠️ M{self._motor_num} 이동 실패")
+                # 정착 대기
                 self.msleep(self._settle_ms)
+                # 카메라 내부 버퍼 플러시 — 이동 중 쌓인 낡은 프레임 폐기
+                for _ in range(self._flush_snaps):
+                    try:
+                        self._cam.snap()
+                    except Exception:
+                        pass
 
         # ── CSV 저장 ──────────────────────────────────────────────────
         if self._records:
@@ -586,6 +596,18 @@ class ScanTab(QWidget):
         self.spin_settle.setSuffix(" ms")
         self.spin_settle.setStyleSheet(_SPIN_STYLE)
         gs.addLayout(_row("정착 대기:", self.spin_settle))
+
+        # 버퍼 플러시 스냅 수 (카메라 하드웨어 버퍼에 남은 낡은 프레임 폐기)
+        self.spin_flush = QSpinBox()
+        self.spin_flush.setRange(0, 10)
+        self.spin_flush.setValue(0)
+        self.spin_flush.setToolTip(
+            "모터 정착 후 측정 전 버릴 프레임 수\n"
+            "카메라 하드웨어 버퍼에 잔류한 낡은 프레임 제거용\n"
+            "(대부분 0으로 충분, 하드웨어 버퍼가 큰 경우 1~2)"
+        )
+        self.spin_flush.setStyleSheet(_SPIN_STYLE)
+        gs.addLayout(_row("버퍼 플러시:", self.spin_flush))
 
         ctrl_layout.addWidget(grp_scan)
 
@@ -1018,6 +1040,7 @@ class ScanTab(QWidget):
             "settle_ms":   settle_ms,
             "save_dir":    save_dir,
             "scan_name":   scan_name,
+            "flush_snaps": self.spin_flush.value(),
         }
         self._worker = _ScanWorker(self._cam, self._motor_panel, params, proc=self._proc)
         self._worker.step_done.connect(self._on_step_done)
