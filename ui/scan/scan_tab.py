@@ -821,14 +821,15 @@ class ScanTab(QWidget):
     def _on_step_done(self, idx: int, result, positions: list, spe_path: str):
         # 이미지 리스트 누적 (상한 초과 시 가장 오래된 것 제거)
         max_frames = self.spin_max_frames.value()
-        self._image_list.append((idx, result.raw.copy()))
+        pos_snapshot = [p if p is not None else 0 for p in positions]
+        self._image_list.append((idx, result.raw.copy(), pos_snapshot))
         if len(self._image_list) > max_frames:
-            evicted_idx, evicted_raw = self._image_list.pop(0)
+            evicted_idx, evicted_raw, evicted_pos = self._image_list.pop(0)
             self._frame_list.takeItem(0)
             if len(self._image_list) == max_frames:
                 self._log(f"⚠️ 프레임 상한 {max_frames}개 도달 — 오래된 프레임 제거 중")
             if self.chk_evict_save.isChecked():
-                self._save_evicted(evicted_idx, evicted_raw)
+                self._save_evicted(evicted_idx, evicted_raw, evicted_pos)
 
         # 프레임 스핀박스 최대값 갱신
         n = len(self._image_list) - 1
@@ -929,7 +930,7 @@ class ScanTab(QWidget):
         self._frame_list.addItem(item)
         self._frame_list.scrollToItem(item)
 
-    def _save_evicted(self, step_idx: int, raw: np.ndarray):
+    def _save_evicted(self, step_idx: int, raw: np.ndarray, pos: list):
         """상한 초과로 메모리에서 제거되는 프레임을 SPE 파일로 저장."""
         save_dir  = self.edit_save_dir.text().strip() or "Scan_Data"
         scan_name = self.edit_scan_name.text().strip() or "Scan"
@@ -946,7 +947,11 @@ class ScanTab(QWidget):
                         "StepIndex": str(step_idx + 1),
                         "Reason": "frame_list_overflow",
                         "MaxFrames": str(self.spin_max_frames.value()),
-                    }
+                    },
+                    "MotorPositions": {
+                        "M1": str(pos[0]), "M2": str(pos[1]),
+                        "M3": str(pos[2]), "M4": str(pos[3]),
+                    },
                 },
             )
             self._log(f"💾 제거 프레임 SPE 저장: {os.path.basename(path)}")
@@ -970,7 +975,7 @@ class ScanTab(QWidget):
             self._log("⚠️ 저장된 프레임 없음")
             return
         idx = max(0, min(idx, len(self._image_list) - 1))
-        _, raw = self._image_list[idx]
+        step_i, raw, pos = self._image_list[idx]
         disp = (raw >> 8).astype(np.uint8) if raw.dtype == np.uint16 else raw.astype(np.uint8)
         try:
             import cv2
@@ -978,7 +983,9 @@ class ScanTab(QWidget):
         except ImportError:
             rgb = np.stack([disp, disp, disp], axis=-1) if disp.ndim == 2 else disp.copy()
         self.image_viewer.set_live_frame(rgb, fit=False)
-        self._log(f"🖼 프레임 {idx} 표시")
+        self._log(
+            f"🖼 Step#{step_i+1}  M1={pos[0]}  M2={pos[1]}  M3={pos[2]}  M4={pos[3]}"
+        )
 
     def _show_diff(self):
         self._render_diff(absolute=False)
@@ -996,10 +1003,15 @@ class ScanTab(QWidget):
             self._log("⚠️ A와 B가 같은 프레임")
             return
 
-        _, raw_a = self._image_list[a_idx]
-        _, raw_b = self._image_list[b_idx]
+        step_a, raw_a, pos_a = self._image_list[a_idx]
+        step_b, raw_b, pos_b = self._image_list[b_idx]
         a = raw_a.astype(np.float32)
         b = raw_b.astype(np.float32)
+        dp = [pb - pa for pa, pb in zip(pos_a, pos_b)]
+        self._log(
+            f"A=Step#{step_a+1} → B=Step#{step_b+1}  "
+            f"ΔM1={dp[0]:+d}  ΔM2={dp[1]:+d}  ΔM3={dp[2]:+d}  ΔM4={dp[3]:+d}"
+        )
         diff = a - b  # 부호 있는 차이
 
         if absolute:
