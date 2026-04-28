@@ -14,7 +14,7 @@ from typing import Optional
 
 import numpy as np
 from PyQt6.QtCore import (
-    Qt, QThread, pyqtSignal, QSettings
+    Qt, QThread, pyqtSignal, QSettings, QSize
 )
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
@@ -432,14 +432,14 @@ class ScanTab(QWidget):
         self._cam = cam
         cam_name = type(cam).__name__.replace("Camera", "")
         self._lbl_cam.setText(f"📷 {cam_name}  ● CONNECTED")
-        self._lbl_cam.setStyleSheet("color: #4ecdc4; font-family: 'Courier New'; font-size: 11px;")
+        self._lbl_cam.setStyleSheet(f"color: #4ecdc4; font-family: '{_F}'; font-size: {_FS_LBL};")
         self.btn_start.setEnabled(True)
         self.btn_calibrate.setEnabled(True)
 
     def clear_shared_camera(self):
         self._cam = None
         self._lbl_cam.setText("📷 카메라 없음")
-        self._lbl_cam.setStyleSheet("color: #e94560; font-family: 'Courier New'; font-size: 11px;")
+        self._lbl_cam.setStyleSheet(f"color: #e94560; font-family: '{_F}'; font-size: {_FS_LBL};")
         self.btn_start.setEnabled(False)
         self.btn_calibrate.setEnabled(False)
 
@@ -468,7 +468,9 @@ class ScanTab(QWidget):
         ctrl_layout.setContentsMargins(8, 8, 8, 8)
         ctrl_layout.setSpacing(8)
         ctrl_scroll.setWidget(ctrl_widget)
-        ctrl_scroll.setFixedWidth(290)
+        # ctrl_scroll.setFixedWidth(290)
+
+        splitter.setStyleSheet("QSplitter::handle { background-color: #4ecdc4; width: 4px; }")
 
         # 카메라 상태
         grp_cam = QGroupBox("CAMERA")
@@ -476,23 +478,23 @@ class ScanTab(QWidget):
         gc = QVBoxLayout(grp_cam)
         gc.setSpacing(5)
         self._lbl_cam = QLabel("📷 카메라 없음")
-        self._lbl_cam.setStyleSheet("color: #e94560; font-family: 'Courier New'; font-size: 11px;")
+        self._lbl_cam.setStyleSheet(f"color: #e94560; font-family: '{_F}'; font-size: {_FS_LBL};")
         gc.addWidget(self._lbl_cam)
 
         self.btn_sim = QPushButton("▷  SIM MODE")
         self.btn_sim.setToolTip("실 하드웨어 없이 가상 카메라+모터로 동작 검증")
-        self.btn_sim.setStyleSheet("""
-            QPushButton {
+        self.btn_sim.setStyleSheet(f"""
+            QPushButton {{
                 background: #1a1a0a; color: #ffe66d;
                 border: 1px solid #ffe66d; border-radius: 4px;
-                font-family: 'Courier New'; font-weight: bold;
-                font-size: 11px; padding: 4px 10px;
-            }
-            QPushButton:hover  { background: #2a2a10; }
-            QPushButton:checked {
+                font-family: '{_F}'; font-weight: bold;
+                font-size: {_FS_BTN}; padding: 6px 10px;
+            }}
+            QPushButton:hover  {{ background: #2a2a10; }}
+            QPushButton:checked {{
                 background: #2a2800; color: #ffcc00;
                 border-color: #ffcc00;
-            }
+            }}
         """)
         self.btn_sim.setCheckable(True)
         self.btn_sim.clicked.connect(self._toggle_sim_mode)
@@ -508,8 +510,8 @@ class ScanTab(QWidget):
         def _row(label, widget):
             r = QHBoxLayout()
             lbl = QLabel(label)
-            lbl.setFixedWidth(100)
-            lbl.setStyleSheet("color: #7080a0; font-family: 'Courier New'; font-size: 11px;")
+            lbl.setFixedWidth(110)
+            lbl.setStyleSheet(f"color: {_C_LBL}; font-family: '{_F}'; font-size: {_FS_LBL};")
             r.addWidget(lbl)
             r.addWidget(widget)
             return r
@@ -517,10 +519,7 @@ class ScanTab(QWidget):
         # 모터 축 선택
         self.combo_motor = QComboBox()
         self.combo_motor.addItems(["M1", "M2", "M3", "M4"])
-        self.combo_motor.setStyleSheet(
-            "QComboBox { background:#080e1e; border:1px solid #0f3460; color:#c0d0ff;"
-            "border-radius:3px; font-family:'Courier New'; font-size:11px; padding:2px 4px; }"
-        )
+        self.combo_motor.setStyleSheet(_COMBO_STYLE)
         gs.addLayout(_row("이동 축:", self.combo_motor))
 
         # 스텝당 이동량
@@ -554,18 +553,12 @@ class ScanTab(QWidget):
 
         self.edit_scan_name = QLineEdit("Scan")
         self.edit_scan_name.setPlaceholderText("스캔 이름")
-        self.edit_scan_name.setStyleSheet(
-            "QLineEdit { background:#080e1e; border:1px solid #0f3460; color:#c0d0ff;"
-            "border-radius:3px; font-family:'Courier New'; font-size:11px; padding:2px 4px; }"
-        )
+        self.edit_scan_name.setStyleSheet(_EDIT_STYLE)
         gsv.addWidget(self.edit_scan_name)
 
         dir_row = QHBoxLayout()
         self.edit_save_dir = QLineEdit("Scan_Data")
-        self.edit_save_dir.setStyleSheet(
-            "QLineEdit { background:#080e1e; border:1px solid #0f3460; color:#c0d0ff;"
-            "border-radius:3px; font-family:'Courier New'; font-size:11px; padding:2px 4px; }"
-        )
+        self.edit_save_dir.setStyleSheet(_EDIT_STYLE)
         btn_browse = QPushButton("…")
         btn_browse.setFixedWidth(28)
         btn_browse.setStyleSheet(
@@ -598,10 +591,10 @@ class ScanTab(QWidget):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.progress_bar.setTextVisible(True)
-        self.progress_bar.setStyleSheet("""
-            QProgressBar { background:#080e1e; border:1px solid #0f3460; border-radius:4px;
-                color:#4ecdc4; font-family:'Courier New'; font-size:10px; }
-            QProgressBar::chunk { background:#0d2820; border-radius:3px; }
+        self.progress_bar.setStyleSheet(f"""
+            QProgressBar {{ background:#080e1e; border:1px solid #0f3460; border-radius:4px;
+                color:#4ecdc4; font-family:'{_F}'; font-size:{_FS_LOG}; }}
+            QProgressBar::chunk {{ background:#0d2820; border-radius:3px; }}
         """)
         ctrl_layout.addWidget(self.progress_bar)
 
@@ -633,7 +626,7 @@ class ScanTab(QWidget):
         for lbl_text, attr in (("A:", "spin_frame_a"), ("B:", "spin_frame_b")):
             l = QLabel(lbl_text)
             l.setFixedWidth(14)
-            l.setStyleSheet("color:#7080a0; font-family:'Courier New'; font-size:11px;")
+            l.setStyleSheet(f"color:{_C_LBL}; font-family:'{_F}'; font-size:{_FS_LBL};")
             sp = QSpinBox()
             sp.setRange(0, 9999)
             sp.setValue(0)
@@ -686,7 +679,7 @@ class ScanTab(QWidget):
             chk = QCheckBox(f"M{mn}")
             chk.setChecked(True)
             chk.setStyleSheet(
-                "QCheckBox { color:#c0d0ff; font-family:'Courier New'; font-size:11px; }"
+                f"QCheckBox {{ color:{_C_VAL}; font-family:'{_F}'; font-size:{_FS_LBL}; }}"
             )
             self._calib_chk[mn] = chk
             chk_row.addWidget(chk)
@@ -720,13 +713,13 @@ class ScanTab(QWidget):
         # 이미지 썸네일 리스트
         lbl_frames = QLabel("CAPTURED FRAMES")
         lbl_frames.setStyleSheet(
-            "color:#4ecdc4; font-family:'Courier New'; font-size:10px; "
+            f"color:#4ecdc4; font-family:'{_F}'; font-size:{_FS_LBL}; "
             "font-weight:bold; letter-spacing:1px; padding:2px 0;"
         )
         right_layout.addWidget(lbl_frames)
 
         self._frame_list = QListWidget()
-        self._frame_list.setIconSize(__import__('PyQt6.QtCore', fromlist=['QSize']).QSize(80, 60))
+        self._frame_list.setIconSize(QSize(80, 60))
         self._frame_list.setFlow(QListWidget.Flow.LeftToRight)
         self._frame_list.setWrapping(False)
         self._frame_list.setResizeMode(QListWidget.ResizeMode.Adjust)
@@ -751,8 +744,8 @@ class ScanTab(QWidget):
         self.log_display.setReadOnly(True)
         self.log_display.setMaximumHeight(120)
         self.log_display.setStyleSheet(
-            "QTextEdit { background:#080e1e; border:1px solid #0f3460;"
-            "color:#00cc88; font-family:'Courier New'; font-size:10px; }"
+            f"QTextEdit {{ background:#080e1e; border:1px solid #0f3460;"
+            f"color:#00cc88; font-family:'Courier New'; font-size:{_FS_LOG}; }}"
         )
         right_layout.addWidget(self.log_display, 1)
 
@@ -768,9 +761,9 @@ class ScanTab(QWidget):
         self._table.horizontalHeader().setStretchLastSection(True)
         self._table.setStyleSheet(f"""
             QTableWidget {{ background:#080e1e; gridline-color:#0f3460;
-                color:#c0d0ff; font-family:'{_FC}'; font-size:{_FS_LOG}; border:none; }}
+                color:#c0d0ff; font-family:'{_FC}'; font-size:{_FS_LOG}; border:none; text-align:center; }}
             QHeaderView::section {{ background:#0f1729; color:#4ecdc4;
-                border:1px solid #0f3460; font-family:'{_FC}'; font-size:{_FS_LOG}; }}
+                border:1px solid #0f3460; font-family:'{_FC}'; font-size:{_FS_LOG}; text-align:center; }}
             QTableWidget::item:selected {{ background:#1a3a60; }}
         """)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -914,7 +907,9 @@ class ScanTab(QWidget):
             os.path.basename(spe_path),
         ]
         for col, v in enumerate(vals):
-            self._table.setItem(row, col, QTableWidgetItem(v))
+            item = QTableWidgetItem(v)
+            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._table.setItem(row, col, item)
         self._table.scrollToBottom()
 
         # 플롯 업데이트 — centroid None이면 0으로 채워 길이 항상 일치
@@ -923,12 +918,13 @@ class ScanTab(QWidget):
         self._plot_cx.append(result.centroid_x if result.centroid_x is not None else 0.0)
         self._plot_cy.append(result.centroid_y if result.centroid_y is not None else 0.0)
 
-        self.plot_panel.plot_two_lines(
-            np.array(self._plot_cx),
-            np.array(self._plot_cy),
-            "Centroid X",
-            "Centroid Y",
-        )
+        if self.enable_profile_plot:
+            self.plot_panel.plot_two_lines(
+                np.array(self._plot_cx),
+                np.array(self._plot_cy),
+                "Centroid X",
+                "Centroid Y",
+            )
 
     def _on_progress(self, current: int, total: int):
         self.progress_bar.setValue(current)
@@ -1104,7 +1100,6 @@ class ScanTab(QWidget):
             if "weight_adj" in res:
                 parts.append(f"adj={res['weight_adj']:.4f}")
             self._log("  " + "  |  ".join(parts))
-        self._calib_worker = None
 
     # ── 유틸 ─────────────────────────────────────────────────────────
 
@@ -1122,7 +1117,7 @@ class ScanTab(QWidget):
             self._motor_panel = self._sim_motor
             self._lbl_cam.setText("🟡 SIM  ● Gaussian Beam  512×512")
             self._lbl_cam.setStyleSheet(
-                "color: #ffe66d; font-family: 'Courier New'; font-size: 11px;"
+                f"color: #ffe66d; font-family: '{_F}'; font-size: {_FS_LBL};"
             )
             self.btn_sim.setText("■  SIM OFF")
             self._log("🟡 SIM MODE 활성 — 가상 카메라 + M1/M2/M3 가중치 비대칭 모터")
@@ -1152,7 +1147,7 @@ class ScanTab(QWidget):
         else:
             color = "#00cc88"
         self.log_display.append(
-            f"<span style='color:#2a4060;font-size:10px'>[{ts}]</span> "
+            f"<span style='color:#2a4060;font-size:{_FS_LOG}'>[{ts}]</span> "
             f"<span style='color:{color}'>{msg}</span>"
         )
 
