@@ -65,6 +65,7 @@ class TemporalMode(IntEnum):
     MIN_PROJ = 2   # 최소값 투영 — 이동 물체 제거
     STD_MAP  = 3   # 표준편차 맵 — 공간적 노이즈 시각화
     ACCUM    = 4   # 무한 누적 — 광자 카운팅 모드
+    SINGLE   = 5   # 단일 프레임 — 버퍼 없이 원본 그대로
 
 
 class CentroidMode(IntEnum):
@@ -256,7 +257,10 @@ class ImageProcessor:
                 calc = calc / flat_safe
 
         # ── 4. 시간 축 N-frame 연산 ───────────────────────────────────
-        if self.temporal_mode == TemporalMode.AVERAGE:
+        if self.temporal_mode == TemporalMode.SINGLE:
+            temporal = calc  # 버퍼 건드리지 않고 현재 프레임 그대로
+
+        elif self.temporal_mode == TemporalMode.AVERAGE:
             # Running sum: 새 프레임 더하고 빠진 프레임 빼기 → O(H×W)
             # np.mean(list(buffer), axis=0) 과 수학적으로 동일한 결과
             self._buffer.append(calc)

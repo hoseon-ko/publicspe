@@ -225,7 +225,7 @@ class CameraControlPanel(QWidget):
         lbl_mode.setStyleSheet(_LBL_STYLE)
         self.combo_temporal = QComboBox()
         self.combo_temporal.addItems([
-            "Average", "Max Proj", "Min Proj", "Std Map", "Accumulate"
+            "Average", "Max Proj", "Min Proj", "Std Map", "Accumulate", "Live (Single)"
         ])
         self.combo_temporal.setStyleSheet("""
             QComboBox { background: #080e1e; border: 1px solid #0f3460;
