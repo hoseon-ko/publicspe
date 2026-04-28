@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QDockWidget, QToolBar,
     QScrollArea, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QTextEdit, QSizePolicy,
-    QApplication
+    QApplication, QListWidget, QListWidgetItem,
 )
 from PyQt6.QtCore import Qt, QTimer, QSize, QSettings, QThread, QObject, pyqtSignal
 from PyQt6.QtGui import QAction
@@ -221,6 +221,7 @@ class LiveTab(QMainWindow):
         self._conn_worker: Optional[_ConnectWorker] = None
         self._snap_thread: Optional[QThread] = None
         self._snap_worker: Optional[_SnapWorker] = None
+        self._pending_connect_index: Optional[int] = None  # 해제 후 재연결 대기
 
         # ── 처리 전용 워커 (카메라 스레드 블로킹 방지) ──
         self._proc_worker = _ProcessWorker(self._proc)
@@ -342,6 +343,59 @@ class LiveTab(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_log)
         self.dock_log.setObjectName("dock_log")
 
+        # ── Dock: ROI List (우측, Log 아래) ──────────────────────────
+        roi_container = QWidget()
+        roi_container.setStyleSheet("background:#080e1e;")
+        roi_v = QVBoxLayout(roi_container)
+        roi_v.setContentsMargins(0, 0, 0, 0)
+        roi_v.setSpacing(0)
+
+        roi_hdr = QWidget()
+        roi_hdr.setStyleSheet("background:#0c1428; border-bottom:1px solid #0f3460;")
+        roi_hdr_row = QHBoxLayout(roi_hdr)
+        roi_hdr_row.setContentsMargins(8, 3, 4, 3)
+        lbl_roi_title = QLabel("ROI LIST")
+        lbl_roi_title.setStyleSheet(
+            "color:#4a5a7a; font-family:'Courier New'; font-size:10px;"
+            " font-weight:bold; letter-spacing:2px;"
+        )
+        self._btn_del_roi = QPushButton("DEL")
+        self._btn_del_roi.setFixedHeight(20)
+        self._btn_del_roi.setToolTip("선택한 ROI 삭제 (Delete)")
+        self._btn_del_roi.setStyleSheet("""
+            QPushButton { background:transparent; color:#304060; border:1px solid #1a2840;
+                border-radius:2px; font-family:'Courier New'; font-size:9px; padding:0 6px; }
+            QPushButton:hover { color:#e94560; border-color:#e94560; }
+        """)
+        self._btn_del_roi.clicked.connect(self._delete_selected_roi)
+        btn_del_all = QPushButton("ALL")
+        btn_del_all.setFixedHeight(20)
+        btn_del_all.setToolTip("모든 ROI 삭제")
+        btn_del_all.setStyleSheet(self._btn_del_roi.styleSheet())
+        btn_del_all.clicked.connect(self._clear_all_rois)
+        roi_hdr_row.addWidget(lbl_roi_title, 1)
+        roi_hdr_row.addWidget(self._btn_del_roi)
+        roi_hdr_row.addWidget(btn_del_all)
+        roi_v.addWidget(roi_hdr)
+
+        self._roi_list_widget = QListWidget()
+        self._roi_list_widget.setStyleSheet("""
+            QListWidget { background:#080e1e; border:none; color:#c0d0ff;
+                font-family:'Courier New'; font-size:11px; }
+            QListWidget::item { padding:4px 8px; border-bottom:1px solid #0f2040; }
+            QListWidget::item:selected { background:#1a3a60; color:#4ecdc4; }
+            QListWidget::item:hover { background:#0f1f3a; }
+        """)
+        self._roi_list_widget.itemClicked.connect(self._on_roi_list_click)
+        roi_v.addWidget(self._roi_list_widget, 1)
+
+        self.dock_roi = QDockWidget("📐  ROI List", self)
+        self.dock_roi.setWidget(roi_container)
+        self.dock_roi.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_roi)
+        self.tabifyDockWidget(self.dock_log, self.dock_roi)
+        self.dock_roi.setObjectName("dock_roi")
+
         # 기본 크기 힌트
         self.resizeDocks(
             [self.dock_cam, self.dock_motor], [350, 350], Qt.Orientation.Vertical
@@ -374,6 +428,7 @@ class LiveTab(QMainWindow):
             ("📈 Profile",   "dock_plot"),
             ("📊 Histogram", "dock_hist"),
             ("🖥 Log",       "dock_log"),
+            ("📐 ROI List",  "dock_roi"),
         ]:
             act = QAction(label, self)
             act.setCheckable(True)
@@ -478,6 +533,9 @@ class LiveTab(QMainWindow):
         self.image_viewer._view.scale_changed.connect(self._on_zoom_changed)
         # #13 ROI 크기
         self.image_viewer._view.roi_drawn.connect(self._on_roi_size)
+        # ROI 목록 패널 연동
+        self.image_viewer._view.on_roi_added   = self._on_roi_added_to_list
+        self.image_viewer._view.on_roi_selected = self._on_roi_selected_in_list
 
     # ── 카메라 제어 ───────────────────────────────────────────────────
 
@@ -502,10 +560,22 @@ class LiveTab(QMainWindow):
 
     def _connect_camera(self, index: int):
         """#6 카메라 연결을 백그라운드 스레드에서 실행 — UI 응답 유지."""
-        if self._cam is not None:
-            self._log("⚠️ 이미 연결됨"); return
         if self._conn_thread is not None and self._conn_thread.isRunning():
             self._log("⚠️ 연결 중..."); return
+
+        # 다른 카메라가 연결되어 있으면 먼저 해제 후 재연결
+        if self._cam is not None:
+            new_type = self.cam_panel.get_selected_camera_type()
+            cur_type = type(self._cam).__name__
+            # 같은 타입이면 재연결 불필요
+            same = (new_type == "HIKVISION" and "Hikvision" in cur_type) or \
+                   (new_type != "HIKVISION" and "Hikvision" not in cur_type)
+            if same:
+                self._log("⚠️ 이미 동일 카메라 연결됨"); return
+            self._log(f"🔄 카메라 변경 — 기존 연결 해제 후 재연결...")
+            self._pending_connect_index = index
+            self._disconnect_camera()   # 완료 후 _on_disconnect_done → _connect_pending
+            return
 
         cam_type = self.cam_panel.get_selected_camera_type()
         try:
@@ -574,6 +644,11 @@ class LiveTab(QMainWindow):
         self._log("카메라 연결 해제")
         self.status_message.emit("카메라 해제")
         self.camera_disconnected.emit()
+        # 카메라 변경 시 해제 완료 → 새 카메라로 바로 연결
+        if self._pending_connect_index is not None:
+            idx = self._pending_connect_index
+            self._pending_connect_index = None
+            self._connect_camera(idx)
 
     def _start_camera(self):
         if self._cam is None: return
@@ -730,8 +805,7 @@ class LiveTab(QMainWindow):
         elif key == Qt.Key.Key_F:
             self.image_viewer.autoRange()
         elif key == Qt.Key.Key_R:
-            self.image_viewer._view.delete_all_rois()
-            self._lbl_roi.setText("ROI: —")
+            self._clear_all_rois()
             self._log("ROI 초기화")
         else:
             super().keyPressEvent(event)
@@ -743,6 +817,63 @@ class LiveTab(QMainWindow):
         self._lbl_zoom.setText(f"🔍 {pct}%")
 
     # ── #13 ROI 크기 표시 ────────────────────────────────────────────
+
+    # ── ROI 목록 패널 ─────────────────────────────────────────────────
+
+    def _roi_label(self, roi) -> str:
+        """ROI 객체 → 목록에 표시할 텍스트."""
+        try:
+            (x0, y0), (x1, y1) = roi.pts[0], roi.pts[1]
+            rt = roi.roi_type
+            if rt == 'Line':
+                l = np.hypot(x1 - x0, y1 - y0)
+                return f"#{roi.roi_id}  Line  {l:.0f}px  ({x0:.0f},{y0:.0f})→({x1:.0f},{y1:.0f})"
+            else:
+                w, h = abs(x1 - x0), abs(y1 - y0)
+                tag = "Hist" if rt == 'Hist' else "Box"
+                return f"#{roi.roi_id}  {tag}  {w:.0f}×{h:.0f}  @({x0:.0f},{y0:.0f})"
+        except Exception:
+            return f"#{getattr(roi, 'roi_id', '?')}  {getattr(roi, 'roi_type', '?')}"
+
+    def _on_roi_added_to_list(self, roi):
+        """ROI 드로우 완료 시 목록에 항목 추가 후 ROI List 탭 활성화."""
+        item = QListWidgetItem(self._roi_label(roi))
+        item.setData(0x100, roi.roi_id)   # Qt.UserRole = 0x100
+        self._roi_list_widget.addItem(item)
+        self._roi_list_widget.setCurrentItem(item)
+        self.dock_roi.show()
+        self.dock_roi.raise_()
+
+    def _on_roi_selected_in_list(self, roi_id):
+        """ImageViewer 에서 ROI 선택 시 목록도 동기화."""
+        for i in range(self._roi_list_widget.count()):
+            item = self._roi_list_widget.item(i)
+            if item.data(0x100) == roi_id:
+                self._roi_list_widget.setCurrentItem(item)
+                return
+
+    def _on_roi_list_click(self, item: QListWidgetItem):
+        """목록 클릭 → ImageViewer 에서 해당 ROI 선택."""
+        roi_id = item.data(0x100)
+        if roi_id is not None:
+            self.image_viewer._view._select_roi(roi_id)
+
+    def _delete_selected_roi(self):
+        """목록에서 선택한 ROI 삭제."""
+        item = self._roi_list_widget.currentItem()
+        if item is None:
+            return
+        roi_id = item.data(0x100)
+        self.image_viewer._view.delete_roi(roi_id)
+        row = self._roi_list_widget.row(item)
+        self._roi_list_widget.takeItem(row)
+        self._lbl_roi.setText("ROI: —")
+
+    def _clear_all_rois(self):
+        """모든 ROI 삭제."""
+        self.image_viewer._view.delete_all_rois()
+        self._roi_list_widget.clear()
+        self._lbl_roi.setText("ROI: —")
 
     def _on_roi_size(self, mode: str, pts: list):
         try:

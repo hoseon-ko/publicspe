@@ -451,6 +451,8 @@ class ScanTab(QWidget):
         self._motor_panel  = None
         self._sim_cam      = None
         self._sim_motor    = None
+        self._real_cam     = None   # SIM 모드 진입 전 실제 카메라 백업
+        self._real_motor   = None
         self._worker: Optional[_ScanWorker] = None
         self._calib_worker: Optional[_CalibWorker] = None
         self._scan_records: list = []
@@ -1275,6 +1277,9 @@ class ScanTab(QWidget):
             self.btn_sim.setChecked(not checked)  # 토글 되돌리기
             return
         if checked:
+            # 실제 카메라/모터 보관 (SIM 해제 시 복원)
+            self._real_cam   = self._cam
+            self._real_motor = self._motor_panel
             from core.simulator import SimCamera, SimMotorPanel
             self._sim_cam   = SimCamera()
             self._sim_motor = SimMotorPanel(self._sim_cam)
@@ -1289,10 +1294,18 @@ class ScanTab(QWidget):
         else:
             self._sim_cam   = None
             self._sim_motor = None
-            self.clear_shared_camera()
-            self._motor_panel = None
+            # 저장된 실제 카메라 복원
+            real_cam   = getattr(self, "_real_cam",   None)
+            real_motor = getattr(self, "_real_motor", None)
+            self._real_cam   = None
+            self._real_motor = None
+            if real_cam is not None:
+                self.set_shared_camera(real_cam)
+            else:
+                self.clear_shared_camera()
+            self._motor_panel = real_motor
             self.btn_sim.setText("▷  SIM MODE")
-            self._log("⬛ SIM MODE 해제")
+            self._log("⬛ SIM MODE 해제" + ("" if real_cam is None else " — 실제 카메라 복원"))
 
     def _browse_dir(self):
         path = QFileDialog.getExistingDirectory(self, "저장 폴더 선택", self.edit_save_dir.text())
