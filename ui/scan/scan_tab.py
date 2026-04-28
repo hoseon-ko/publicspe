@@ -423,6 +423,7 @@ class ScanTab(QWidget):
         self._plot_x:  list = []
         self._plot_cx: list = []
         self._plot_cy: list = []
+        self.enable_profile_plot = True
         self._build_ui()
         self._restore_settings()
 
@@ -703,28 +704,36 @@ class ScanTab(QWidget):
         self.image_viewer = ImageViewer()
         center_right.addWidget(self.image_viewer)
 
-        # 우측: 플롯 + 로그 + 테이블 (세로 분할)
-        right_widget = QWidget()
-        right_widget.setStyleSheet("background: #0a0f1e;")
-        right_layout = QVBoxLayout(right_widget)
-        right_layout.setContentsMargins(4, 4, 4, 4)
-        right_layout.setSpacing(4)
+        # 우측: 세로 스플리터 (드래그로 높낮이 조절)
+        right_splitter = QSplitter(Qt.Orientation.Vertical)
+        right_splitter.setStyleSheet("""
+            QSplitter::handle:vertical {
+                background: #1a3a60; height: 4px; margin: 1px 0;
+            }
+            QSplitter::handle:vertical:hover { background: #4ecdc4; }
+        """)
 
-        # 이미지 썸네일 리스트
+        # ── 패널 1: 썸네일 리스트 ─────────────────────────────────────
+        frames_widget = QWidget()
+        frames_widget.setStyleSheet("background: #0a0f1e;")
+        frames_layout = QVBoxLayout(frames_widget)
+        frames_layout.setContentsMargins(4, 2, 4, 2)
+        frames_layout.setSpacing(2)
+
         lbl_frames = QLabel("CAPTURED FRAMES")
         lbl_frames.setStyleSheet(
             f"color:#4ecdc4; font-family:'{_F}'; font-size:{_FS_LBL}; "
             "font-weight:bold; letter-spacing:1px; padding:2px 0;"
         )
-        right_layout.addWidget(lbl_frames)
+        frames_layout.addWidget(lbl_frames)
 
         self._frame_list = QListWidget()
         self._frame_list.setIconSize(QSize(80, 60))
         self._frame_list.setFlow(QListWidget.Flow.LeftToRight)
         self._frame_list.setWrapping(False)
         self._frame_list.setResizeMode(QListWidget.ResizeMode.Adjust)
-        self._frame_list.setFixedHeight(100)
-        self._frame_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self._frame_list.setMinimumHeight(60)
+        self._frame_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._frame_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._frame_list.setStyleSheet("""
             QListWidget { background:#080e1e; border:1px solid #0f3460; color:#c0d0ff; }
@@ -732,24 +741,25 @@ class ScanTab(QWidget):
             QListWidget::item:selected { background:#1a3a60; border:1px solid #4ecdc4; }
         """)
         self._frame_list.currentRowChanged.connect(self._on_frame_list_select)
-        right_layout.addWidget(self._frame_list)
+        frames_layout.addWidget(self._frame_list)
+        right_splitter.addWidget(frames_widget)
 
-        # 플롯 패널 (위치 vs centroid)
+        # ── 패널 2: 플롯 ──────────────────────────────────────────────
         self.plot_panel = PlotPanel("Centroid X/Y vs Motor Position")
-        self.plot_panel.setMinimumHeight(200)
-        right_layout.addWidget(self.plot_panel, 2)
+        self.plot_panel.setMinimumHeight(100)
+        right_splitter.addWidget(self.plot_panel)
 
-        # 로그
+        # ── 패널 3: 로그 ──────────────────────────────────────────────
         self.log_display = QTextEdit()
         self.log_display.setReadOnly(True)
-        self.log_display.setMaximumHeight(120)
+        self.log_display.setMinimumHeight(40)
         self.log_display.setStyleSheet(
             f"QTextEdit {{ background:#080e1e; border:1px solid #0f3460;"
             f"color:#00cc88; font-family:'Courier New'; font-size:{_FS_LOG}; }}"
         )
-        right_layout.addWidget(self.log_display, 1)
+        right_splitter.addWidget(self.log_display)
 
-        # 결과 테이블
+        # ── 패널 4: 결과 테이블 ───────────────────────────────────────
         self._table = QTableWidget()
         self._table.setColumnCount(9)
         self._table.setHorizontalHeaderLabels(
@@ -759,6 +769,7 @@ class ScanTab(QWidget):
             QHeaderView.ResizeMode.ResizeToContents
         )
         self._table.horizontalHeader().setStretchLastSection(True)
+        self._table.setMinimumHeight(40)
         self._table.setStyleSheet(f"""
             QTableWidget {{ background:#080e1e; gridline-color:#0f3460;
                 color:#c0d0ff; font-family:'{_FC}'; font-size:{_FS_LOG}; border:none; text-align:center; }}
@@ -767,9 +778,13 @@ class ScanTab(QWidget):
             QTableWidget::item:selected {{ background:#1a3a60; }}
         """)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        right_layout.addWidget(self._table, 2)
+        right_splitter.addWidget(self._table)
 
-        center_right.addWidget(right_widget)
+        # 초기 높이 비율: 썸네일 120 / 플롯 280 / 로그 120 / 테이블 200
+        right_splitter.setSizes([120, 280, 120, 200])
+        self._right_splitter = right_splitter   # QSettings 저장용
+
+        center_right.addWidget(right_splitter)
         center_right.setSizes([700, 400])
 
         splitter.addWidget(center_right)
@@ -1159,6 +1174,12 @@ class ScanTab(QWidget):
         self.spin_settle.setValue(int(s.value("settle_ms", 500)))
         self.edit_save_dir.setText(s.value("save_dir", "Scan_Data"))
         self.edit_scan_name.setText(s.value("scan_name", "Scan"))
+        raw = s.value("right_splitter_sizes")
+        if raw:
+            try:
+                self._right_splitter.setSizes([int(x) for x in raw])
+            except Exception:
+                pass
 
     def cleanup(self):
         s = QSettings("SpeAnalyze", "ScanTab")
@@ -1168,6 +1189,7 @@ class ScanTab(QWidget):
         s.setValue("settle_ms",  self.spin_settle.value())
         s.setValue("save_dir",   self.edit_save_dir.text())
         s.setValue("scan_name",  self.edit_scan_name.text())
+        s.setValue("right_splitter_sizes", self._right_splitter.sizes())
         if self._worker and self._worker.isRunning():
             self._worker.request_stop()
             self._worker.wait(2000)
