@@ -353,6 +353,7 @@ class LiveTab(QMainWindow):
 
     def _setup_toolbar(self):
         tb = QToolBar("Live Toolbar")
+        tb.setObjectName("live_toolbar")
         tb.setMovable(False)
         tb.setIconSize(QSize(16, 16))
         tb.setStyleSheet("""

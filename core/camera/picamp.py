@@ -210,12 +210,86 @@ class PicamCameraWrapper:
         return result
 
     def read_temperature_block(self) -> Tuple[Any, Any, Any]:
+        """온도 블록 읽기.
+
+        Reading / Status 는 Picam SDK의 ReadParameter 계열만 동작하며
+        GetParameter(get_attribute_value)로 호출하면 SDK가 에러를 반환한다.
+        clib 직접 호출 → pylablib read_attribute_value → get_attribute_value 순 폴백.
+        """
         if self.cam is None:
             raise RuntimeError("Camera is not opened")
-        reading = self.get_attr_safe("Sensor Temperature Reading", default=None)
+
+        reading = self._read_hw_float("Sensor Temperature Reading")
         setpoint = self.get_attr_safe("Sensor Temperature Set Point", default=None)
-        status = self.get_attr_safe("Sensor Temperature Status", default=None)
+        status = self._read_hw_int_str("Sensor Temperature Status")
         return reading, setpoint, status
+
+    def _read_hw_float(self, name: str) -> Optional[float]:
+        """Picam_ReadParameterFloatingPointValue 경유 하드웨어 직접 읽기."""
+        import ctypes
+        # 1) pylablib read_attribute_value (있는 경우)
+        if hasattr(self.cam, 'read_attribute_value'):
+            try:
+                return self.cam.read_attribute_value(name)
+            except Exception:
+                pass
+        # 2) clib 직접 호출
+        try:
+            attr = self.cam.get_attribute(name, error_on_missing=False)
+            if attr is None:
+                return None
+            pid = getattr(attr, 'pid', None) or getattr(attr, 'parameter', None) or getattr(attr, 'param', None)
+            if pid is None:
+                return None
+            handle = getattr(self.cam, 'handle', None) or getattr(self.cam, '_cam', None)
+            val = ctypes.c_double()
+            err = self.cam.clib.Picam_ReadParameterFloatingPointValue(
+                handle, ctypes.c_int(int(pid)), ctypes.byref(val)
+            )
+            return val.value if err == 0 else None
+        except Exception:
+            pass
+        # 3) 폴백 (일부 구성에선 동작할 수 있음)
+        return self.get_attr_safe(name, default=None)
+
+    def _read_hw_int_str(self, name: str) -> Optional[Any]:
+        """Picam_ReadParameterIntegerValue 경유 하드웨어 직접 읽기 → 문자열 변환."""
+        import ctypes
+        # 1) pylablib read_attribute_value
+        if hasattr(self.cam, 'read_attribute_value'):
+            try:
+                return self.cam.read_attribute_value(name)
+            except Exception:
+                pass
+        # 2) clib 직접 호출
+        try:
+            attr = self.cam.get_attribute(name, error_on_missing=False)
+            if attr is None:
+                return None
+            pid = getattr(attr, 'pid', None) or getattr(attr, 'parameter', None) or getattr(attr, 'param', None)
+            if pid is None:
+                return None
+            handle = getattr(self.cam, 'handle', None) or getattr(self.cam, '_cam', None)
+            val = ctypes.c_int()
+            err = self.cam.clib.Picam_ReadParameterIntegerValue(
+                handle, ctypes.c_int(int(pid)), ctypes.byref(val)
+            )
+            if err != 0:
+                return None
+            # enum → 문자열: pylablib attribute의 ivalues/values 맵 활용
+            ivalues = getattr(attr, 'ivalues', None)
+            values  = getattr(attr, 'values',  None)
+            if ivalues and values:
+                try:
+                    idx = list(ivalues).index(val.value)
+                    return list(values)[idx]
+                except (ValueError, IndexError):
+                    pass
+            return val.value
+        except Exception:
+            pass
+        # 3) 폴백
+        return self.get_attr_safe(name, default=None)
 
     def get_temperature_setpoint_limits(self) -> Tuple[Optional[float], Optional[float]]:
         if self.cam is None:

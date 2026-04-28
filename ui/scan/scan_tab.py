@@ -31,41 +31,71 @@ from core.spe_writer import save_spe
 from ui.image_viewer import ImageViewer
 from ui.plot_panel import PlotPanel
 
+# ── 공통 폰트/색상 토큰 ──────────────────────────────────────────────
+_F  = "Segoe UI"        # 기본 UI 폰트
+_FC = "Courier New"     # 모노스페이스 (숫자, 로그)
+_FS_LBL  = "15px"       # 일반 레이블
+_FS_CTRL = "15px"       # 스핀박스·콤보·에디트
+_FS_BTN  = "15px"       # 버튼
+_FS_GRP  = "14px"       # 그룹박스 타이틀
+_FS_LOG  = "14px"       # 로그·테이블
+_C_VAL   = "#d8e8ff"    # 입력값 색 (밝게)
+_C_LBL   = "#8090b0"    # 레이블 색
+_C_DIM   = "#4a6a8a"    # 흐린 보조 텍스트
+
 # 스타일 공통
-_BTN_PRIMARY = """
-    QPushButton {
+_BTN_PRIMARY = f"""
+    QPushButton {{
         background: #0d2820; color: #4ecdc4;
         border: 1px solid #4ecdc4; border-radius: 4px;
-        font-family: 'Courier New'; font-weight: bold;
-        font-size: 12px; padding: 6px 14px;
-    }
-    QPushButton:hover { background: #1a4838; }
-    QPushButton:disabled { color: #1a2840; background: #080e1e; border-color: #0a1828; }
+        font-family: '{_F}'; font-weight: bold;
+        font-size: {_FS_BTN}; padding: 7px 14px;
+    }}
+    QPushButton:hover {{ background: #1a4838; }}
+    QPushButton:disabled {{ color: #1a2840; background: #080e1e; border-color: #0a1828; }}
 """
-_BTN_DANGER = """
-    QPushButton {
+_BTN_DANGER = f"""
+    QPushButton {{
         background: #200808; color: #e94560;
         border: 1px solid #e94560; border-radius: 4px;
-        font-family: 'Courier New'; font-weight: bold;
-        font-size: 12px; padding: 6px 14px;
-    }
-    QPushButton:hover { background: #3a1020; }
-    QPushButton:disabled { color: #2a1010; background: #100404; border-color: #200808; }
-"""
-_SPIN_STYLE = """
-    QSpinBox {
-        background: #080e1e; border: 1px solid #0f3460;
-        color: #c0d0ff; border-radius: 3px;
-        font-family: 'Courier New'; font-size: 11px; padding: 2px 4px;
-    }
-"""
-_GRP = """
-    QGroupBox {{
-        border: 1px solid {c}; border-radius: 6px;
-        margin-top: 10px; font-family: 'Courier New';
-        font-size: 11px; color: {c}; letter-spacing: 1px; font-weight: bold;
+        font-family: '{_F}'; font-weight: bold;
+        font-size: {_FS_BTN}; padding: 7px 14px;
     }}
-    QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 4px; }}
+    QPushButton:hover {{ background: #3a1020; }}
+    QPushButton:disabled {{ color: #2a1010; background: #100404; border-color: #200808; }}
+"""
+_SPIN_STYLE = f"""
+    QSpinBox, QDoubleSpinBox {{
+        background: #080e1e; border: 1px solid #1a3a60;
+        color: {_C_VAL}; border-radius: 3px;
+        font-family: '{_FC}'; font-size: {_FS_CTRL}; padding: 3px 5px; min-height: 22px;
+    }}
+"""
+_COMBO_STYLE = f"""
+    QComboBox {{
+        background: #080e1e; border: 1px solid #1a3a60; color: {_C_VAL};
+        border-radius: 3px; font-family: '{_FC}'; font-size: {_FS_CTRL};
+        padding: 3px 5px; min-height: 22px;
+    }}
+    QComboBox::drop-down {{ border: none; }}
+    QComboBox QAbstractItemView {{
+        background: #0a1428; color: {_C_VAL}; selection-background-color: #1a3a60;
+    }}
+"""
+_EDIT_STYLE = f"""
+    QLineEdit {{
+        background: #080e1e; border: 1px solid #1a3a60; color: {_C_VAL};
+        border-radius: 3px; font-family: '{_FC}'; font-size: {_FS_CTRL};
+        padding: 3px 5px; min-height: 22px;
+    }}
+"""
+_GRP = f"""
+    QGroupBox {{{{
+        border: 1px solid {{c}}; border-radius: 6px;
+        margin-top: 12px; font-family: '{_F}';
+        font-size: {_FS_GRP}; color: {{c}}; letter-spacing: 1px; font-weight: bold;
+    }}}}
+    QGroupBox::title {{{{ subcontrol-origin: margin; left: 10px; padding: 0 4px; }}}}
 """
 
 
@@ -736,12 +766,12 @@ class ScanTab(QWidget):
             QHeaderView.ResizeMode.ResizeToContents
         )
         self._table.horizontalHeader().setStretchLastSection(True)
-        self._table.setStyleSheet("""
-            QTableWidget { background:#080e1e; gridline-color:#0f3460;
-                color:#c0d0ff; font-family:'Courier New'; font-size:10px; border:none; }
-            QHeaderView::section { background:#0f1729; color:#4ecdc4;
-                border:1px solid #0f3460; font-family:'Courier New'; font-size:10px; }
-            QTableWidget::item:selected { background:#1a3a60; }
+        self._table.setStyleSheet(f"""
+            QTableWidget {{ background:#080e1e; gridline-color:#0f3460;
+                color:#c0d0ff; font-family:'{_FC}'; font-size:{_FS_LOG}; border:none; }}
+            QHeaderView::section {{ background:#0f1729; color:#4ecdc4;
+                border:1px solid #0f3460; font-family:'{_FC}'; font-size:{_FS_LOG}; }}
+            QTableWidget::item:selected {{ background:#1a3a60; }}
         """)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         right_layout.addWidget(self._table, 2)
