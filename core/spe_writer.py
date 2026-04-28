@@ -1,7 +1,6 @@
 """
 core/spe_writer.py
-SPE 3.0 포맷 파일 저장 — picamp.py의 _save_as_spe를 독립 모듈로 분리.
-HIKVISION, Picam 등 모든 카메라 데이터를 동일하게 저장할 수 있다.
+SPE 3.0 포맷 파일 저장 — LightField 호환 XML 구조.
 """
 
 import struct
@@ -27,12 +26,14 @@ _SPE_PIXEL_FORMAT: Dict[str, str] = {
 }
 
 
-def _xml_tag(tag: str, value: Any) -> str:
+def _xml_tag(tag: str, value: Any, attrs: str = "") -> str:
     if value is None:
         return ""
     text = str(value)
     if text == "":
         return ""
+    if attrs:
+        return f"<{tag} {attrs}>{escape(text)}</{tag}>"
     return f"<{tag}>{escape(text)}</{tag}>"
 
 
@@ -43,18 +44,33 @@ def save_spe(
     exposure_ms: float = 0.0,
     roi=None,
     dtype=None,
+    # 카메라 기본 정보
     camera_name: str = "Camera1",
     camera_model: str = "",
     camera_serial: str = "",
     camera_interface: str = "",
+    # 픽셀 크기
     pixel_size_um: Optional[tuple] = None,
+    # 센서 정보
+    sensor_name: Optional[str] = None,
+    sensor_type: Optional[str] = None,
+    sensor_characteristics: Optional[str] = None,
+    # 온도
     temperature_reading_c: Optional[float] = None,
     temperature_setpoint_c: Optional[float] = None,
     temperature_status: Optional[str] = None,
-    sensor_name: Optional[str] = None,
-    sensor_characteristics: Optional[str] = None,
+    # ShutterTiming 확장
+    shutter_mode: Optional[str] = None,
+    shutter_opening_delay_ms: Optional[float] = None,
+    shutter_closing_delay_ms: Optional[float] = None,
+    # ReadoutControl 확장
+    readout_mode: Optional[str] = None,
+    readout_ports_used: Optional[int] = None,
+    vertical_shift_rate: Optional[float] = None,
+    # ADC
     adc_info: Optional[Dict[str, Any]] = None,
     readout_rate_mhz: Optional[float] = None,
+    # 소프트웨어 / 파일 메타
     software: str = "SpeAnalyze",
     software_version: str = "1.0",
     software_company: str = "",
@@ -67,17 +83,17 @@ def save_spe(
 
     Parameters
     ----------
-    path         : 저장 경로 (str 또는 Path), .spe 확장자 권장
-    frames       : ndarray (H,W) 또는 (N,H,W), 또는 list of ndarray
-    exposure_ms  : 노출 시간 ms — 메타데이터에 기록
-    roi          : (hstart, hend, vstart, vend, hbin, vbin) — pilablib roi 반환값
-    dtype        : 저장 dtype (None = 원본 유지)
-    camera_name  : XML 푸터에 기록할 카메라 이름
-    pixel_size_um: (width_um, height_um) 픽셀 크기
-
-    Returns
-    -------
-    저장된 파일의 Path
+    path              : 저장 경로 (.spe 권장)
+    frames            : ndarray (H,W) / (N,H,W) / list of ndarray
+    exposure_ms       : 노출 시간 (ms)
+    roi               : (hstart, hend, vstart, vend, hbin, vbin)
+    sensor_name       : 예) "E2V 2048 x 2048 (CCD 42-40)(B)(MP)"
+    sensor_type       : 예) "Ccd"
+    sensor_characteristics : 예) "BackIlluminated, Multiport"
+    readout_mode      : 예) "FullFrame"
+    vertical_shift_rate : µs 단위 shift rate
+    shutter_mode      : 예) "Normal"
+    adc_info          : {adc_quality, adc_speed, adc_analog_gain, bit_depth, readout_ports_used}
     """
     # ── frames 통일 ────────────────────────────────────────────────────
     if isinstance(frames, np.ndarray):
@@ -100,7 +116,7 @@ def save_spe(
     bytes_per_px = out_dtype.itemsize
     frame_bytes = width * height * bytes_per_px
 
-    # ── ROI 파라미터 ───────────────────────────────────────────────────
+    # ── ROI ───────────────────────────────────────────────────────────
     x0, y0, hbin, vbin = 0, 0, 1, 1
     if roi is not None:
         x0   = int(roi[0])
@@ -108,78 +124,108 @@ def save_spe(
         hbin = int(roi[4]) if len(roi) > 4 else 1
         vbin = int(roi[5]) if len(roi) > 5 else 1
 
-    # ── 헤더 (4100 bytes) ──────────────────────────────────────────────
+    # ── 헤더 (4100 bytes) ─────────────────────────────────────────────
     header = bytearray(4100)
     footer_offset = 4100 + nframes * frame_bytes
     struct.pack_into("<H", header, 42,   min(width,  65535))
     struct.pack_into("<H", header, 656,  min(height, 65535))
     struct.pack_into("<h", header, 108,  dtype_code)
     struct.pack_into("<i", header, 1446, nframes)
-    struct.pack_into("<f", header, 1992, 3.0)          # SPE version
+    struct.pack_into("<f", header, 1992, 3.0)
     struct.pack_into("<Q", header, 678,  footer_offset)
 
     created_str = created or datetime.now().astimezone().isoformat()
-    cam_name = camera_name or "Camera1"
+    cam_name  = camera_name or "Camera1"
     cam_model = camera_model or cam_name
 
-    # ── 픽셀 크기 XML ──────────────────────────────────────────────────
-    pixel_xml = ""
-    if isinstance(pixel_size_um, (tuple, list)) and len(pixel_size_um) >= 2:
-        pixel_xml = (
-            "<Pixel>"
-            f"<Width>{float(pixel_size_um[0]):.6f}</Width>"
-            f"<Height>{float(pixel_size_um[1]):.6f}</Height>"
-            "</Pixel>"
+    # ── readout_ports_used: adc_info와 별도 파라미터 중 우선순위 ──────
+    _ports = readout_ports_used
+    if _ports is None and adc_info:
+        _ports = adc_info.get("readout_ports_used")
+
+    # ── Sensor Information XML ────────────────────────────────────────
+    sensor_info_xml = ""
+    has_sensor_info = any(v is not None for v in (
+        sensor_name, sensor_type, sensor_characteristics, pixel_size_um
+    ))
+    if has_sensor_info:
+        pixel_info_xml = ""
+        if isinstance(pixel_size_um, (tuple, list)) and len(pixel_size_um) >= 2:
+            pixel_info_xml = (
+                "<Pixel>"
+                f'<Width r:readOnly="true">{float(pixel_size_um[0]):.6f}</Width>'
+                f'<Height r:readOnly="true">{float(pixel_size_um[1]):.6f}</Height>'
+                "</Pixel>"
+            )
+        sensor_info_xml = (
+            "<Information>"
+            f'{_xml_tag("SensorName", sensor_name, "r:readOnly=\"true\"")}'
+            f'{_xml_tag("CcdCharacteristics", sensor_characteristics, "r:readOnly=\"true\"")}'
+            f'{_xml_tag("Type", sensor_type, "r:readOnly=\"true\"")}'
+            f"{pixel_info_xml}"
+            "</Information>"
         )
 
-    # ── 온도 XML ───────────────────────────────────────────────────────
-    temp_xml = ""
+    # ── Sensor Temperature XML ────────────────────────────────────────
+    temp_inner_xml = ""
     if any(v is not None for v in (temperature_reading_c, temperature_setpoint_c, temperature_status)):
         reading_xml = (
             f'<Reading r:readOnly="true">{float(temperature_reading_c):.4f}</Reading>'
             if temperature_reading_c is not None else ""
         )
-        temp_xml = (
-            "<Sensor>"
-            f"{_xml_tag('SensorName', sensor_name)}"
-            f"{_xml_tag('CcdCharacteristics', sensor_characteristics)}"
+        temp_inner_xml = (
             "<Temperature>"
             f"{_xml_tag('SetPoint', temperature_setpoint_c)}"
             f"{reading_xml}"
-            f"{_xml_tag('SensorTemperature', temperature_status)}"
+            f"{_xml_tag('Status', temperature_status, 'r:readOnly=\"true\"')}"
             "</Temperature>"
-            "</Sensor>"
         )
 
-    # ── ADC XML ────────────────────────────────────────────────────────
-    adc_xml = ""
-    if adc_info:
-        adc_xml = (
-            "<ADC>"
-            f"{_xml_tag('Quality', adc_info.get('adc_quality'))}"
-            f"{_xml_tag('Speed', adc_info.get('adc_speed'))}"
-            f"{_xml_tag('ReadoutRate', readout_rate_mhz)}"
-            f"{_xml_tag('AnalogGain', adc_info.get('adc_analog_gain'))}"
-            f"{_xml_tag('BitDepth', adc_info.get('bit_depth'))}"
-            f"{_xml_tag('ReadoutPortsUsed', adc_info.get('readout_ports_used'))}"
-            "</ADC>"
-        )
+    sensor_xml = ""
+    if sensor_info_xml or temp_inner_xml:
+        sensor_xml = f"<Sensor>{sensor_info_xml}{temp_inner_xml}</Sensor>"
 
-    roi_xml = (
-        "<ReadoutControl><RegionsOfInterest><CustomRegions>"
+    # ── ShutterTiming XML ─────────────────────────────────────────────
+    shutter_xml = (
+        "<ShutterTiming>"
+        f'<ExposureTime type="Double">{float(exposure_ms):.6f}</ExposureTime>'
+        "<TimeUnit>ms</TimeUnit>"
+        f"{_xml_tag('Mode', shutter_mode)}"
+        f"{_xml_tag('OpeningDelay', shutter_opening_delay_ms)}"
+        f"{_xml_tag('ClosingDelay', shutter_closing_delay_ms)}"
+        "</ShutterTiming>"
+    )
+
+    # ── ReadoutControl XML ────────────────────────────────────────────
+    roi_regions_xml = (
+        "<RegionsOfInterest><CustomRegions>"
         "<RegionOfInterest>"
         f"<X>{x0}</X><Y>{y0}</Y><Width>{width}</Width><Height>{height}</Height>"
         f"<XBinning>{hbin}</XBinning><YBinning>{vbin}</YBinning>"
         "</RegionOfInterest>"
-        "</CustomRegions></RegionsOfInterest></ReadoutControl>"
+        "</CustomRegions></RegionsOfInterest>"
+    )
+    readout_xml = (
+        "<ReadoutControl>"
+        f"{_xml_tag('Mode', readout_mode)}"
+        f"{_xml_tag('PortsUsed', _ports)}"
+        f"{_xml_tag('VerticalShiftRate', vertical_shift_rate)}"
+        f"{roi_regions_xml}"
+        "</ReadoutControl>"
     )
 
-    exposure_xml = (
-        "<ShutterTiming>"
-        f'<ExposureTime type="Double">{float(exposure_ms):.6f}</ExposureTime>'
-        "<TimeUnit>ms</TimeUnit>"
-        "</ShutterTiming>"
-    )
+    # ── Adc XML ───────────────────────────────────────────────────────
+    adc_xml = ""
+    if adc_info:
+        adc_xml = (
+            "<Adc>"
+            f"{_xml_tag('Speed', adc_info.get('adc_speed'))}"
+            f"{_xml_tag('BitDepth', adc_info.get('bit_depth'), 'r:readOnly=\"true\"')}"
+            f"{_xml_tag('AnalogGain', adc_info.get('adc_analog_gain'))}"
+            f"{_xml_tag('Quality', adc_info.get('adc_quality'))}"
+            f"{_xml_tag('ReadoutRate', readout_rate_mhz, 'r:readOnly=\"true\"')}"
+            "</Adc>"
+        )
 
     # ── Calibrations XML ──────────────────────────────────────────────
     calibrations_xml = (
@@ -193,7 +239,6 @@ def save_spe(
     # ── GeneralInformation XML ────────────────────────────────────────
     creator_attr = f' creator="{escape(creator)}"' if creator else ""
 
-    # extra_metadata → <CustomData> 섹션
     custom_xml = ""
     if extra_metadata:
         def _dict_to_xml(d: dict) -> str:
@@ -215,7 +260,7 @@ def save_spe(
         "</GeneralInformation>"
     )
 
-    # ── Origin attributes ─────────────────────────────────────────────
+    # ── Origin 속성 ───────────────────────────────────────────────────
     origin_creator_attr = f' creator="{escape(creator)}"' if creator else ""
     origin_company_attr = f' softwareCompany="{escape(software_company)}"' if software_company else ""
 
@@ -243,11 +288,10 @@ def save_spe(
         f' model="{escape(cam_model)}"'
         f' serialNumber="{escape(camera_serial)}"'
         f' computerInterface="{escape(camera_interface)}">'
-        f"{exposure_xml}"
-        f"{roi_xml}"
-        f"{pixel_xml}"
+        f"{sensor_xml}"
+        f"{shutter_xml}"
+        f"{readout_xml}"
         f"{adc_xml}"
-        f"{temp_xml}"
         "</Camera>"
         "</Cameras></Devices></Experiment>"
         "</Origin></DataHistory></DataHistories>"

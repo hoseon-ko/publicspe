@@ -919,12 +919,15 @@ class LiveTab(QMainWindow):
                     exp_ms = self._cam.get_exposure_ms()
                 except Exception:
                     pass
-            save_spe(
-                path, [raw],
-                exposure_ms=exp_ms,
-                camera_name=cam_name,
-                software="SpeAnalyze-Live",
-            )
+            if isinstance(self._cam, PicamCamera):
+                self._cam.save_as_spe(path, [raw], exposure_ms=exp_ms)
+            else:
+                save_spe(
+                    path, [raw],
+                    exposure_ms=exp_ms,
+                    camera_name=cam_name,
+                    software="SpeAnalyze-Live",
+                )
             self._log(f"🔬 SPE 저장: {path}")
         except Exception as e:
             self._log(f"❌ SPE 저장 실패: {e}")

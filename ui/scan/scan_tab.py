@@ -28,6 +28,10 @@ from PyQt6.QtGui import QIcon, QPixmap, QImage
 
 from core.image_processor import ImageProcessor, TemporalMode
 from core.spe_writer import save_spe
+try:
+    from core.camera.picamp import PicamCamera as _PicamCamera
+except Exception:
+    _PicamCamera = None
 from ui.image_viewer import ImageViewer
 from ui.plot_panel import PlotPanel
 
@@ -328,38 +332,46 @@ class _ScanWorker(QThread):
 
             # ── SPE 저장 (raw 데이터 + XML 메타데이터) ─────────────────
             spe_path = os.path.join(self._save_dir, stem + ".spe")
+            _scan_extra = {
+                "Scan": {
+                    "ScanName":    self._scan_name,
+                    "StepIndex":   str(i + 1),
+                    "TotalSteps":  str(self._num_steps),
+                    "MotorAxis":   f"M{self._motor_num}",
+                    "StepsPerMove": str(self._steps_move),
+                },
+                "MotorPositions": {
+                    "M1": str(_pos[0]),
+                    "M2": str(_pos[1]),
+                    "M3": str(_pos[2]),
+                    "M4": str(_pos[3]),
+                },
+                "ImageAnalysis": {
+                    "CentroidX":  _cx,
+                    "CentroidY":  _cy,
+                    "Brightness": str(result.brightness),
+                    "SNR":        f"{result.snr:.3f}",
+                    "FrameMean":  f"{result.frame_mean:.3f}",
+                    "Saturated":  "true" if result.saturated else "false",
+                    "SatRatio":   f"{result.sat_ratio:.6f}",
+                },
+            }
             try:
-                save_spe(
-                    spe_path,
-                    raw,
-                    camera_name=cam_name,
-                    exposure_ms=exp_ms,
-                    creator="ScanTab",
-                    extra_metadata={
-                        "Scan": {
-                            "ScanName":    self._scan_name,
-                            "StepIndex":   str(i + 1),
-                            "TotalSteps":  str(self._num_steps),
-                            "MotorAxis":   f"M{self._motor_num}",
-                            "StepsPerMove": str(self._steps_move),
-                        },
-                        "MotorPositions": {
-                            "M1": str(_pos[0]),
-                            "M2": str(_pos[1]),
-                            "M3": str(_pos[2]),
-                            "M4": str(_pos[3]),
-                        },
-                        "ImageAnalysis": {
-                            "CentroidX":  _cx,
-                            "CentroidY":  _cy,
-                            "Brightness": str(result.brightness),
-                            "SNR":        f"{result.snr:.3f}",
-                            "FrameMean":  f"{result.frame_mean:.3f}",
-                            "Saturated":  "true" if result.saturated else "false",
-                            "SatRatio":   f"{result.sat_ratio:.6f}",
-                        },
-                    },
-                )
+                # PicamCamera는 저장 전에 카메라에서 직접 메타데이터를 읽는다
+                if _PicamCamera is not None and isinstance(self._cam, _PicamCamera):
+                    self._cam.save_as_spe(
+                        spe_path, raw,
+                        exposure_ms=exp_ms,
+                        extra_metadata=_scan_extra,
+                    )
+                else:
+                    save_spe(
+                        spe_path, raw,
+                        camera_name=cam_name,
+                        exposure_ms=exp_ms,
+                        creator="ScanTab",
+                        extra_metadata=_scan_extra,
+                    )
             except Exception as e:
                 self.log_message.emit(f"⚠️ SPE 저장 오류: {e}")
                 spe_path = ""
