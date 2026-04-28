@@ -1,11 +1,9 @@
-import struct
 import time
 import re
 import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-from xml.sax.saxutils import escape
 
 import numpy as np
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
@@ -20,6 +18,7 @@ except Exception as e:
     _PICAM_IMPORT_ERROR = str(e)
 
 from core.camera.base import BaseCamera, CameraCapabilities, NotSupportedError
+from core.spe_writer import save_spe as _spe_writer_save_spe
 
 
 # 모델별로 속성명이 달라질 수 있어 alias 목록을 둔다.
@@ -29,21 +28,6 @@ ADC_ATTR_ALIASES = {
     "adc_analog_gain": ["Adc Analog Gain", "ADC Analog Gain"],
     "bit_depth": ["Bit Depth", "Adc Bit Depth", "ADC Bit Depth"],
     "readout_ports_used": ["Readout Ports Used", "Readout Port Count"],
-}
-
-# SPE 3.0 datatype codes (same as spe_loader/spe2py)
-_SPE_DTYPE_CODE: Dict = {
-    "float32": 0,
-    "int32":   1,
-    "int16":   2,
-    "uint16":  3,
-    "uint32":  8,
-}
-
-_SPE_PIXEL_FORMAT: Dict[str, str] = {
-    "float32": "MonochromeFloating32",
-    "uint16": "MonochromeUnsigned16",
-    "uint32": "MonochromeUnsigned32",
 }
 
 __all__ = [
@@ -98,15 +82,6 @@ def _set_attr_by_aliases(cam, aliases: List[str], value: Any) -> Tuple[str, Any]
         except Exception:
             pass
     return "", None
-
-
-def _xml_tag(tag: str, value: Any) -> str:
-    if value is None:
-        return ""
-    text = str(value)
-    if text == "":
-        return ""
-    return f"<{tag}>{escape(text)}</{tag}>"
 
 
 def _parse_first_float(value: Any) -> Optional[float]:
@@ -501,11 +476,10 @@ class PicamCameraWrapper:
         exposure_ms: Optional[float] = None,
         roi=None,
         dtype=None,
-        temperature_c: Optional[float] = None,
-        adc_info: Optional[Dict[str, Any]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        **_,
     ) -> Path:
-        """SPE 3.0 포맷으로 저장한다. 생략한 메타데이터는 현재 카메라 값으로 자동 보완한다."""
+        """저장 전 카메라에서 가능한 모든 정보를 읽고 spe_writer.save_spe로 저장한다."""
+        # ── 노출 / ROI ────────────────────────────────────────────────
         if exposure_ms is None:
             try:
                 exposure_ms = self.get_exposure_ms()
@@ -516,33 +490,82 @@ class PicamCameraWrapper:
                 roi = self.get_roi()
             except Exception:
                 pass
-        if temperature_c is None:
-            try:
-                reading, _, _ = self.read_temperature_block()
-                if reading is not None:
-                    temperature_c = float(reading)
-            except Exception:
-                pass
-        if adc_info is None:
-            try:
-                cmap = self.get_adc_candidate_map()
-                adc_info = {
-                    key: self.get_attr_safe(meta["attribute"])
-                    for key, meta in cmap.items()
-                    if meta["attribute"]
-                }
-            except Exception:
-                pass
-        if metadata is None:
-            metadata = self.get_spe_metadata(exposure_ms=exposure_ms, temperature_c=temperature_c, adc_info=adc_info)
-        return _save_as_spe(
+
+        # ── 카메라 기본 정보 ──────────────────────────────────────────
+        cam = _require_open_camera(self)
+        cam_name = cam_model = cam_serial = cam_iface = ""
+        pixel_size_um = None
+        try:
+            info = cam.get_device_info()
+            cam_name   = str(getattr(info, "model", "") or "")
+            cam_model  = cam_name
+            cam_serial = str(getattr(info, "serial_number", "") or "")
+            cam_iface  = str(getattr(info, "interface", "") or "")
+        except Exception:
+            pass
+        try:
+            pw, ph = cam.get_pixel_size()
+            pixel_size_um = (pw * 1e6, ph * 1e6)
+        except Exception:
+            pass
+
+        # ── 센서 정보 ─────────────────────────────────────────────────
+        sensor_name = self.get_attr_safe("Sensor Name", default=None)
+        sensor_chars_parts: List[str] = []
+        sensor_type = self.get_attr_safe("Sensor Type", default=None)
+        if sensor_type:
+            sensor_chars_parts.append(str(sensor_type))
+
+        # ── 온도 ─────────────────────────────────────────────────────
+        temp_reading = temp_setpoint = temp_status = None
+        try:
+            temp_reading, temp_setpoint, temp_status = self.read_temperature_block()
+        except Exception:
+            pass
+
+        # ── ADC ───────────────────────────────────────────────────────
+        adc_info: Optional[Dict[str, Any]] = None
+        readout_rate_mhz: Optional[float] = None
+        try:
+            cmap = self.get_adc_candidate_map()
+            adc_info = {
+                key: self.get_attr_safe(meta["attribute"])
+                for key, meta in cmap.items()
+                if meta["attribute"]
+            }
+            ports_used = adc_info.get("readout_ports_used")
+            if ports_used is not None:
+                try:
+                    sensor_chars_parts.append(
+                        "Multiport" if int(ports_used) > 1 else "SinglePort"
+                    )
+                except Exception:
+                    pass
+            readout_rate_mhz = _parse_first_float(adc_info.get("adc_speed"))
+        except Exception:
+            pass
+
+        sensor_chars = ", ".join(sensor_chars_parts) or None
+
+        return _spe_writer_save_spe(
             path, frames,
-            exposure_ms=exposure_ms,
+            exposure_ms=float(exposure_ms),
             roi=roi,
             dtype=dtype,
-            temperature_c=temperature_c,
+            camera_name=cam_name or "Picam",
+            camera_model=cam_model or cam_name or "Picam",
+            camera_serial=cam_serial,
+            camera_interface=cam_iface,
+            pixel_size_um=pixel_size_um,
+            temperature_reading_c=temp_reading,
+            temperature_setpoint_c=temp_setpoint,
+            temperature_status=temp_status,
+            sensor_name=sensor_name,
+            sensor_characteristics=sensor_chars,
             adc_info=adc_info,
-            metadata=metadata,
+            readout_rate_mhz=readout_rate_mhz,
+            software="picamp",
+            software_version="0.1",
         )
 
     def get_spe_metadata(
@@ -1093,174 +1116,7 @@ def snap_image(cam_or_wrapper):
     return cam.snap()
 
 
-def _save_as_spe(
-    path,
-    frames,
-    *,
-    exposure_ms: float = 0.0,
-    roi=None,
-    dtype=None,
-    temperature_c: Optional[float] = None,
-    adc_info: Optional[Dict[str, Any]] = None,
-    metadata: Optional[Dict[str, Any]] = None,
-) -> Path:
-    """
-    SPE 3.0 포맷으로 이미지를 저장한다 (LightField / spe_loader 호환).
-
-    Parameters
-    ----------
-    path        : 저장 경로 (str or Path), .spe 확장자 권장
-    frames      : ndarray (H, W) 또는 (N, H, W), 또는 list of ndarray
-    exposure_ms : 노출 시간 (ms), 메타데이터에 기록
-    roi         : (hstart, hend, vstart, vend, hbin, vbin) — get_roi() 반환값
-    dtype       : 저장 데이터 타입 (None=원본 유지)
-
-    Returns
-    -------
-    저장된 파일의 Path
-    """
-    if isinstance(frames, np.ndarray):
-        frames = [frames[i] for i in range(frames.shape[0])] if frames.ndim == 3 else [frames]
-    frames = list(frames)
-    nframes = len(frames)
-    if nframes == 0:
-        raise ValueError("frames is empty")
-
-    frame0 = np.asarray(frames[0])
-    height, width = frame0.shape
-
-    out_dtype = np.dtype(dtype) if dtype is not None else frame0.dtype
-    dtype_code = _SPE_DTYPE_CODE.get(out_dtype.name, 3)
-    if out_dtype.name not in _SPE_DTYPE_CODE:
-        out_dtype = np.dtype("uint16")
-        dtype_code = 3
-    pixel_format = _SPE_PIXEL_FORMAT.get(out_dtype.name, "MonochromeUnsigned16")
-
-    bytes_per_px = out_dtype.itemsize
-    frame_bytes = width * height * bytes_per_px
-
-    x0, y0, hbin, vbin = 0, 0, 1, 1
-    if roi is not None:
-        x0   = int(roi[0])
-        y0   = int(roi[2])
-        hbin = int(roi[4]) if len(roi) > 4 else 1
-        vbin = int(roi[5]) if len(roi) > 5 else 1
-
-    header = bytearray(4100)
-    footer_offset = 4100 + nframes * frame_bytes
-    struct.pack_into("<H", header, 42, min(width, 65535))
-    struct.pack_into("<H", header, 656, min(height, 65535))
-    struct.pack_into("<h", header, 108, dtype_code)
-    struct.pack_into("<i", header, 1446, nframes)
-    struct.pack_into("<f", header, 1992, 3.0)
-    struct.pack_into("<Q", header, 678, footer_offset)
-
-    metadata = dict(metadata or {})
-    created_str = metadata.get("created") or datetime.now().astimezone().isoformat()
-    camera_name = metadata.get("camera_model") or "Camera1"
-    pixel_size_um = metadata.get("pixel_size_um")
-    pixel_xml = ""
-    if isinstance(pixel_size_um, (tuple, list)) and len(pixel_size_um) >= 2:
-        pixel_xml = (
-            "<Pixel>"
-            f'<Width>{float(pixel_size_um[0]):.6f}</Width>'
-            f'<Height>{float(pixel_size_um[1]):.6f}</Height>'
-            "</Pixel>"
-        )
-
-    temperature_reading_c = metadata.get("temperature_reading_c", temperature_c)
-    temperature_setpoint_c = metadata.get("temperature_setpoint_c")
-    temperature_status = metadata.get("temperature_status")
-    if temperature_reading_c is not None or temperature_setpoint_c is not None or temperature_status is not None:
-        reading_xml = (
-            f'<Reading r:readOnly="true">{float(temperature_reading_c):.4f}</Reading>'
-            if temperature_reading_c is not None else ""
-        )
-        temp_xml = (
-            "<Sensor>"
-            f'{_xml_tag("SensorName", metadata.get("sensor_name"))}'
-            f'{_xml_tag("CcdCharacteristics", metadata.get("sensor_characteristics"))}'
-            "<Temperature>"
-            f'{_xml_tag("SetPoint", temperature_setpoint_c)}'
-            f"{reading_xml}"
-            f'{_xml_tag("SensorTemperature", temperature_status)}'
-            "</Temperature>"
-            "</Sensor>"
-        )
-    else:
-        temp_xml = ""
-
-    adc_xml = ""
-    if adc_info:
-        readout_rate_mhz = metadata.get("readout_rate_mhz")
-        adc_xml = (
-            "<ADC>"
-            f'{_xml_tag("Quality", adc_info.get("adc_quality"))}'
-            f'{_xml_tag("Speed", adc_info.get("adc_speed"))}'
-            f'{_xml_tag("ReadoutRate", readout_rate_mhz)}'
-            f'{_xml_tag("AnalogGain", adc_info.get("adc_analog_gain"))}'
-            f'{_xml_tag("BitDepth", adc_info.get("bit_depth"))}'
-            f'{_xml_tag("ReadoutPortsUsed", adc_info.get("readout_ports_used"))}'
-            "</ADC>"
-        )
-
-    roi_xml = (
-        "<ReadoutControl><RegionsOfInterest><CustomRegions>"
-        '<RegionOfInterest>'
-        f'<X>{x0}</X><Y>{y0}</Y><Width>{width}</Width><Height>{height}</Height>'
-        f'<XBinning>{hbin}</XBinning><YBinning>{vbin}</YBinning>'
-        '</RegionOfInterest>'
-        "</CustomRegions></RegionsOfInterest></ReadoutControl>"
-    )
-
-    exposure_block_xml = (
-        "<ShutterTiming>"
-        f'<ExposureTime>{float(metadata.get("exposure_time", exposure_ms)):.6f}</ExposureTime>'
-        f'<TimeUnit>{escape(str(metadata.get("exposure_time_unit", "ms")))}</TimeUnit>'
-        "</ShutterTiming>"
-    )
-
-    xml_footer = (
-        '<?xml version="1.0" encoding="utf-8"?>'
-        '<SpeFormat version="3.0" xmlns:r="http://www.teledynevisionsolutions.com/spe/readonly">'
-        "<DataFormat>"
-        f'<DataBlock type="Frame" count="{nframes}" size="{frame_bytes}" stride="{frame_bytes}" pixelFormat="{metadata.get("pixel_format", pixel_format)}">'
-        f'<DataBlock type="Region" count="1" size="{frame_bytes}" stride="{frame_bytes}" width="{width}" height="{height}"/>'
-        "</DataBlock>"
-        "</DataFormat>"
-        "<DataHistories><DataHistory><Origin "
-        f'created="{escape(created_str)}" '
-        f'software="{escape(str(metadata.get("software", "picamp")))}" '
-        f'softwareVersion="{escape(str(metadata.get("software_version", "0.1")))}">'
-        "<Experiment><Devices><Cameras>"
-        f'<Camera name="{escape(str(camera_name))}" '
-        f'model="{escape(str(metadata.get("camera_model", camera_name)))}" '
-        f'serialNumber="{escape(str(metadata.get("camera_serial", "")))}" '
-        f'computerInterface="{escape(str(metadata.get("camera_interface", "")))}">'
-        f"{exposure_block_xml}"
-        f"{roi_xml}"
-        f"{pixel_xml}"
-        f"{adc_xml}"
-        f"{temp_xml}"
-        f'{_xml_tag("TriggerResponse", metadata.get("trigger_response"))}'
-        "</Camera>"
-        "</Cameras></Devices></Experiment>"
-        "</Origin></DataHistory></DataHistories>"
-        "</SpeFormat>"
-    )
-
-    out_path = Path(path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(out_path, "wb") as f:
-        f.write(bytes(header))
-        for frame in frames:
-            f.write(np.asarray(frame, dtype=out_dtype).tobytes())
-        f.write(xml_footer.encode("utf-8"))
-
-    return out_path
-
-
-save_as_spe = _save_as_spe
+save_as_spe = _spe_writer_save_spe
 
 
 def acquire_images(
