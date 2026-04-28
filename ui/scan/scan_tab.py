@@ -597,15 +597,6 @@ class ScanTab(QWidget):
         self.spin_max_frames.setToolTip("메모리 보호: 초과 시 가장 오래된 프레임부터 삭제")
         gf.addLayout(_row("최대 보관:", self.spin_max_frames))
 
-        self.chk_evict_save = QCheckBox("제거 시 NPY 저장")
-        self.chk_evict_save.setChecked(False)
-        self.chk_evict_save.setToolTip(
-            "상한 초과로 제거되는 프레임을 .npy (uint16 raw) 로 저장 디렉터리에 저장"
-        )
-        self.chk_evict_save.setStyleSheet(
-            "QCheckBox { color:#a0b0d0; font-family:'Courier New'; font-size:11px; }"
-        )
-        gf.addWidget(self.chk_evict_save)
 
         # Frame A / B 선택
         ab_row = QHBoxLayout()
@@ -824,12 +815,10 @@ class ScanTab(QWidget):
         pos_snapshot = [p if p is not None else 0 for p in positions]
         self._image_list.append((idx, result.raw.copy(), pos_snapshot))
         if len(self._image_list) > max_frames:
-            evicted_idx, evicted_raw, evicted_pos = self._image_list.pop(0)
+            evicted_idx, _, _ = self._image_list.pop(0)
             self._frame_list.takeItem(0)
             if len(self._image_list) == max_frames:
-                self._log(f"⚠️ 프레임 상한 {max_frames}개 도달 — 오래된 프레임 제거 중")
-            if self.chk_evict_save.isChecked():
-                self._save_evicted(evicted_idx, evicted_raw, evicted_pos)
+                self._log(f"⚠️ 프레임 상한 {max_frames}개 도달 — RAM에서 제거 (SPE는 디스크에 유지)")
 
         # 프레임 스핀박스 최대값 갱신
         n = len(self._image_list) - 1
@@ -929,34 +918,6 @@ class ScanTab(QWidget):
         item.setTextAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom)
         self._frame_list.addItem(item)
         self._frame_list.scrollToItem(item)
-
-    def _save_evicted(self, step_idx: int, raw: np.ndarray, pos: list):
-        """상한 초과로 메모리에서 제거되는 프레임을 SPE 파일로 저장."""
-        save_dir  = self.edit_save_dir.text().strip() or "Scan_Data"
-        scan_name = self.edit_scan_name.text().strip() or "Scan"
-        os.makedirs(save_dir, exist_ok=True)
-        ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
-        path = os.path.join(save_dir, f"{scan_name}_evicted_step{step_idx+1:04d}_{ts}.spe")
-        try:
-            save_spe(
-                path, raw,
-                camera_name="evicted",
-                creator="ScanTab/evict",
-                extra_metadata={
-                    "Eviction": {
-                        "StepIndex": str(step_idx + 1),
-                        "Reason": "frame_list_overflow",
-                        "MaxFrames": str(self.spin_max_frames.value()),
-                    },
-                    "MotorPositions": {
-                        "M1": str(pos[0]), "M2": str(pos[1]),
-                        "M3": str(pos[2]), "M4": str(pos[3]),
-                    },
-                },
-            )
-            self._log(f"💾 제거 프레임 SPE 저장: {os.path.basename(path)}")
-        except Exception as e:
-            self._log(f"⚠️ 제거 프레임 저장 실패: {e}")
 
     def _on_frame_list_select(self, row: int):
         """리스트에서 프레임 선택 → 이미지뷰어 + 스핀박스 동기화."""
