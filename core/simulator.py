@@ -92,28 +92,32 @@ class SimMotorPanel:
       - move(motor_num, steps) -> bool
       - get_positions() -> list
 
-    물리 모델:
-      M1: 오른쪽 대각선  (+dx, +dy)   bwd_weight = 0.75
-      M2: 위              (0,   -dy)   bwd_weight = 0.90
-      M3: 왼쪽 대각선    (-dx, +dy)   bwd_weight = 0.80
-      M4: 효과 없음                   bwd_weight = 1.00
+    물리 모델 — 실제 MotorPanel 의 weight 구조를 그대로 복제:
+      actual_steps = requested_steps * fwd_weight  (전진, steps > 0)
+      actual_steps = requested_steps * bwd_weight  (후진, steps < 0)
+      displacement = actual_steps * _SCALE * direction_vector
 
-    전진 px/step 은 모든 모터 동일(5e-3 px/step), 방향만 다름.
-    후진은 전진 대비 bwd_weight 비율만큼 이동 → 비대칭 재현.
+    기본값 (의도적으로 비대칭):
+          fwd_w   bwd_w
+      M1:  1.20   0.75   → 전진이 후진보다 큼
+      M2:  1.00   0.90   → 후진이 약간 작음
+      M3:  0.90   0.80   → 둘 다 1 미만이지만 서로 다름
+      M4:  1.00   1.00   → 대칭 (기준축)
     """
 
-    _SCALE = 5e-3   # px per step (전진)
+    _SCALE = 5e-3   # 기준 px / step
 
-    # 전진 방향 단위벡터 (dx, dy)
-    _FWD_DIR = {
-        1: ( 1.0,  0.6),   # M1: 오른쪽 + 약간 아래
+    # 전진 방향 단위벡터 (dx, dy) — 정규화되지 않아도 됨
+    _DIR = {
+        1: ( 1.0,  0.6),   # M1: 오른쪽 대각선
         2: ( 0.0, -1.0),   # M2: 위
-        3: (-1.0,  0.6),   # M3: 왼쪽 + 약간 아래
+        3: (-1.0,  0.6),   # M3: 왼쪽 대각선
         4: ( 0.0,  0.0),   # M4: 무효
     }
 
-    # 후진 가중치 (1.0 = 완전 대칭)
-    _BWD_WEIGHT = {1: 0.75, 2: 0.90, 3: 0.80, 4: 1.00}
+    # 전진 / 후진 가중치 — 둘 다 독립적
+    _FWD_W = {1: 1.20, 2: 1.00, 3: 0.90, 4: 1.00}
+    _BWD_W = {1: 0.75, 2: 0.90, 3: 0.80, 4: 1.00}
 
     def __init__(self, cam: SimCamera):
         self._cam = cam
@@ -127,15 +131,12 @@ class SimMotorPanel:
     def move(self, motor_num: int, steps: int) -> bool:
         if motor_num < 1 or motor_num > 4:
             return False
-        vx, vy = self._FWD_DIR[motor_num]
-        if steps >= 0:
-            dx = vx * self._SCALE * steps
-            dy = vy * self._SCALE * steps
-        else:
-            w  = self._BWD_WEIGHT[motor_num]
-            dx = vx * self._SCALE * steps * w   # steps < 0 → 반대 방향, 스케일 축소
-            dy = vy * self._SCALE * steps * w
-        self._pos[motor_num - 1] += steps
+        w = self._FWD_W[motor_num] if steps >= 0 else self._BWD_W[motor_num]
+        vx, vy = self._DIR[motor_num]
+        actual = steps * w                     # 실제로 모터에 전달되는 스텝
+        dx = vx * self._SCALE * actual
+        dy = vy * self._SCALE * actual
+        self._pos[motor_num - 1] += steps      # 위치 카운터는 요청값 기준
         self._cam._apply_move(dx, dy)
         return True
 
