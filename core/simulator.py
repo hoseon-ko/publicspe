@@ -48,8 +48,9 @@ class SimCamera:
 
     # ── 내부 API (SimMotorPanel 전용) ─────────────────────────────────
     def _apply_move(self, dx: float, dy: float):
-        self._cx = float(np.clip(self._cx + dx, 5, self.WIDTH  - 6))
-        self._cy = float(np.clip(self._cy + dy, 5, self.HEIGHT - 6))
+        # Ensure the direction of movement aligns with the motor steps
+        self._cx = float(np.clip(self._cx - dx, 5, self.WIDTH  - 6))
+        self._cy = float(np.clip(self._cy - dy, 5, self.HEIGHT - 6))
 
     # ── 공개 API (ScanTab / CalibWorker 인터페이스) ───────────────────
     def snap(self) -> np.ndarray:

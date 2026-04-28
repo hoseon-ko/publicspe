@@ -327,10 +327,11 @@ class LiveTab(QMainWindow):
 
         self.log_display = QTextEdit()
         self.log_display.setReadOnly(True)
-        self.log_display.setStyleSheet("""
-            QTextEdit { background: #080e1e; border: none;
-                color: #00cc88; font-family: 'Courier New'; font-size: 11px; }
+        self.log_display.setStyleSheet(f"""
+            QTextEdit {{ background: #080e1e; border: none;
+                color: #00cc88; font-family: 'Courier New'; font-size: {{self.log_font_size}}px; }}
         """)
+        self.log_font_size = 12  # Default font size for the log display
         log_layout.addWidget(self.log_display, 1)
 
         self.dock_log = QDockWidget("🖥  System Log", self)
