@@ -69,8 +69,10 @@ class TemporalMode(IntEnum):
 
 class CentroidMode(IntEnum):
     """Centroid 계산 방식."""
-    BINARY   = 0   # 이진화 이미지 moments (임계값에 민감)
-    WEIGHTED = 1   # intensity 가중 centroid (더 정확)
+    BINARY       = 0   # 이진화 이미지 moments (임계값에 민감)
+    WEIGHTED     = 1   # intensity 가중 centroid (더 정확)
+    GAUSSIAN_FIT = 2   # 2D Gaussian 피팅 — sub-pixel 정밀도 (scipy 필요)
+    PEAK_MAX     = 3   # 최대값 위치 — 빠름, 노이즈에 약함
 
 
 # ── 결과 데이터 클래스 ────────────────────────────────────────────────────────
@@ -86,6 +88,8 @@ class ProcessedFrame:
     centroid_y:   Optional[float] = None
     brightness:   int   = 0
     has_centroid: bool  = False
+    fit_sigma_x:  float = 0.0   # Gaussian fit X 폭 (pixel), GAUSSIAN_FIT 모드 전용
+    fit_sigma_y:  float = 0.0   # Gaussian fit Y 폭 (pixel)
 
     # 포화 감지
     saturated:    bool  = False
@@ -366,6 +370,7 @@ class ImageProcessor:
         cx = cy = None
         brightness = 0
         has_centroid = False
+        fit_sigma_x = fit_sigma_y = 0.0
         h, w = raw.shape[:2]
 
         if self.centroid_enabled:
@@ -386,9 +391,24 @@ class ImageProcessor:
                     cy = float((ys * filtered).sum() / total)
                     has_centroid = True
 
+            elif self.centroid_mode == CentroidMode.PEAK_MAX:
+                idx = int(filtered.argmax())
+                cy, cx = divmod(idx, w)
+                cx, cy = float(cx), float(cy)
+                has_centroid = True
+
+            elif self.centroid_mode == CentroidMode.GAUSSIAN_FIT:
+                cx, cy, fit_sigma_x, fit_sigma_y = self._gaussian_fit(filtered, h, w)
+                has_centroid = cx is not None
+                if not has_centroid:  # 피팅 실패 시 peak max fallback
+                    idx = int(filtered.argmax())
+                    cy, cx = divmod(idx, w)
+                    cx, cy = float(cx), float(cy)
+                    has_centroid = True
+
             if has_centroid:
-                iy = min(int(cy), h - 1)
-                ix = min(int(cx), w - 1)
+                iy = min(int(round(cy)), h - 1)
+                ix = min(int(round(cx)), w - 1)
                 brightness = int(display[iy, ix])
 
         return ProcessedFrame(
@@ -399,6 +419,8 @@ class ImageProcessor:
             centroid_y=cy,
             brightness=brightness,
             has_centroid=has_centroid,
+            fit_sigma_x=fit_sigma_x,
+            fit_sigma_y=fit_sigma_y,
             saturated=saturated,
             sat_ratio=sat_ratio,
             frame_mean=frame_mean,
@@ -406,6 +428,41 @@ class ImageProcessor:
             frame_max=frame_max,
             snr=snr,
         )
+
+    @staticmethod
+    def _gaussian_fit(img: np.ndarray, h: int, w: int):
+        """2D Gaussian 피팅. 반환: (cx, cy, sigma_x, sigma_y) 또는 실패 시 (None,)*4."""
+        try:
+            from scipy.optimize import curve_fit
+
+            def _gauss2d(xy, amp, x0, y0, sx, sy, bg):
+                x, y = xy
+                return bg + amp * np.exp(
+                    -((x - x0)**2 / (2*sx**2) + (y - y0)**2 / (2*sy**2))
+                )
+
+            # 초기 추정: 최대값 위치 기준 crop (빠름 + 안정)
+            iy_pk, ix_pk = np.unravel_index(int(img.argmax()), img.shape)
+            half = 30
+            x0c = max(0, ix_pk - half); x1c = min(w, ix_pk + half)
+            y0c = max(0, iy_pk - half); y1c = min(h, iy_pk + half)
+            crop = img[y0c:y1c, x0c:x1c].astype(np.float64)
+
+            yc_g, xc_g = np.mgrid[y0c:y1c, x0c:x1c]
+            xy = (xc_g.ravel(), yc_g.ravel())
+            z  = crop.ravel()
+
+            amp0 = float(crop.max() - crop.min())
+            bg0  = float(crop.min())
+            p0   = [amp0, float(ix_pk), float(iy_pk), 5.0, 5.0, bg0]
+            lo   = [0,    float(x0c),   float(y0c),   0.3, 0.3, -float('inf')]
+            hi   = [float('inf'), float(x1c), float(y1c), half*2, half*2, float('inf')]
+
+            popt, _ = curve_fit(_gauss2d, xy, z, p0=p0,
+                                bounds=(lo, hi), maxfev=2000)
+            return popt[1], popt[2], abs(popt[3]), abs(popt[4])
+        except Exception:
+            return None, None, 0.0, 0.0
 
     def reset_buffer(self) -> None:
         """버퍼, 누적기, EMA, 이전 프레임 모두 초기화."""

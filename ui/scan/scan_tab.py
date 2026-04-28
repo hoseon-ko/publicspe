@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
     QComboBox, QLineEdit, QFileDialog,
     QProgressBar, QTextEdit, QTableWidget,
     QTableWidgetItem, QHeaderView, QScrollArea,
+    QCheckBox,
 )
 
 from core.image_processor import ImageProcessor
@@ -65,6 +66,125 @@ _GRP = """
     }}
     QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 4px; }}
 """
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 캘리브레이션 워커
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _CalibWorker(QThread):
+    """
+    각 모터 단독 전진/후진 → centroid 변위 측정 → 방향벡터 + 가중치 비율 계산.
+
+    결과 dict:
+      {motor_num: {'fwd': {'dx','dy','mag','angle'},
+                   'bwd': {'dx','dy','mag','angle'},
+                   'weight_adj': float}}  # bwd_weight *= weight_adj 로 수정
+    """
+    log_message  = pyqtSignal(str)
+    progress     = pyqtSignal(int, int)
+    result_ready = pyqtSignal(dict)
+
+    def __init__(self, cam, motor_panel, params: dict, parent=None):
+        super().__init__(parent)
+        self._cam         = cam
+        self._motor       = motor_panel
+        self._calib_steps = params["calib_steps"]
+        self._settle_ms   = params["settle_ms"]
+        self._motors      = params["motors"]   # e.g. [1, 2, 3]
+        self._proc        = ImageProcessor()
+        self._proc.centroid_enabled = True
+        self._stop        = False
+
+    def request_stop(self):
+        self._stop = True
+
+    def _snap_cx_cy(self):
+        """snap + centroid 반환. 실패 시 (None, None)."""
+        try:
+            raw = np.asarray(self._cam.snap())
+            r = self._proc.process(raw)
+            return r.centroid_x, r.centroid_y
+        except Exception:
+            return None, None
+
+    def run(self):
+        total = 1 + len(self._motors) * 2  # baseline + N × (fwd + bwd)
+        step  = 0
+
+        # 기준 centroid
+        self.log_message.emit("📍 기준 위치 스냅...")
+        bx, by = self._snap_cx_cy()
+        step += 1; self.progress.emit(step, total)
+        if bx is None:
+            self.log_message.emit("❌ centroid 측정 실패 — 이미지 프로세서 설정 확인")
+            return
+        self.log_message.emit(f"   기준 centroid: ({bx:.2f}, {by:.2f})")
+
+        results = {}
+        for motor_num in self._motors:
+            if self._stop:
+                break
+            res = {}
+            self.log_message.emit(f"── M{motor_num} 캘리브레이션 ──")
+
+            # ── 전진 ──────────────────────────────────────────────────
+            self.log_message.emit(f"  M{motor_num} +{self._calib_steps} steps →")
+            self._motor.move(motor_num, self._calib_steps)
+            self.msleep(self._settle_ms)
+            fx, fy = self._snap_cx_cy()
+            step += 1; self.progress.emit(step, total)
+
+            if fx is not None:
+                dx, dy = fx - bx, fy - by
+                mag    = (dx**2 + dy**2) ** 0.5
+                angle  = float(np.degrees(np.arctan2(dy, dx)))
+                res["fwd"] = {"dx": dx, "dy": dy, "mag": mag, "angle": angle}
+                self.log_message.emit(
+                    f"    Δ({dx:+.2f}, {dy:+.2f})  {mag:.2f}px  {angle:.1f}°"
+                )
+            else:
+                self.log_message.emit("    ❌ centroid 없음")
+
+            # ── 후진 (원점 복귀) ──────────────────────────────────────
+            self.log_message.emit(f"  M{motor_num} -{self._calib_steps} steps ←")
+            self._motor.move(motor_num, -self._calib_steps)
+            self.msleep(self._settle_ms)
+            rx, ry = self._snap_cx_cy()
+            step += 1; self.progress.emit(step, total)
+
+            if rx is not None:
+                dx2, dy2 = rx - bx, ry - by
+                mag2   = (dx2**2 + dy2**2) ** 0.5
+                angle2 = float(np.degrees(np.arctan2(dy2, dx2)))
+                res["bwd"] = {"dx": dx2, "dy": dy2, "mag": mag2, "angle": angle2}
+                self.log_message.emit(
+                    f"    Δ({dx2:+.2f}, {dy2:+.2f})  {mag2:.2f}px  {angle2:.1f}°"
+                )
+                # 잔류 오차: 기준으로 돌아오지 못한 거리
+                residual = mag2
+                self.log_message.emit(f"    잔류 오차: {residual:.2f}px")
+            else:
+                self.log_message.emit("    ❌ centroid 없음")
+
+            # ── 가중치 보정 계산 ──────────────────────────────────────
+            if "fwd" in res and "bwd" in res:
+                fwd_mag = res["fwd"]["mag"]
+                bwd_mag = res["bwd"]["mag"]
+                if bwd_mag > 0.5:
+                    adj = fwd_mag / bwd_mag
+                    res["weight_adj"] = adj
+                    self.log_message.emit(
+                        f"  → 전진/후진 크기 비: {adj:.4f}  "
+                        f"(bwd_weight × {adj:.4f} 권장)"
+                    )
+                else:
+                    self.log_message.emit("  ⚠️ 후진 변위 너무 작음 — 계산 불가")
+
+            results[motor_num] = res
+
+        self.log_message.emit("✅ 캘리브레이션 완료")
+        self.result_ready.emit(results)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -263,7 +383,9 @@ class ScanTab(QWidget):
         self._cam          = None
         self._motor_panel  = None
         self._worker: Optional[_ScanWorker] = None
+        self._calib_worker: Optional[_CalibWorker] = None
         self._scan_records: list = []
+        self._image_list:   list = []   # 스텝별 raw ndarray 누적
 
         self._plot_x:  list = []
         self._plot_cx: list = []
@@ -279,12 +401,14 @@ class ScanTab(QWidget):
         self._lbl_cam.setText(f"📷 {cam_name}  ● CONNECTED")
         self._lbl_cam.setStyleSheet("color: #4ecdc4; font-family: 'Courier New'; font-size: 11px;")
         self.btn_start.setEnabled(True)
+        self.btn_calibrate.setEnabled(True)
 
     def clear_shared_camera(self):
         self._cam = None
         self._lbl_cam.setText("📷 카메라 없음")
         self._lbl_cam.setStyleSheet("color: #e94560; font-family: 'Courier New'; font-size: 11px;")
         self.btn_start.setEnabled(False)
+        self.btn_calibrate.setEnabled(False)
 
     def set_motor_panel(self, motor_panel):
         """Live 탭의 MotorPanel 공유 — 위치 읽기 + 이동 명령."""
@@ -435,6 +559,84 @@ class ScanTab(QWidget):
         )
         ctrl_layout.addWidget(self._lbl_progress)
 
+        # ── 프레임 분석 ────────────────────────────────────────────────
+        grp_frame = QGroupBox("FRAME ANALYSIS")
+        grp_frame.setStyleSheet(_GRP.format(c="#ff9f43"))
+        gf = QVBoxLayout(grp_frame)
+        gf.setSpacing(5)
+
+        # Frame A / B 선택
+        ab_row = QHBoxLayout()
+        for lbl_text, attr in (("A:", "spin_frame_a"), ("B:", "spin_frame_b")):
+            l = QLabel(lbl_text)
+            l.setFixedWidth(14)
+            l.setStyleSheet("color:#7080a0; font-family:'Courier New'; font-size:11px;")
+            sp = QSpinBox()
+            sp.setRange(0, 9999)
+            sp.setValue(0)
+            sp.setStyleSheet(_SPIN_STYLE)
+            setattr(self, attr, sp)
+            ab_row.addWidget(l)
+            ab_row.addWidget(sp)
+        gf.addLayout(ab_row)
+
+        # 표시 버튼
+        btn_row_f1 = QHBoxLayout()
+        self.btn_show_a = QPushButton("Show A")
+        self.btn_show_b = QPushButton("Show B")
+        for btn in (self.btn_show_a, self.btn_show_b):
+            btn.setStyleSheet(_BTN_PRIMARY)
+            btn_row_f1.addWidget(btn)
+        gf.addLayout(btn_row_f1)
+
+        btn_row_f2 = QHBoxLayout()
+        self.btn_diff    = QPushButton("A − B")
+        self.btn_absdiff = QPushButton("|A − B|")
+        for btn in (self.btn_diff, self.btn_absdiff):
+            btn.setStyleSheet(_BTN_PRIMARY)
+            btn_row_f2.addWidget(btn)
+        gf.addLayout(btn_row_f2)
+
+        self.btn_show_a.clicked.connect(lambda: self._show_frame_idx(self.spin_frame_a.value()))
+        self.btn_show_b.clicked.connect(lambda: self._show_frame_idx(self.spin_frame_b.value()))
+        self.btn_diff.clicked.connect(self._show_diff)
+        self.btn_absdiff.clicked.connect(self._show_abs_diff)
+        ctrl_layout.addWidget(grp_frame)
+
+        # ── 캘리브레이션 ───────────────────────────────────────────────
+        grp_calib = QGroupBox("CALIBRATION")
+        grp_calib.setStyleSheet(_GRP.format(c="#fd79a8"))
+        gcal = QVBoxLayout(grp_calib)
+        gcal.setSpacing(5)
+
+        # 캘리브레이션 스텝 수
+        self.spin_calib_steps = QSpinBox()
+        self.spin_calib_steps.setRange(10, 999999)
+        self.spin_calib_steps.setValue(1000)
+        self.spin_calib_steps.setStyleSheet(_SPIN_STYLE)
+        gcal.addLayout(_row("캘리브 스텝:", self.spin_calib_steps))
+
+        # 대상 모터 선택 (체크박스)
+        chk_row = QHBoxLayout()
+        self._calib_chk = {}
+        for mn in (1, 2, 3):
+            chk = QCheckBox(f"M{mn}")
+            chk.setChecked(True)
+            chk.setStyleSheet(
+                "QCheckBox { color:#c0d0ff; font-family:'Courier New'; font-size:11px; }"
+            )
+            self._calib_chk[mn] = chk
+            chk_row.addWidget(chk)
+        gcal.addLayout(chk_row)
+
+        self.btn_calibrate = QPushButton("⚙  CALIBRATE")
+        self.btn_calibrate.setStyleSheet(_BTN_PRIMARY)
+        self.btn_calibrate.setEnabled(False)
+        self.btn_calibrate.clicked.connect(self._start_calibration)
+        gcal.addWidget(self.btn_calibrate)
+
+        ctrl_layout.addWidget(grp_calib)
+
         ctrl_layout.addStretch()
         splitter.addWidget(ctrl_scroll)
 
@@ -519,6 +721,7 @@ class ScanTab(QWidget):
         self.progress_bar.setMaximum(num_steps)
         self._table.setRowCount(0)
         self._scan_records.clear()
+        self._image_list.clear()
         self._plot_x.clear()
         self._plot_cx.clear()
         self._plot_cy.clear()
@@ -549,6 +752,13 @@ class ScanTab(QWidget):
     # ── 워커 콜백 ─────────────────────────────────────────────────────
 
     def _on_step_done(self, idx: int, result, positions: list, spe_path: str):
+        # 이미지 리스트 누적
+        self._image_list.append(result.raw.copy())
+        # 프레임 B 스핀박스 최대값 갱신
+        n = len(self._image_list) - 1
+        self.spin_frame_a.setMaximum(n)
+        self.spin_frame_b.setMaximum(n)
+
         # 이미지 표시
         disp = result.display
         if disp.ndim == 2:
@@ -610,6 +820,112 @@ class ScanTab(QWidget):
         self.btn_stop.setEnabled(False)
         self._worker = None
 
+    # ── 프레임 분석 ───────────────────────────────────────────────────
+
+    def _show_frame_idx(self, idx: int):
+        if not self._image_list:
+            self._log("⚠️ 저장된 프레임 없음")
+            return
+        idx = max(0, min(idx, len(self._image_list) - 1))
+        raw = self._image_list[idx]
+        disp = (raw >> 8).astype(np.uint8) if raw.dtype == np.uint16 else raw.astype(np.uint8)
+        try:
+            import cv2
+            rgb = cv2.cvtColor(disp, cv2.COLOR_GRAY2RGB) if disp.ndim == 2 else disp.copy()
+        except ImportError:
+            rgb = np.stack([disp, disp, disp], axis=-1) if disp.ndim == 2 else disp.copy()
+        self.image_viewer.set_live_frame(rgb, fit=False)
+        self._log(f"🖼 프레임 {idx} 표시")
+
+    def _show_diff(self):
+        self._render_diff(absolute=False)
+
+    def _show_abs_diff(self):
+        self._render_diff(absolute=True)
+
+    def _render_diff(self, absolute: bool):
+        if len(self._image_list) < 2:
+            self._log("⚠️ 비교할 프레임 2개 이상 필요")
+            return
+        a_idx = max(0, min(self.spin_frame_a.value(), len(self._image_list) - 1))
+        b_idx = max(0, min(self.spin_frame_b.value(), len(self._image_list) - 1))
+        if a_idx == b_idx:
+            self._log("⚠️ A와 B가 같은 프레임")
+            return
+
+        a = self._image_list[a_idx].astype(np.float32)
+        b = self._image_list[b_idx].astype(np.float32)
+        diff = a - b  # 부호 있는 차이
+
+        if absolute:
+            arr = np.abs(diff)
+            vmin, vmax = 0.0, float(arr.max()) or 1.0
+            # 0~255 단순 정규화
+            disp8 = ((arr - vmin) / (vmax - vmin) * 255).astype(np.uint8)
+            try:
+                import cv2
+                rgb = cv2.cvtColor(disp8, cv2.COLOR_GRAY2RGB) if disp8.ndim == 2 else disp8.copy()
+            except ImportError:
+                rgb = np.stack([disp8, disp8, disp8], axis=-1)
+            self._log(f"|A-B|  max={arr.max():.1f}  mean={arr.mean():.2f}")
+        else:
+            # diverging 컬러맵: 음수→파랑, 0→검정, 양수→빨강
+            peak = float(max(abs(diff.min()), abs(diff.max()))) or 1.0
+            norm = diff / peak  # -1 ~ +1
+            r_ch = np.clip( norm * 255, 0, 255).astype(np.uint8)
+            b_ch = np.clip(-norm * 255, 0, 255).astype(np.uint8)
+            g_ch = np.zeros_like(r_ch)
+            rgb = np.stack([r_ch, g_ch, b_ch], axis=-1)
+            self._log(f"A-B  min={diff.min():.1f}  max={diff.max():.1f}  mean={diff.mean():.2f}")
+
+        self.image_viewer.set_live_frame(rgb, fit=False)
+
+    # ── 캘리브레이션 ──────────────────────────────────────────────────
+
+    def _start_calibration(self):
+        if self._cam is None:
+            self._log("❌ 카메라 연결 필요")
+            return
+        if self._motor_panel is None or not self._motor_panel.is_connected:
+            self._log("❌ 모터 연결 필요")
+            return
+        if self._calib_worker and self._calib_worker.isRunning():
+            self._log("⚠️ 캘리브레이션 이미 진행 중")
+            return
+
+        motors = [mn for mn, chk in self._calib_chk.items() if chk.isChecked()]
+        if not motors:
+            self._log("⚠️ 캘리브레이션할 모터 선택 필요")
+            return
+
+        params = {
+            "calib_steps": self.spin_calib_steps.value(),
+            "settle_ms":   self.spin_settle.value(),
+            "motors":      motors,
+        }
+        self._calib_worker = _CalibWorker(self._cam, self._motor_panel, params)
+        self._calib_worker.log_message.connect(self._log)
+        self._calib_worker.result_ready.connect(self._on_calib_result)
+        self.btn_calibrate.setEnabled(False)
+        self._calib_worker.start()
+        self._log(f"⚙ 캘리브레이션 시작 — M{motors}  ±{params['calib_steps']} steps")
+
+    def _on_calib_result(self, results: dict):
+        self.btn_calibrate.setEnabled(self._cam is not None)
+        self._log("── 캘리브레이션 결과 ──")
+        for motor_num, res in results.items():
+            parts = [f"M{motor_num}:"]
+            if "fwd" in res:
+                f = res["fwd"]
+                parts.append(f"FWD Δ({f['dx']:+.2f},{f['dy']:+.2f}) {f['mag']:.2f}px {f['angle']:.1f}°")
+            if "bwd" in res:
+                b = res["bwd"]
+                parts.append(f"BWD Δ({b['dx']:+.2f},{b['dy']:+.2f}) {b['mag']:.2f}px {b['angle']:.1f}°")
+            if "weight_adj" in res:
+                parts.append(f"adj={res['weight_adj']:.4f}")
+            self._log("  " + "  |  ".join(parts))
+        self._calib_worker = None
+
     # ── 유틸 ─────────────────────────────────────────────────────────
 
     def _browse_dir(self):
@@ -654,3 +970,6 @@ class ScanTab(QWidget):
         if self._worker and self._worker.isRunning():
             self._worker.request_stop()
             self._worker.wait(2000)
+        if self._calib_worker and self._calib_worker.isRunning():
+            self._calib_worker.request_stop()
+            self._calib_worker.wait(2000)
