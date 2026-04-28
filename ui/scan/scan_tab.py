@@ -22,8 +22,9 @@ from PyQt6.QtWidgets import (
     QComboBox, QLineEdit, QFileDialog,
     QProgressBar, QTextEdit, QTableWidget,
     QTableWidgetItem, QHeaderView, QScrollArea,
-    QCheckBox,
+    QCheckBox, QListWidget, QListWidgetItem,
 )
+from PyQt6.QtGui import QIcon, QPixmap, QImage
 
 from core.image_processor import ImageProcessor
 from core.spe_writer import save_spe
@@ -654,6 +655,30 @@ class ScanTab(QWidget):
         right_layout.setContentsMargins(4, 4, 4, 4)
         right_layout.setSpacing(4)
 
+        # 이미지 썸네일 리스트
+        lbl_frames = QLabel("CAPTURED FRAMES")
+        lbl_frames.setStyleSheet(
+            "color:#4ecdc4; font-family:'Courier New'; font-size:10px; "
+            "font-weight:bold; letter-spacing:1px; padding:2px 0;"
+        )
+        right_layout.addWidget(lbl_frames)
+
+        self._frame_list = QListWidget()
+        self._frame_list.setIconSize(__import__('PyQt6.QtCore', fromlist=['QSize']).QSize(80, 60))
+        self._frame_list.setFlow(QListWidget.Flow.LeftToRight)
+        self._frame_list.setWrapping(False)
+        self._frame_list.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self._frame_list.setFixedHeight(100)
+        self._frame_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self._frame_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._frame_list.setStyleSheet("""
+            QListWidget { background:#080e1e; border:1px solid #0f3460; color:#c0d0ff; }
+            QListWidget::item { padding:2px; border:1px solid #0f2040; }
+            QListWidget::item:selected { background:#1a3a60; border:1px solid #4ecdc4; }
+        """)
+        self._frame_list.currentRowChanged.connect(self._on_frame_list_select)
+        right_layout.addWidget(self._frame_list)
+
         # 플롯 패널 (위치 vs centroid)
         self.plot_panel = PlotPanel("Centroid X/Y vs Motor Position")
         self.plot_panel.setMinimumHeight(200)
@@ -720,6 +745,7 @@ class ScanTab(QWidget):
         self.progress_bar.setValue(0)
         self.progress_bar.setMaximum(num_steps)
         self._table.setRowCount(0)
+        self._frame_list.clear()
         self._scan_records.clear()
         self._image_list.clear()
         self._plot_x.clear()
@@ -754,10 +780,13 @@ class ScanTab(QWidget):
     def _on_step_done(self, idx: int, result, positions: list, spe_path: str):
         # 이미지 리스트 누적
         self._image_list.append(result.raw.copy())
-        # 프레임 B 스핀박스 최대값 갱신
+        # 프레임 스핀박스 최대값 갱신
         n = len(self._image_list) - 1
         self.spin_frame_a.setMaximum(n)
         self.spin_frame_b.setMaximum(n)
+
+        # 썸네일 리스트 추가
+        self._append_thumbnail(result.display, idx)
 
         # 이미지 표시
         disp = result.display
@@ -819,6 +848,46 @@ class ScanTab(QWidget):
         self.btn_start.setEnabled(self._cam is not None)
         self.btn_stop.setEnabled(False)
         self._worker = None
+
+    # ── 썸네일 ───────────────────────────────────────────────────────
+
+    def _append_thumbnail(self, display: np.ndarray, step_idx: int):
+        """display(uint8 2D/3D)를 80×60 썸네일로 QListWidget에 추가."""
+        disp = display
+        if disp.ndim == 2:
+            disp = np.stack([disp, disp, disp], axis=-1)
+        h, w = disp.shape[:2]
+        thumb_w, thumb_h = 80, 60
+        # 비율 유지 리사이즈
+        scale = min(thumb_w / w, thumb_h / h)
+        nw, nh = max(1, int(w * scale)), max(1, int(h * scale))
+        try:
+            import cv2
+            small = cv2.resize(disp, (nw, nh), interpolation=cv2.INTER_AREA)
+        except ImportError:
+            small = disp[::max(1, h // nh), ::max(1, w // nw)][:nh, :nw]
+
+        # 검은 배경 캔버스에 중앙 배치
+        canvas = np.zeros((thumb_h, thumb_w, 3), dtype=np.uint8)
+        y0 = (thumb_h - nh) // 2
+        x0 = (thumb_w - nw) // 2
+        canvas[y0:y0+nh, x0:x0+nw] = small[:, :, :3]
+
+        img = QImage(canvas.tobytes(), thumb_w, thumb_h, thumb_w * 3, QImage.Format.Format_RGB888)
+        item = QListWidgetItem(QIcon(QPixmap.fromImage(img)), f"#{step_idx+1}")
+        item.setTextAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom)
+        self._frame_list.addItem(item)
+        self._frame_list.scrollToItem(item)
+
+    def _on_frame_list_select(self, row: int):
+        """리스트에서 프레임 선택 → 이미지뷰어 + 스핀박스 동기화."""
+        if row < 0 or row >= len(self._image_list):
+            return
+        self._show_frame_idx(row)
+        # 스핀박스 B를 마지막 선택에 맞춤 (A는 항상 직전)
+        self.spin_frame_b.setValue(row)
+        if row > 0:
+            self.spin_frame_a.setValue(row - 1)
 
     # ── 프레임 분석 ───────────────────────────────────────────────────
 
