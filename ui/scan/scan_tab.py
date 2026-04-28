@@ -383,6 +383,8 @@ class ScanTab(QWidget):
         super().__init__(parent)
         self._cam          = None
         self._motor_panel  = None
+        self._sim_cam      = None
+        self._sim_motor    = None
         self._worker: Optional[_ScanWorker] = None
         self._calib_worker: Optional[_CalibWorker] = None
         self._scan_records: list = []
@@ -442,9 +444,29 @@ class ScanTab(QWidget):
         grp_cam = QGroupBox("CAMERA")
         grp_cam.setStyleSheet(_GRP.format(c="#4ecdc4"))
         gc = QVBoxLayout(grp_cam)
+        gc.setSpacing(5)
         self._lbl_cam = QLabel("📷 카메라 없음")
         self._lbl_cam.setStyleSheet("color: #e94560; font-family: 'Courier New'; font-size: 11px;")
         gc.addWidget(self._lbl_cam)
+
+        self.btn_sim = QPushButton("▷  SIM MODE")
+        self.btn_sim.setToolTip("실 하드웨어 없이 가상 카메라+모터로 동작 검증")
+        self.btn_sim.setStyleSheet("""
+            QPushButton {
+                background: #1a1a0a; color: #ffe66d;
+                border: 1px solid #ffe66d; border-radius: 4px;
+                font-family: 'Courier New'; font-weight: bold;
+                font-size: 11px; padding: 4px 10px;
+            }
+            QPushButton:hover  { background: #2a2a10; }
+            QPushButton:checked {
+                background: #2a2800; color: #ffcc00;
+                border-color: #ffcc00;
+            }
+        """)
+        self.btn_sim.setCheckable(True)
+        self.btn_sim.clicked.connect(self._toggle_sim_mode)
+        gc.addWidget(self.btn_sim)
         ctrl_layout.addWidget(grp_cam)
 
         # 스캔 파라미터
@@ -996,6 +1018,27 @@ class ScanTab(QWidget):
         self._calib_worker = None
 
     # ── 유틸 ─────────────────────────────────────────────────────────
+
+    def _toggle_sim_mode(self, checked: bool):
+        if checked:
+            from core.simulator import SimCamera, SimMotorPanel
+            self._sim_cam   = SimCamera()
+            self._sim_motor = SimMotorPanel(self._sim_cam)
+            self.set_shared_camera(self._sim_cam)
+            self._motor_panel = self._sim_motor
+            self._lbl_cam.setText("🟡 SIM  ● Gaussian Beam  512×512")
+            self._lbl_cam.setStyleSheet(
+                "color: #ffe66d; font-family: 'Courier New'; font-size: 11px;"
+            )
+            self.btn_sim.setText("■  SIM OFF")
+            self._log("🟡 SIM MODE 활성 — 가상 카메라 + M1/M2/M3 가중치 비대칭 모터")
+        else:
+            self._sim_cam   = None
+            self._sim_motor = None
+            self.clear_shared_camera()
+            self._motor_panel = None
+            self.btn_sim.setText("▷  SIM MODE")
+            self._log("⬛ SIM MODE 해제")
 
     def _browse_dir(self):
         path = QFileDialog.getExistingDirectory(self, "저장 폴더 선택", self.edit_save_dir.text())
