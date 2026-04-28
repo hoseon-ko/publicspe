@@ -588,6 +588,15 @@ class ScanTab(QWidget):
         gf = QVBoxLayout(grp_frame)
         gf.setSpacing(5)
 
+        # 최대 보관 프레임 수
+        self.spin_max_frames = QSpinBox()
+        self.spin_max_frames.setRange(1, 9999)
+        self.spin_max_frames.setValue(200)
+        self.spin_max_frames.setSuffix(" frames")
+        self.spin_max_frames.setStyleSheet(_SPIN_STYLE)
+        self.spin_max_frames.setToolTip("메모리 보호: 초과 시 가장 오래된 프레임부터 삭제")
+        gf.addLayout(_row("최대 보관:", self.spin_max_frames))
+
         # Frame A / B 선택
         ab_row = QHBoxLayout()
         for lbl_text, attr in (("A:", "spin_frame_a"), ("B:", "spin_frame_b")):
@@ -800,8 +809,15 @@ class ScanTab(QWidget):
     # ── 워커 콜백 ─────────────────────────────────────────────────────
 
     def _on_step_done(self, idx: int, result, positions: list, spe_path: str):
-        # 이미지 리스트 누적
+        # 이미지 리스트 누적 (상한 초과 시 가장 오래된 것 제거)
+        max_frames = self.spin_max_frames.value()
         self._image_list.append(result.raw.copy())
+        if len(self._image_list) > max_frames:
+            self._image_list.pop(0)
+            self._frame_list.takeItem(0)   # 썸네일도 동기화
+            if len(self._image_list) == max_frames:
+                self._log(f"⚠️ 프레임 상한 {max_frames}개 도달 — 오래된 프레임 삭제 중")
+
         # 프레임 스핀박스 최대값 갱신
         n = len(self._image_list) - 1
         self.spin_frame_a.setMaximum(n)
