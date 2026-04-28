@@ -26,15 +26,14 @@ _SPE_PIXEL_FORMAT: Dict[str, str] = {
 }
 
 
-def _xml_tag(tag: str, value: Any, attrs: str = "") -> str:
+def _xml_tag(tag: str, value: Any, readonly: bool = False) -> str:
     if value is None:
         return ""
     text = str(value)
     if text == "":
         return ""
-    if attrs:
-        return f"<{tag} {attrs}>{escape(text)}</{tag}>"
-    return f"<{tag}>{escape(text)}</{tag}>"
+    ro = ' r:readOnly="true"' if readonly else ""
+    return "<" + tag + ro + ">" + escape(text) + "</" + tag + ">"
 
 
 def save_spe(
@@ -151,34 +150,36 @@ def save_spe(
     if has_sensor_info:
         pixel_info_xml = ""
         if isinstance(pixel_size_um, (tuple, list)) and len(pixel_size_um) >= 2:
+            pw_str = "{:.6f}".format(float(pixel_size_um[0]))
+            ph_str = "{:.6f}".format(float(pixel_size_um[1]))
             pixel_info_xml = (
                 "<Pixel>"
-                f'<Width r:readOnly="true">{float(pixel_size_um[0]):.6f}</Width>'
-                f'<Height r:readOnly="true">{float(pixel_size_um[1]):.6f}</Height>'
+                '<Width r:readOnly="true">' + pw_str + "</Width>"
+                '<Height r:readOnly="true">' + ph_str + "</Height>"
                 "</Pixel>"
             )
         sensor_info_xml = (
             "<Information>"
-            f'{_xml_tag("SensorName", sensor_name, "r:readOnly=\"true\"")}'
-            f'{_xml_tag("CcdCharacteristics", sensor_characteristics, "r:readOnly=\"true\"")}'
-            f'{_xml_tag("Type", sensor_type, "r:readOnly=\"true\"")}'
-            f"{pixel_info_xml}"
-            "</Information>"
+            + _xml_tag("SensorName", sensor_name, readonly=True)
+            + _xml_tag("CcdCharacteristics", sensor_characteristics, readonly=True)
+            + _xml_tag("Type", sensor_type, readonly=True)
+            + pixel_info_xml
+            + "</Information>"
         )
 
     # ── Sensor Temperature XML ────────────────────────────────────────
     temp_inner_xml = ""
     if any(v is not None for v in (temperature_reading_c, temperature_setpoint_c, temperature_status)):
         reading_xml = (
-            f'<Reading r:readOnly="true">{float(temperature_reading_c):.4f}</Reading>'
+            '<Reading r:readOnly="true">{:.4f}</Reading>'.format(float(temperature_reading_c))
             if temperature_reading_c is not None else ""
         )
         temp_inner_xml = (
             "<Temperature>"
-            f"{_xml_tag('SetPoint', temperature_setpoint_c)}"
-            f"{reading_xml}"
-            f"{_xml_tag('Status', temperature_status, 'r:readOnly=\"true\"')}"
-            "</Temperature>"
+            + _xml_tag("SetPoint", temperature_setpoint_c)
+            + reading_xml
+            + _xml_tag("Status", temperature_status, readonly=True)
+            + "</Temperature>"
         )
 
     sensor_xml = ""
@@ -188,12 +189,12 @@ def save_spe(
     # ── ShutterTiming XML ─────────────────────────────────────────────
     shutter_xml = (
         "<ShutterTiming>"
-        f'<ExposureTime type="Double">{float(exposure_ms):.6f}</ExposureTime>'
-        "<TimeUnit>ms</TimeUnit>"
-        f"{_xml_tag('Mode', shutter_mode)}"
-        f"{_xml_tag('OpeningDelay', shutter_opening_delay_ms)}"
-        f"{_xml_tag('ClosingDelay', shutter_closing_delay_ms)}"
-        "</ShutterTiming>"
+        + '<ExposureTime type="Double">{:.6f}</ExposureTime>'.format(float(exposure_ms))
+        + "<TimeUnit>ms</TimeUnit>"
+        + _xml_tag("Mode", shutter_mode)
+        + _xml_tag("OpeningDelay", shutter_opening_delay_ms)
+        + _xml_tag("ClosingDelay", shutter_closing_delay_ms)
+        + "</ShutterTiming>"
     )
 
     # ── ReadoutControl XML ────────────────────────────────────────────
@@ -207,11 +208,11 @@ def save_spe(
     )
     readout_xml = (
         "<ReadoutControl>"
-        f"{_xml_tag('Mode', readout_mode)}"
-        f"{_xml_tag('PortsUsed', _ports)}"
-        f"{_xml_tag('VerticalShiftRate', vertical_shift_rate)}"
-        f"{roi_regions_xml}"
-        "</ReadoutControl>"
+        + _xml_tag("Mode", readout_mode)
+        + _xml_tag("PortsUsed", _ports)
+        + _xml_tag("VerticalShiftRate", vertical_shift_rate)
+        + roi_regions_xml
+        + "</ReadoutControl>"
     )
 
     # ── Adc XML ───────────────────────────────────────────────────────
@@ -219,12 +220,12 @@ def save_spe(
     if adc_info:
         adc_xml = (
             "<Adc>"
-            f"{_xml_tag('Speed', adc_info.get('adc_speed'))}"
-            f"{_xml_tag('BitDepth', adc_info.get('bit_depth'), 'r:readOnly=\"true\"')}"
-            f"{_xml_tag('AnalogGain', adc_info.get('adc_analog_gain'))}"
-            f"{_xml_tag('Quality', adc_info.get('adc_quality'))}"
-            f"{_xml_tag('ReadoutRate', readout_rate_mhz, 'r:readOnly=\"true\"')}"
-            "</Adc>"
+            + _xml_tag("Speed", adc_info.get("adc_speed"))
+            + _xml_tag("BitDepth", adc_info.get("bit_depth"), readonly=True)
+            + _xml_tag("AnalogGain", adc_info.get("adc_analog_gain"))
+            + _xml_tag("Quality", adc_info.get("adc_quality"))
+            + _xml_tag("ReadoutRate", readout_rate_mhz, readonly=True)
+            + "</Adc>"
         )
 
     # ── Calibrations XML ──────────────────────────────────────────────
