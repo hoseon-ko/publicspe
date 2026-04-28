@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
     QComboBox, QLineEdit, QFileDialog,
     QProgressBar, QTextEdit, QTableWidget,
     QTableWidgetItem, QHeaderView, QScrollArea,
-    QCheckBox, QListWidget, QListWidgetItem,
+    QCheckBox, QListWidget, QListWidgetItem, QSlider,
 )
 from PyQt6.QtGui import QIcon, QPixmap, QImage
 
@@ -38,7 +38,8 @@ _FS_LBL  = "15px"       # 일반 레이블
 _FS_CTRL = "15px"       # 스핀박스·콤보·에디트
 _FS_BTN  = "15px"       # 버튼
 _FS_GRP  = "14px"       # 그룹박스 타이틀
-_FS_LOG  = "14px"       # 로그·테이블
+_FS_LOG  = "13px"       # 로그·테이블 (모노)
+_FS_TBL_HDR = "14px"   # 테이블 헤더 (약간 크게)
 _C_VAL   = "#d8e8ff"    # 입력값 색 (밝게)
 _C_LBL   = "#8090b0"    # 레이블 색
 _C_DIM   = "#4a6a8a"    # 흐린 보조 텍스트
@@ -97,6 +98,41 @@ _GRP = f"""
     }}}}
     QGroupBox::title {{{{ subcontrol-origin: margin; left: 10px; padding: 0 4px; }}}}
 """
+
+
+def _sep_v() -> QWidget:
+    """수직 구분선 위젯."""
+    sep = QWidget()
+    sep.setFixedSize(1, 20)
+    sep.setStyleSheet("background:#1a3a60;")
+    return sep
+
+
+def _draw_centroid_cross(rgb: np.ndarray, cx: float, cy: float,
+                          size: int = 20) -> np.ndarray:
+    """RGB 배열에 청록색 십자 마커를 그린 복사본을 반환."""
+    out = rgb.copy()
+    h, w = out.shape[:2]
+    x, y = int(round(cx)), int(round(cy))
+    color = (0, 220, 180)
+    x1, x2 = max(0, x - size), min(w, x + size + 1)
+    y1, y2 = max(0, y - 1),    min(h, y + 2)
+    out[y1:y2, x1:x2] = color
+    x1, x2 = max(0, x - 1),    min(w, x + 2)
+    y1, y2 = max(0, y - size), min(h, y + size + 1)
+    out[y1:y2, x1:x2] = color
+    # 작은 원 형태로 표시 (3×3 외곽 박스)
+    for dy in (-size, size):
+        for dx in (-2, -1, 0, 1, 2):
+            ny, nx = y + dy, x + dx
+            if 0 <= ny < h and 0 <= nx < w:
+                out[ny, nx] = color
+    for dx in (-size, size):
+        for dy in (-2, -1, 0, 1, 2):
+            ny, nx = y + dy, x + dx
+            if 0 <= ny < h and 0 <= nx < w:
+                out[ny, nx] = color
+    return out
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -233,7 +269,7 @@ class _ScanWorker(QThread):
     finished    = pyqtSignal(str)                     # CSV 요약 경로
     error       = pyqtSignal(str)
 
-    def __init__(self, cam, motor_panel, params: dict, parent=None):
+    def __init__(self, cam, motor_panel, params: dict, proc=None, parent=None):
         super().__init__(parent)
         self._cam         = cam
         self._motor       = motor_panel
@@ -243,7 +279,7 @@ class _ScanWorker(QThread):
         self._settle_ms   = params["settle_ms"]
         self._save_dir    = params["save_dir"]
         self._scan_name   = params["scan_name"]
-        self._proc        = ImageProcessor()
+        self._proc        = proc if proc is not None else ImageProcessor()
         self._proc.centroid_enabled = True
         self._stop        = False
         self._records: list = []   # CSV 누적
@@ -419,6 +455,10 @@ class ScanTab(QWidget):
         self._calib_worker: Optional[_CalibWorker] = None
         self._scan_records: list = []
         self._image_list:   list = []   # 스텝별 raw ndarray 누적
+
+        # 공유 ImageProcessor — 이진화/임계값 설정이 스캔 전반에 유지됨
+        self._proc = ImageProcessor()
+        self._proc.centroid_enabled = True
 
         self._plot_x:  list = []
         self._plot_cx: list = []
@@ -700,9 +740,92 @@ class ScanTab(QWidget):
         # ── 중앙+우측: 이미지 + 플롯 ──────────────────────────────────
         center_right = QSplitter(Qt.Orientation.Horizontal)
 
-        # 이미지 뷰어
+        # 이미지 뷰어 + 옵션 바 컨테이너
+        img_container = QWidget()
+        img_container.setStyleSheet("background: #080e1e;")
+        img_vbox = QVBoxLayout(img_container)
+        img_vbox.setContentsMargins(0, 0, 0, 0)
+        img_vbox.setSpacing(0)
+
+        # ── 이미지 옵션 바 ──────────────────────────────────────────
+        img_opt_bar = QWidget()
+        img_opt_bar.setFixedHeight(36)
+        img_opt_bar.setStyleSheet(
+            "background:#0a1428; border-bottom:1px solid #0f3460;"
+        )
+        opt_layout = QHBoxLayout(img_opt_bar)
+        opt_layout.setContentsMargins(8, 4, 8, 4)
+        opt_layout.setSpacing(10)
+
+        # 원본 / 이진화 토글
+        self.btn_view_raw = QPushButton("원본")
+        self.btn_view_bin = QPushButton("이진화")
+        _view_btn_style = f"""
+            QPushButton {{
+                background:#0f1729; color:{_C_LBL};
+                border:1px solid #1a3a60; border-radius:3px;
+                font-family:'{_F}'; font-size:13px; font-weight:bold;
+                padding:2px 10px; min-width:52px;
+            }}
+            QPushButton:checked {{
+                background:#0d2820; color:#4ecdc4; border-color:#4ecdc4;
+            }}
+            QPushButton:hover {{ color:{_C_VAL}; }}
+        """
+        for b in (self.btn_view_raw, self.btn_view_bin):
+            b.setCheckable(True)
+            b.setStyleSheet(_view_btn_style)
+        self.btn_view_raw.setChecked(True)
+        self.btn_view_raw.clicked.connect(lambda: self._set_view_mode(False))
+        self.btn_view_bin.clicked.connect(lambda: self._set_view_mode(True))
+        opt_layout.addWidget(self.btn_view_raw)
+        opt_layout.addWidget(self.btn_view_bin)
+
+        opt_layout.addWidget(_sep_v())
+
+        # 임계값 슬라이더
+        lbl_t = QLabel("임계값:")
+        lbl_t.setStyleSheet(f"color:{_C_LBL}; font-family:'{_F}'; font-size:13px;")
+        self.slider_thresh = QSlider(Qt.Orientation.Horizontal)
+        self.slider_thresh.setRange(0, 255)
+        self.slider_thresh.setValue(127)
+        self.slider_thresh.setFixedWidth(120)
+        self.slider_thresh.setStyleSheet("""
+            QSlider::groove:horizontal { height:4px; background:#1a3a60; border-radius:2px; }
+            QSlider::handle:horizontal {
+                background:#4ecdc4; border:1px solid #4ecdc4;
+                width:12px; height:12px; margin:-4px 0; border-radius:6px;
+            }
+            QSlider::sub-page:horizontal { background:#4ecdc4; border-radius:2px; }
+        """)
+        self.lbl_thresh_val = QLabel("127")
+        self.lbl_thresh_val.setFixedWidth(30)
+        self.lbl_thresh_val.setStyleSheet(
+            f"color:{_C_VAL}; font-family:'{_FC}'; font-size:13px;"
+        )
+        self.slider_thresh.valueChanged.connect(self._on_thresh_changed)
+        opt_layout.addWidget(lbl_t)
+        opt_layout.addWidget(self.slider_thresh)
+        opt_layout.addWidget(self.lbl_thresh_val)
+
+        opt_layout.addWidget(_sep_v())
+
+        # 중심점 표시 토글
+        self.chk_centroid_marker = QCheckBox("중심점 표시")
+        self.chk_centroid_marker.setChecked(True)
+        self.chk_centroid_marker.setStyleSheet(
+            f"QCheckBox {{ color:{_C_VAL}; font-family:'{_F}'; font-size:13px; }}"
+        )
+        opt_layout.addWidget(self.chk_centroid_marker)
+
+        opt_layout.addStretch()
+
+        img_vbox.addWidget(img_opt_bar)
+
         self.image_viewer = ImageViewer()
-        center_right.addWidget(self.image_viewer)
+        img_vbox.addWidget(self.image_viewer)
+
+        center_right.addWidget(img_container)
 
         # 우측: 세로 스플리터 (드래그로 높낮이 조절)
         right_splitter = QSplitter(Qt.Orientation.Vertical)
@@ -717,13 +840,13 @@ class ScanTab(QWidget):
         frames_widget = QWidget()
         frames_widget.setStyleSheet("background: #0a0f1e;")
         frames_layout = QVBoxLayout(frames_widget)
-        frames_layout.setContentsMargins(4, 2, 4, 2)
-        frames_layout.setSpacing(2)
+        frames_layout.setContentsMargins(6, 4, 6, 4)
+        frames_layout.setSpacing(4)
 
         lbl_frames = QLabel("CAPTURED FRAMES")
         lbl_frames.setStyleSheet(
-            f"color:#4ecdc4; font-family:'{_F}'; font-size:{_FS_LBL}; "
-            "font-weight:bold; letter-spacing:1px; padding:2px 0;"
+            f"color:#4ecdc4; font-family:'{_F}'; font-size:16px; "
+            "font-weight:bold; letter-spacing:2px; padding:0;"
         )
         frames_layout.addWidget(lbl_frames)
 
@@ -774,7 +897,8 @@ class ScanTab(QWidget):
             QTableWidget {{ background:#080e1e; gridline-color:#0f3460;
                 color:#c0d0ff; font-family:'{_FC}'; font-size:{_FS_LOG}; border:none; text-align:center; }}
             QHeaderView::section {{ background:#0f1729; color:#4ecdc4;
-                border:1px solid #0f3460; font-family:'{_FC}'; font-size:{_FS_LOG}; text-align:center; }}
+                border:1px solid #0f3460; font-family:'{_F}'; font-size:{_FS_TBL_HDR};
+                font-weight:bold; padding:4px 2px; text-align:center; }}
             QTableWidget::item:selected {{ background:#1a3a60; }}
         """)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -816,6 +940,38 @@ class ScanTab(QWidget):
             w.setEnabled(idle)
         for chk in self._calib_chk.values():
             chk.setEnabled(idle)
+
+    # ── 이미지 표시 옵션 ─────────────────────────────────────────────
+
+    def _set_view_mode(self, binary: bool):
+        """원본/이진화 토글."""
+        self._proc.show_binary = binary
+        self.btn_view_raw.setChecked(not binary)
+        self.btn_view_bin.setChecked(binary)
+        self.slider_thresh.setEnabled(binary)
+
+    def _on_thresh_changed(self, val: int):
+        self._proc.bin_threshold = val
+        self.lbl_thresh_val.setText(str(val))
+
+    # ── 이미지 뷰어에 RGB + 중심점 마커 표시 ─────────────────────────
+
+    def _display_result(self, result, fit: bool = False):
+        """ProcessResult → display RGB + centroid 오버레이 → image_viewer."""
+        disp = result.display
+        if disp.ndim == 2:
+            try:
+                import cv2
+                rgb = cv2.cvtColor(disp, cv2.COLOR_GRAY2RGB)
+            except ImportError:
+                rgb = np.stack([disp, disp, disp], axis=-1)
+        else:
+            rgb = disp.copy()
+
+        if self.chk_centroid_marker.isChecked() and result.has_centroid:
+            rgb = _draw_centroid_cross(rgb, result.centroid_x, result.centroid_y)
+
+        self.image_viewer.set_live_frame(rgb, fit=fit)
 
     # ── 스캔 제어 ─────────────────────────────────────────────────────
 
@@ -861,7 +1017,7 @@ class ScanTab(QWidget):
             "save_dir":    save_dir,
             "scan_name":   scan_name,
         }
-        self._worker = _ScanWorker(self._cam, self._motor_panel, params)
+        self._worker = _ScanWorker(self._cam, self._motor_panel, params, proc=self._proc)
         self._worker.step_done.connect(self._on_step_done)
         self._worker.progress.connect(self._on_progress)
         self._worker.log_message.connect(self._log)
@@ -896,17 +1052,8 @@ class ScanTab(QWidget):
         # 썸네일 리스트 추가
         self._append_thumbnail(result.display, idx)
 
-        # 이미지 표시
-        disp = result.display
-        if disp.ndim == 2:
-            try:
-                import cv2
-                rgb = cv2.cvtColor(disp, cv2.COLOR_GRAY2RGB)
-            except ImportError:
-                rgb = np.stack([disp, disp, disp], axis=-1)
-        else:
-            rgb = disp
-        self.image_viewer.set_live_frame(rgb, fit=(idx == 0))
+        # 이미지 표시 (중심점 오버레이 포함)
+        self._display_result(result, fit=(idx == 0))
 
         # 테이블 추가
         row = self._table.rowCount()
@@ -948,6 +1095,11 @@ class ScanTab(QWidget):
     def _on_scan_finished(self, csv_path: str):
         self._worker = None
         self._set_controls_locked(False)
+        # B 스핀박스를 마지막 프레임 인덱스로 자동 세팅
+        if self._image_list:
+            last = len(self._image_list) - 1
+            self.spin_frame_b.setValue(last)
+            self.spin_frame_a.setValue(0)
         if csv_path:
             self._log(f"✅ 스캔 완료 — CSV: {csv_path}")
         else:
@@ -1006,15 +1158,13 @@ class ScanTab(QWidget):
             return
         idx = max(0, min(idx, len(self._image_list) - 1))
         step_i, raw, pos = self._image_list[idx]
-        disp = (raw >> 8).astype(np.uint8) if raw.dtype == np.uint16 else raw.astype(np.uint8)
-        try:
-            import cv2
-            rgb = cv2.cvtColor(disp, cv2.COLOR_GRAY2RGB) if disp.ndim == 2 else disp.copy()
-        except ImportError:
-            rgb = np.stack([disp, disp, disp], axis=-1) if disp.ndim == 2 else disp.copy()
-        self.image_viewer.set_live_frame(rgb, fit=False)
+        result = self._proc.process(raw)   # 현재 이진화/임계값 설정 반영
+        self._display_result(result, fit=False)
+        cx = f"{result.centroid_x:.1f}" if result.centroid_x is not None else "N/A"
+        cy = f"{result.centroid_y:.1f}" if result.centroid_y is not None else "N/A"
         self._log(
-            f"🖼 Step#{step_i+1}  M1={pos[0]}  M2={pos[1]}  M3={pos[2]}  M4={pos[3]}"
+            f"🖼 Step#{step_i+1}  Centroid=({cx},{cy})  "
+            f"M1={pos[0]}  M2={pos[1]}  M3={pos[2]}  M4={pos[3]}"
         )
 
     def _show_diff(self):
@@ -1180,6 +1330,11 @@ class ScanTab(QWidget):
                 self._right_splitter.setSizes([int(x) for x in raw])
             except Exception:
                 pass
+        thresh = int(s.value("bin_threshold", 127))
+        self.slider_thresh.setValue(thresh)
+        # _proc 동기화
+        self._proc.bin_threshold = thresh
+        self.slider_thresh.setEnabled(False)  # 원본 모드 기본
 
     def cleanup(self):
         s = QSettings("SpeAnalyze", "ScanTab")
@@ -1190,6 +1345,7 @@ class ScanTab(QWidget):
         s.setValue("save_dir",   self.edit_save_dir.text())
         s.setValue("scan_name",  self.edit_scan_name.text())
         s.setValue("right_splitter_sizes", self._right_splitter.sizes())
+        s.setValue("bin_threshold", self.slider_thresh.value())
         if self._worker and self._worker.isRunning():
             self._worker.request_stop()
             self._worker.wait(2000)
