@@ -134,9 +134,10 @@ class _ScanWorker(QThread):
             except Exception:
                 exp_ms = 0.0
 
-            # ── SPE 저장 (프레임 + XML 메타데이터) ────────────────────
-            spe_name = f"{self._scan_name}_{ts}_step{i+1:04d}.spe"
-            spe_path = os.path.join(self._save_dir, spe_name)
+            stem = f"{self._scan_name}_{ts}_step{i+1:04d}"
+
+            # ── SPE 저장 (raw 데이터 + XML 메타데이터) ─────────────────
+            spe_path = os.path.join(self._save_dir, stem + ".spe")
             try:
                 save_spe(
                     spe_path,
@@ -173,6 +174,38 @@ class _ScanWorker(QThread):
                 self.log_message.emit(f"⚠️ SPE 저장 오류: {e}")
                 spe_path = ""
 
+            # ── 이미지 저장 (raw BMP + display PNG) ────────────────────
+            try:
+                import cv2 as _cv2
+                # raw: 원본 16-bit 그대로
+                raw_img_path = os.path.join(self._save_dir, stem + "_raw.png")
+                _cv2.imwrite(raw_img_path, raw)
+                # display: 8-bit 정규화 + centroid 마커 오버레이
+                disp = result.display.copy()
+                if disp.ndim == 2:
+                    disp_bgr = _cv2.cvtColor(disp, _cv2.COLOR_GRAY2BGR)
+                else:
+                    disp_bgr = disp.copy()
+                if result.has_centroid:
+                    ix = int(round(result.centroid_x))
+                    iy = int(round(result.centroid_y))
+                    _cv2.drawMarker(disp_bgr, (ix, iy), (0, 220, 180),
+                                    _cv2.MARKER_CROSS, 40, 2)
+                    _cv2.putText(disp_bgr,
+                                 f"({result.centroid_x:.1f},{result.centroid_y:.1f})",
+                                 (ix + 8, iy - 8), _cv2.FONT_HERSHEY_SIMPLEX,
+                                 0.5, (0, 220, 180), 1)
+                disp_img_path = os.path.join(self._save_dir, stem + "_disp.png")
+                _cv2.imwrite(disp_img_path, disp_bgr)
+            except ImportError:
+                raw_img_path = ""
+                disp_img_path = ""
+                self.log_message.emit("⚠️ OpenCV 없음 — 이미지 파일 저장 생략")
+            except Exception as e:
+                self.log_message.emit(f"⚠️ 이미지 저장 오류: {e}")
+                raw_img_path = ""
+                disp_img_path = ""
+
             # ── CSV 기록 ──────────────────────────────────────────────
             self._records.append({
                 "step": i + 1,
@@ -183,6 +216,8 @@ class _ScanWorker(QThread):
                 "snr":        result.snr,
                 "frame_mean": result.frame_mean,
                 "spe_file":   os.path.basename(spe_path),
+                "raw_img":    os.path.basename(raw_img_path),
+                "disp_img":   os.path.basename(disp_img_path),
             })
 
             self.step_done.emit(i, result, positions, spe_path)
