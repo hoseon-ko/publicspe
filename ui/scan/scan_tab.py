@@ -752,11 +752,44 @@ class ScanTab(QWidget):
         splitter.addWidget(center_right)
         splitter.setSizes([290, 1110])
 
+    # ── 컨트롤 잠금 ──────────────────────────────────────────────────
+
+    def _set_controls_locked(self, locked: bool):
+        """동작 중 모든 파라미터/시작 버튼 잠금, 정지만 활성."""
+        idle = not locked
+        cam_ok = self._cam is not None
+        motor_ok = self._motor_panel is not None and self._motor_panel.is_connected
+
+        self.btn_start.setEnabled(idle and cam_ok)
+        self.btn_stop.setEnabled(locked and (self._worker is not None))
+        self.btn_calibrate.setEnabled(idle and cam_ok and motor_ok)
+        self.btn_sim.setEnabled(idle)
+
+        # 파라미터 위젯
+        for w in (
+            self.combo_motor,
+            self.spin_steps_move, self.spin_num_steps, self.spin_settle,
+            self.spin_max_frames, self.spin_calib_steps,
+            self.spin_frame_a, self.spin_frame_b,
+            self.edit_scan_name, self.edit_save_dir,
+            self.btn_show_a, self.btn_show_b,
+            self.btn_diff, self.btn_absdiff,
+        ):
+            w.setEnabled(idle)
+        for chk in self._calib_chk.values():
+            chk.setEnabled(idle)
+
     # ── 스캔 제어 ─────────────────────────────────────────────────────
 
     def _start_scan(self):
         if self._cam is None:
             self._log("❌ 카메라 연결 필요")
+            return
+        if self._worker and self._worker.isRunning():
+            self._log("⚠️ 이미 스캔 중")
+            return
+        if self._calib_worker and self._calib_worker.isRunning():
+            self._log("❌ 캘리브레이션 진행 중 — 완료 후 시작")
             return
 
         motor_num   = int(self.combo_motor.currentText()[1])
@@ -770,9 +803,7 @@ class ScanTab(QWidget):
             self._log("⚠️ Picomotor 연결 안 됨 — 위치 기록 없이 진행")
 
         self.scan_starting.emit()
-
-        # UI 상태
-        self.btn_start.setEnabled(False)
+        self._set_controls_locked(True)
         self.btn_stop.setEnabled(True)
         self.progress_bar.setValue(0)
         self.progress_bar.setMaximum(num_steps)
@@ -804,7 +835,6 @@ class ScanTab(QWidget):
     def _stop_scan(self):
         if self._worker and self._worker.isRunning():
             self._worker.request_stop()
-        self.btn_stop.setEnabled(False)
         self._log("■ 정지 요청...")
 
     # ── 워커 콜백 ─────────────────────────────────────────────────────
@@ -875,19 +905,17 @@ class ScanTab(QWidget):
         self._lbl_progress.setText(f"{current} / {total}")
 
     def _on_scan_finished(self, csv_path: str):
-        self.btn_start.setEnabled(self._cam is not None)
-        self.btn_stop.setEnabled(False)
+        self._worker = None
+        self._set_controls_locked(False)
         if csv_path:
             self._log(f"✅ 스캔 완료 — CSV: {csv_path}")
         else:
             self._log("✅ 스캔 완료 (데이터 없음)")
-        self._worker = None
 
     def _on_scan_error(self, msg: str):
         self._log(f"❌ {msg}")
-        self.btn_start.setEnabled(self._cam is not None)
-        self.btn_stop.setEnabled(False)
         self._worker = None
+        self._set_controls_locked(False)
 
     # ── 썸네일 ───────────────────────────────────────────────────────
 
@@ -1010,6 +1038,9 @@ class ScanTab(QWidget):
         if self._calib_worker and self._calib_worker.isRunning():
             self._log("⚠️ 캘리브레이션 이미 진행 중")
             return
+        if self._worker and self._worker.isRunning():
+            self._log("❌ 스캔 진행 중 — 완료 후 시작")
+            return
 
         motors = [mn for mn, chk in self._calib_chk.items() if chk.isChecked()]
         if not motors:
@@ -1024,12 +1055,13 @@ class ScanTab(QWidget):
         self._calib_worker = _CalibWorker(self._cam, self._motor_panel, params)
         self._calib_worker.log_message.connect(self._log)
         self._calib_worker.result_ready.connect(self._on_calib_result)
-        self.btn_calibrate.setEnabled(False)
+        self._set_controls_locked(True)
         self._calib_worker.start()
         self._log(f"⚙ 캘리브레이션 시작 — M{motors}  ±{params['calib_steps']} steps")
 
     def _on_calib_result(self, results: dict):
-        self.btn_calibrate.setEnabled(self._cam is not None)
+        self._calib_worker = None
+        self._set_controls_locked(False)
         self._log("── 캘리브레이션 결과 ──")
         for motor_num, res in results.items():
             parts = [f"M{motor_num}:"]
@@ -1047,6 +1079,11 @@ class ScanTab(QWidget):
     # ── 유틸 ─────────────────────────────────────────────────────────
 
     def _toggle_sim_mode(self, checked: bool):
+        if (self._worker and self._worker.isRunning()) or \
+           (self._calib_worker and self._calib_worker.isRunning()):
+            self._log("❌ 동작 중 SIM 모드 전환 불가")
+            self.btn_sim.setChecked(not checked)  # 토글 되돌리기
+            return
         if checked:
             from core.simulator import SimCamera, SimMotorPanel
             self._sim_cam   = SimCamera()
