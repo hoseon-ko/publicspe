@@ -76,7 +76,7 @@ class MotorCard(QFrame):
             "color: #4ecdc4; font-family: 'Courier New'; font-weight: bold; font-size: 12px;"
         )
         self.lbl_dot = QLabel("●")
-        self.lbl_dot.setStyleSheet("color: #2a3a6a; font-size: 10px;")
+        self.lbl_dot.setStyleSheet("color: #2a3a6a; font-family: 'Courier New'; font-size: 10px;")
         top.addWidget(lbl_num)
         top.addStretch()
         top.addWidget(self.lbl_dot)
@@ -159,23 +159,23 @@ class MotorCard(QFrame):
         if pos is None:
             self.lbl_pos.setText("ERR")
             self.lbl_dot.setText("●")
-            self.lbl_dot.setStyleSheet("color: #e94560; font-size: 10px;")
+            self.lbl_dot.setStyleSheet("color: #e94560; font-family: 'Courier New'; font-size: 10px;")
         else:
             self.lbl_pos.setText(f"{pos:,}")
             self.lbl_dot.setText("●")   # flash_moving 후 텍스트 복원
-            self.lbl_dot.setStyleSheet("color: #4ecdc4; font-size: 10px;")
+            self.lbl_dot.setStyleSheet("color: #4ecdc4; font-family: 'Courier New'; font-size: 10px;")
 
     def flash_moving(self, steps: int):
         """#11 이동 명령 시 상태 인디케이터를 노란색으로 잠깐 점등."""
         dir_str = "→" if steps > 0 else ("←" if steps < 0 else "⊙")
         self.lbl_dot.setText(f"{dir_str}")
-        self.lbl_dot.setStyleSheet("color: #ffe66d; font-size: 10px;")
+        self.lbl_dot.setStyleSheet("color: #ffe66d; font-family: 'Courier New'; font-size: 10px;")
         # 1.5초 후 복원 (폴링으로 위치 갱신되면 자동으로 teal 복구)
         QTimer.singleShot(1500, self._reset_dot)
 
     def _reset_dot(self):
         self.lbl_dot.setText("●")
-        self.lbl_dot.setStyleSheet("color: #4ecdc4; font-size: 10px;")
+        self.lbl_dot.setStyleSheet("color: #4ecdc4; font-family: 'Courier New'; font-size: 10px;")
 
     def set_enabled(self, en: bool):
         for w in (self.btn_neg, self.btn_pos, self.btn_zero, self.spin):
@@ -183,7 +183,7 @@ class MotorCard(QFrame):
         if not en:
             self.lbl_pos.setText("—")
             self.lbl_dot.setText("●")
-            self.lbl_dot.setStyleSheet("color: #2a3a6a; font-size: 10px;")
+            self.lbl_dot.setStyleSheet("color: #2a3a6a; font-family: 'Courier New'; font-size: 10px;")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -319,7 +319,7 @@ class LiveTab(QMainWindow):
         btn_clear_log.setFixedHeight(20)
         btn_clear_log.setStyleSheet("""
             QPushButton { background: transparent; color: #304060; border: 1px solid #1a2840;
-                border-radius: 2px; font-family: 'Courier New'; font-size: 9px; padding: 0 6px; }
+                border-radius: 2px; font-family: 'Courier New'; font-size: 10px; padding: 0 6px; }
             QPushButton:hover { color: #e94560; border-color: #e94560; }
         """)
         btn_clear_log.clicked.connect(lambda: self.log_display.clear())
@@ -329,11 +329,10 @@ class LiveTab(QMainWindow):
 
         self.log_display = QTextEdit()
         self.log_display.setReadOnly(True)
-        self.log_display.setStyleSheet(f"""
-            QTextEdit {{ background: #080e1e; border: none;
-                color: #00cc88; font-family: 'Courier New'; font-size: {{self.log_font_size}}px; }}
+        self.log_display.setStyleSheet("""
+            QTextEdit { background: #080e1e; border: none;
+                color: #00cc88; font-family: 'Courier New'; font-size: 11px; }
         """)
-        self.log_font_size = 12  # Default font size for the log display
         log_layout.addWidget(self.log_display, 1)
 
         self.dock_log = QDockWidget("🖥  System Log", self)
@@ -365,7 +364,7 @@ class LiveTab(QMainWindow):
         self._btn_del_roi.setToolTip("선택한 ROI 삭제 (Delete)")
         self._btn_del_roi.setStyleSheet("""
             QPushButton { background:transparent; color:#304060; border:1px solid #1a2840;
-                border-radius:2px; font-family:'Courier New'; font-size:9px; padding:0 6px; }
+                border-radius:2px; font-family:'Courier New'; font-size:10px; padding:0 6px; }
             QPushButton:hover { color:#e94560; border-color:#e94560; }
         """)
         self._btn_del_roi.clicked.connect(self._delete_selected_roi)
@@ -953,7 +952,7 @@ class LiveTab(QMainWindow):
         save_dir = "Live_Captures"
         os.makedirs(save_dir, exist_ok=True)
 
-        cx, cy, br, _ = self._last_centroid
+        cx, cy, br, *_ = self._last_centroid
         xstr = f"{cx:.1f}".replace(".", "p") if cx is not None else "X"
         ystr = f"{cy:.1f}".replace(".", "p") if cy is not None else "Y"
 

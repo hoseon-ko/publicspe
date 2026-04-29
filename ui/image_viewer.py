@@ -10,7 +10,8 @@ QGraphicsView 기반 이미지 뷰어
 """
 
 import numpy as np
-from ui.roi_items import LineROI, BoxROI, HistROI
+from ui.roi_items import LineROI, BoxROI, HistROI, HandleItem
+from ui.colormap_utils import apply_colormap, ndarray_to_qpixmap  # re-export for backward compat
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
     QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
@@ -24,50 +25,6 @@ from PyQt6.QtGui import (
 )
 
 from typing import Optional, Union
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 컬러맵
-# ─────────────────────────────────────────────────────────────────────────────
-
-def apply_colormap(image: np.ndarray, cmap: str = 'jet') -> np.ndarray:
-    """2D float 이미지 → RGBA uint8"""
-    f = image.astype(np.float64)
-    vmin, vmax = f.min(), f.max()
-    if vmax > vmin:
-        f = (f - vmin) / (vmax - vmin)
-    else:
-        f = np.zeros_like(f)
-
-    if cmap == 'jet':
-        r = np.clip(1.5 - np.abs(4.0 * f - 3.0), 0, 1)
-        g = np.clip(1.5 - np.abs(4.0 * f - 2.0), 0, 1)
-        b = np.clip(1.5 - np.abs(4.0 * f - 1.0), 0, 1)
-    elif cmap == 'grey':
-        r = g = b = f
-    elif cmap == 'hot':
-        r = np.clip(f * 3.0, 0, 1)
-        g = np.clip(f * 3.0 - 1.0, 0, 1)
-        b = np.clip(f * 3.0 - 2.0, 0, 1)
-    elif cmap == 'viridis':
-        r = np.clip(0.267 + 0.005 * f + 2.33 * f**2 - 1.98 * f**3, 0, 1)
-        g = np.clip(0.005 + 1.40 * f - 0.55 * f**2, 0, 1)
-        b = np.clip(0.329 + 1.50 * f - 1.85 * f**2, 0, 1)
-    elif cmap == 'plasma':
-        r = np.clip(0.05 + 2.0 * f - 0.7 * f**2, 0, 1)
-        g = np.clip(0.03 * f + 1.2 * f**2 - 0.5 * f**3, 0, 1)
-        b = np.clip(0.55 - 0.8 * f + 0.5 * f**2, 0, 1)
-    else:
-        r = g = b = f
-
-    rgba = np.stack([r, g, b, np.ones_like(f)], axis=-1)
-    return (rgba * 255).astype(np.uint8)
-
-
-def ndarray_to_qpixmap(rgba: np.ndarray) -> QPixmap:
-    h, w = rgba.shape[:2]
-    rgba_c = np.ascontiguousarray(rgba)
-    img = QImage(rgba_c.data, w, h, w * 4, QImage.Format.Format_RGBA8888)
-    return QPixmap.fromImage(img.copy())
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -355,14 +312,16 @@ class ImageGraphicsView(QGraphicsView):
     # 마우스 이벤트
     # ─────────────────────────────────────────
 
-    def mouseMoveEvent(self, ev: QMouseEvent):
-        scene_pos = self.mapToScene(ev.pos())
-        x, y = scene_pos.x(), scene_pos.y()
-        self.mouse_moved.emit(x, y)
-
     def mousePressEvent(self, ev: QMouseEvent):
         if ev.button() == Qt.MouseButton.LeftButton:
             scene_pos = self.mapToScene(ev.pos())
+
+            # 핸들 클릭이면 씬으로 전파 — 드로잉 모드와 무관하게 ROI 편집 허용
+            for item in self._scene.items(scene_pos):
+                if isinstance(item, HandleItem) and item.isVisible():
+                    super().mousePressEvent(ev)
+                    return
+
             x, y = scene_pos.x(), scene_pos.y()
 
             if self._roi_mode in ('line', 'box', 'histogram'):
@@ -370,7 +329,7 @@ class ImageGraphicsView(QGraphicsView):
                 self._draw_start = (x, y)
                 self._clear_roi_item()
                 ev.accept()
-                return  # 씬으로 전파 차단
+                return
             else:
                 # None 모드: 기존 ROI 클릭 선택 시도 → 없으면 클릭 마커
                 hit = self._find_roi_at(x, y)
@@ -487,14 +446,6 @@ class ImageGraphicsView(QGraphicsView):
             ev.accept()
             return
         super().mouseDoubleClickEvent(ev)
-        if ev.button() == Qt.MouseButton.LeftButton and self._drawing:
-            scene_pos = self.mapToScene(ev.pos())
-            x, y = scene_pos.x(), scene_pos.y()
-            self._drawing = False
-            if self._draw_start is not None:
-                self._finalize_roi(self._draw_start[0], self._draw_start[1], x, y)
-            self._draw_start = None
-        super().mouseReleaseEvent(ev)
 
     def resizeEvent(self, ev):
         super().resizeEvent(ev)

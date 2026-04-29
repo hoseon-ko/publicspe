@@ -199,7 +199,7 @@ class RoiPanel(QWidget):
 
         # Active 배지 (숨김 상태로 시작)
         badge = QLabel("")
-        badge.setStyleSheet("font-size: 9px; font-weight: bold; padding: 0 3px;")
+        badge.setStyleSheet("font-family: 'Courier New'; font-size: 10px; font-weight: bold; padding: 0 3px;")
         badge.hide()
         row.addWidget(badge)
 
@@ -252,7 +252,7 @@ class RoiPanel(QWidget):
         refs['lbl'].setStyleSheet(f"color: {color}; font-size: 11px; font-weight: bold;")
         refs['badge'].setText(badge_text)
         refs['badge'].setStyleSheet(
-            f"color: {color}; font-size: 9px; font-weight: bold; padding: 0 3px;"
+            f"color: {color}; font-family: 'Courier New'; font-size: 10px; font-weight: bold; padding: 0 3px;"
         )
         refs['badge'].show()
 

@@ -1,21 +1,15 @@
 """
 ui/scan/scan_tab.py
-자동 스캔 탭 — 카메라 스냅 + 모터 이동 + 데이터 저장.
+자동 스캔 탭 UI — 카메라 스냅 + 모터 이동 + 데이터 저장.
 
-흐름:
-  (현재 위치에서) Snap → 분석 → 저장 → 모터 이동 → 정착 대기 → 반복
+워커 로직은 ui/scan/scan_workers.py 참고.
 """
 from __future__ import annotations
 
-import csv
-import os
-from datetime import datetime
 from typing import Optional
 
 import numpy as np
-from PyQt6.QtCore import (
-    Qt, QThread, pyqtSignal, QSettings, QSize
-)
+from PyQt6.QtCore import Qt, pyqtSignal, QSettings, QSize
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
     QGroupBox, QLabel, QPushButton, QSpinBox,
@@ -27,13 +21,9 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QIcon, QPixmap, QImage
 
 from core.image_processor import ImageProcessor, TemporalMode
-from core.spe_writer import save_spe
-try:
-    from core.camera.picamp import PicamCamera as _PicamCamera
-except Exception:
-    _PicamCamera = None
 from ui.image_viewer import ImageViewer
 from ui.plot_panel import PlotPanel
+from ui.scan.scan_workers import _CalibWorker, _ScanWorker, _draw_centroid_cross
 
 # ── 공통 폰트/색상 토큰 ──────────────────────────────────────────────
 _F  = "Segoe UI"        # 기본 UI 폰트
@@ -111,354 +101,6 @@ def _sep_v() -> QWidget:
     sep.setStyleSheet("background:#1a3a60;")
     return sep
 
-
-def _draw_centroid_cross(rgb: np.ndarray, cx: float, cy: float,
-                          size: int = 20) -> np.ndarray:
-    """RGB 배열에 청록색 십자 마커를 그린 복사본을 반환."""
-    out = rgb.copy()
-    h, w = out.shape[:2]
-    x, y = int(round(cx)), int(round(cy))
-    color = (0, 220, 180)
-    x1, x2 = max(0, x - size), min(w, x + size + 1)
-    y1, y2 = max(0, y - 1),    min(h, y + 2)
-    out[y1:y2, x1:x2] = color
-    x1, x2 = max(0, x - 1),    min(w, x + 2)
-    y1, y2 = max(0, y - size), min(h, y + size + 1)
-    out[y1:y2, x1:x2] = color
-    # 작은 원 형태로 표시 (3×3 외곽 박스)
-    for dy in (-size, size):
-        for dx in (-2, -1, 0, 1, 2):
-            ny, nx = y + dy, x + dx
-            if 0 <= ny < h and 0 <= nx < w:
-                out[ny, nx] = color
-    for dx in (-size, size):
-        for dy in (-2, -1, 0, 1, 2):
-            ny, nx = y + dy, x + dx
-            if 0 <= ny < h and 0 <= nx < w:
-                out[ny, nx] = color
-    return out
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 캘리브레이션 워커
-# ─────────────────────────────────────────────────────────────────────────────
-
-class _CalibWorker(QThread):
-    """
-    각 모터 단독 전진/후진 → centroid 변위 측정 → 방향벡터 + 가중치 비율 계산.
-
-    결과 dict:
-      {motor_num: {'fwd': {'dx','dy','mag','angle'},
-                   'bwd': {'dx','dy','mag','angle'},
-                   'weight_adj': float}}  # bwd_weight *= weight_adj 로 수정
-    """
-    log_message  = pyqtSignal(str)
-    progress     = pyqtSignal(int, int)
-    result_ready = pyqtSignal(dict)
-
-    def __init__(self, cam, motor_panel, params: dict, parent=None):
-        super().__init__(parent)
-        self._cam         = cam
-        self._motor       = motor_panel
-        self._calib_steps = params["calib_steps"]
-        self._settle_ms   = params["settle_ms"]
-        self._motors      = params["motors"]   # e.g. [1, 2, 3]
-        self._proc        = ImageProcessor()
-        self._proc.centroid_enabled = True
-        self._proc.temporal_mode = TemporalMode.SINGLE  # 이동 후 단일 프레임 측정
-        self._stop        = False
-
-    def request_stop(self):
-        self._stop = True
-
-    def _snap_cx_cy(self):
-        """snap + centroid 반환. 실패 시 (None, None)."""
-        try:
-            raw = np.asarray(self._cam.snap())
-            r = self._proc.process(raw)
-            return r.centroid_x, r.centroid_y
-        except Exception:
-            return None, None
-
-    def run(self):
-        total = 1 + len(self._motors) * 2  # baseline + N × (fwd + bwd)
-        step  = 0
-
-        # 기준 centroid
-        self.log_message.emit("📍 기준 위치 스냅...")
-        bx, by = self._snap_cx_cy()
-        step += 1; self.progress.emit(step, total)
-        if bx is None:
-            self.log_message.emit("❌ centroid 측정 실패 — 이미지 프로세서 설정 확인")
-            return
-        self.log_message.emit(f"   기준 centroid: ({bx:.2f}, {by:.2f})")
-
-        results = {}
-        for motor_num in self._motors:
-            if self._stop:
-                break
-            res = {}
-            self.log_message.emit(f"── M{motor_num} 캘리브레이션 ──")
-
-            # ── 전진 ──────────────────────────────────────────────────
-            self.log_message.emit(f"  M{motor_num} +{self._calib_steps} steps →")
-            self._motor.move(motor_num, self._calib_steps)
-            self.msleep(self._settle_ms)
-            fx, fy = self._snap_cx_cy()
-            step += 1; self.progress.emit(step, total)
-
-            if fx is not None:
-                dx, dy = fx - bx, fy - by
-                mag    = (dx**2 + dy**2) ** 0.5
-                angle  = float(np.degrees(np.arctan2(dy, dx)))
-                res["fwd"] = {"dx": dx, "dy": dy, "mag": mag, "angle": angle}
-                self.log_message.emit(
-                    f"    Δ({dx:+.2f}, {dy:+.2f})  {mag:.2f}px  {angle:.1f}°"
-                )
-            else:
-                self.log_message.emit("    ❌ centroid 없음")
-
-            # ── 후진 (원점 복귀) ──────────────────────────────────────
-            self.log_message.emit(f"  M{motor_num} -{self._calib_steps} steps ←")
-            self._motor.move(motor_num, -self._calib_steps)
-            self.msleep(self._settle_ms)
-            rx, ry = self._snap_cx_cy()
-            step += 1; self.progress.emit(step, total)
-
-            if rx is not None:
-                dx2, dy2 = rx - bx, ry - by
-                mag2   = (dx2**2 + dy2**2) ** 0.5
-                angle2 = float(np.degrees(np.arctan2(dy2, dx2)))
-                res["bwd"] = {"dx": dx2, "dy": dy2, "mag": mag2, "angle": angle2}
-                self.log_message.emit(
-                    f"    Δ({dx2:+.2f}, {dy2:+.2f})  {mag2:.2f}px  {angle2:.1f}°"
-                )
-                # 잔류 오차: 기준으로 돌아오지 못한 거리
-                residual = mag2
-                self.log_message.emit(f"    잔류 오차: {residual:.2f}px")
-            else:
-                self.log_message.emit("    ❌ centroid 없음")
-
-            # ── 가중치 보정 계산 ──────────────────────────────────────
-            if "fwd" in res and "bwd" in res:
-                fwd_mag = res["fwd"]["mag"]
-                bwd_mag = res["bwd"]["mag"]
-                if bwd_mag > 0.5:
-                    adj = fwd_mag / bwd_mag
-                    res["weight_adj"] = adj
-                    self.log_message.emit(
-                        f"  → 전진/후진 크기 비: {adj:.4f}  "
-                        f"(bwd_weight × {adj:.4f} 권장)"
-                    )
-                else:
-                    self.log_message.emit("  ⚠️ 후진 변위 너무 작음 — 계산 불가")
-
-            results[motor_num] = res
-
-        self.log_message.emit("✅ 캘리브레이션 완료")
-        self.result_ready.emit(results)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 스캔 워커
-# ─────────────────────────────────────────────────────────────────────────────
-
-class _ScanWorker(QThread):
-    """
-    Snap → 분석 → 저장 → 이동 → 반복.
-    각 스텝마다 step_done 시그널로 결과 전달.
-    """
-    step_done   = pyqtSignal(int, object, list, str)  # (idx, ProcessedFrame, positions, spe_path)
-    progress    = pyqtSignal(int, int)                # (current, total)
-    log_message = pyqtSignal(str)
-    finished    = pyqtSignal(str)                     # CSV 요약 경로
-    error       = pyqtSignal(str)
-
-    def __init__(self, cam, motor_panel, params: dict, proc=None, parent=None):
-        super().__init__(parent)
-        self._cam         = cam
-        self._motor       = motor_panel
-        self._motor_num   = params["motor_num"]
-        self._steps_move  = params["steps_move"]
-        self._num_steps   = params["num_steps"]
-        self._settle_ms   = params["settle_ms"]
-        self._save_dir    = params["save_dir"]
-        self._scan_name   = params["scan_name"]
-        self._proc        = proc if proc is not None else ImageProcessor()
-        self._proc.centroid_enabled = True
-        # 스캔 중에는 단일 프레임 스냅 — 이동 중 프레임이 버퍼에 섞이면 안 됨
-        self._proc.temporal_mode = TemporalMode.SINGLE
-        self._stop        = False
-        self._records: list = []   # CSV 누적
-
-    def request_stop(self):
-        self._stop = True
-
-    def run(self):
-        os.makedirs(self._save_dir, exist_ok=True)
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        csv_path = os.path.join(self._save_dir, f"{self._scan_name}_{ts}_summary.csv")
-
-        cam_name = type(self._cam).__name__.replace("Camera", "")
-
-        for i in range(self._num_steps):
-            if self._stop:
-                self.log_message.emit("■ 스캔 중단됨")
-                break
-
-            # ── Snap ──────────────────────────────────────────────────
-            try:
-                raw = np.asarray(self._cam.snap())
-            except Exception as e:
-                self.error.emit(f"Step {i+1} 촬영 실패: {e}")
-                break
-
-            # ── 분석 ──────────────────────────────────────────────────
-            result = self._proc.process(raw)
-
-            # ── 모터 위치 읽기 ─────────────────────────────────────────
-            positions = self._motor.get_positions() if self._motor else [None]*4
-            _pos = [p if p is not None else 0 for p in positions]
-            _cx = f"{result.centroid_x:.3f}" if result.centroid_x is not None else "N/A"
-            _cy = f"{result.centroid_y:.3f}" if result.centroid_y is not None else "N/A"
-
-            # ── exposure 읽기 (메타데이터용) ───────────────────────────
-            try:
-                exp_ms = self._cam.get_exposure_ms()
-            except Exception:
-                exp_ms = 0.0
-
-            stem = f"{self._scan_name}_{ts}_step{i+1:04d}"
-
-            # ── SPE 저장 (raw 데이터 + XML 메타데이터) ─────────────────
-            spe_path = os.path.join(self._save_dir, stem + ".spe")
-            _scan_extra = {
-                "Scan": {
-                    "ScanName":    self._scan_name,
-                    "StepIndex":   str(i + 1),
-                    "TotalSteps":  str(self._num_steps),
-                    "MotorAxis":   f"M{self._motor_num}",
-                    "StepsPerMove": str(self._steps_move),
-                },
-                "MotorPositions": {
-                    "M1": str(_pos[0]),
-                    "M2": str(_pos[1]),
-                    "M3": str(_pos[2]),
-                    "M4": str(_pos[3]),
-                },
-                "ImageAnalysis": {
-                    "CentroidX":  _cx,
-                    "CentroidY":  _cy,
-                    "Brightness": str(result.brightness),
-                    "SNR":        f"{result.snr:.3f}",
-                    "FrameMean":  f"{result.frame_mean:.3f}",
-                    "Saturated":  "true" if result.saturated else "false",
-                    "SatRatio":   f"{result.sat_ratio:.6f}",
-                },
-            }
-            try:
-                # PicamCamera는 저장 전에 카메라에서 직접 메타데이터를 읽는다
-                if _PicamCamera is not None and isinstance(self._cam, _PicamCamera):
-                    self._cam.save_as_spe(
-                        spe_path, raw,
-                        exposure_ms=exp_ms,
-                        extra_metadata=_scan_extra,
-                    )
-                else:
-                    save_spe(
-                        spe_path, raw,
-                        camera_name=cam_name,
-                        exposure_ms=exp_ms,
-                        creator="ScanTab",
-                        extra_metadata=_scan_extra,
-                    )
-            except Exception as e:
-                self.log_message.emit(f"⚠️ SPE 저장 오류: {e}")
-                spe_path = ""
-
-            # ── 이미지 저장 (raw BMP + display PNG) ────────────────────
-            try:
-                import cv2 as _cv2
-                # raw: 원본 16-bit 그대로
-                raw_img_path = os.path.join(self._save_dir, stem + "_raw.png")
-                _cv2.imwrite(raw_img_path, raw)
-                # display: 8-bit 정규화 + centroid 마커 오버레이
-                disp = result.display.copy()
-                if disp.ndim == 2:
-                    disp_bgr = _cv2.cvtColor(disp, _cv2.COLOR_GRAY2BGR)
-                else:
-                    disp_bgr = disp.copy()
-                if result.has_centroid:
-                    ix = int(round(result.centroid_x))
-                    iy = int(round(result.centroid_y))
-                    _cv2.drawMarker(disp_bgr, (ix, iy), (0, 220, 180),
-                                    _cv2.MARKER_CROSS, 40, 2)
-                    _cv2.putText(disp_bgr,
-                                 f"({result.centroid_x:.1f},{result.centroid_y:.1f})",
-                                 (ix + 8, iy - 8), _cv2.FONT_HERSHEY_SIMPLEX,
-                                 0.5, (0, 220, 180), 1)
-                disp_img_path = os.path.join(self._save_dir, stem + "_disp.png")
-                _cv2.imwrite(disp_img_path, disp_bgr)
-            except ImportError:
-                raw_img_path = ""
-                disp_img_path = ""
-                self.log_message.emit("⚠️ OpenCV 없음 — 이미지 파일 저장 생략")
-            except Exception as e:
-                self.log_message.emit(f"⚠️ 이미지 저장 오류: {e}")
-                raw_img_path = ""
-                disp_img_path = ""
-
-            # ── CSV 기록 ──────────────────────────────────────────────
-            self._records.append({
-                "step": i + 1,
-                "M1": _pos[0], "M2": _pos[1], "M3": _pos[2], "M4": _pos[3],
-                "centroid_x": result.centroid_x,
-                "centroid_y": result.centroid_y,
-                "brightness": result.brightness,
-                "snr":        result.snr,
-                "frame_mean": result.frame_mean,
-                "spe_file":   os.path.basename(spe_path),
-                "raw_img":    os.path.basename(raw_img_path),
-                "disp_img":   os.path.basename(disp_img_path),
-            })
-
-            self.step_done.emit(i, result, positions, spe_path)
-            self.progress.emit(i + 1, self._num_steps)
-            self.log_message.emit(
-                f"✅ Step {i+1}/{self._num_steps}  "
-                f"Centroid=({_cx}, {_cy})  "
-                f"M{self._motor_num}={_pos[self._motor_num-1]}"
-            )
-
-            # ── 모터 이동 (마지막 스텝 제외) ──────────────────────────
-            if i < self._num_steps - 1 and not self._stop:
-                ok = self._motor.move(self._motor_num, self._steps_move) \
-                     if self._motor else False
-                if not ok:
-                    self.log_message.emit(f"⚠️ M{self._motor_num} 이동 실패")
-                # 정착 대기
-                self.msleep(self._settle_ms)
-                # 카메라 내부 버퍼 플러시 — 이동 중 쌓인 낡은 프레임 폐기
-                for _ in range(self._flush_snaps):
-                    try:
-                        self._cam.snap()
-                    except Exception:
-                        pass
-
-        # ── CSV 저장 ──────────────────────────────────────────────────
-        if self._records:
-            try:
-                with open(csv_path, "w", newline="", encoding="utf-8-sig") as f:
-                    w = csv.DictWriter(f, fieldnames=list(self._records[0].keys()))
-                    w.writeheader()
-                    w.writerows(self._records)
-                self.finished.emit(csv_path)
-            except Exception as e:
-                self.error.emit(f"CSV 저장 오류: {e}")
-        else:
-            self.finished.emit("")
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Scan 탭
 # ─────────────────────────────────────────────────────────────────────────────
@@ -495,6 +137,10 @@ class ScanTab(QWidget):
     # ── Public API ────────────────────────────────────────────────────
 
     def set_shared_camera(self, cam):
+        # 카메라가 바뀌면 이전 스캔 결과 초기화 (스캔 중이 아닐 때만)
+        if self._cam is not cam:
+            if not (self._worker and self._worker.isRunning()):
+                self._reset_scan_results()
         self._cam = cam
         cam_name = type(cam).__name__.replace("Camera", "")
         self._lbl_cam.setText(f"📷 {cam_name}  ● CONNECTED")
@@ -503,11 +149,26 @@ class ScanTab(QWidget):
         self.btn_calibrate.setEnabled(True)
 
     def clear_shared_camera(self):
+        if not (self._worker and self._worker.isRunning()):
+            self._reset_scan_results()
         self._cam = None
         self._lbl_cam.setText("📷 카메라 없음")
         self._lbl_cam.setStyleSheet(f"color: #e94560; font-family: '{_F}'; font-size: {_FS_LBL};")
         self.btn_start.setEnabled(False)
         self.btn_calibrate.setEnabled(False)
+
+    def _reset_scan_results(self):
+        """스캔 결과(테이블·썸네일·이미지 리스트·플롯) 전체 초기화."""
+        self._image_list.clear()
+        self._scan_records.clear()
+        self._plot_x.clear()
+        self._plot_cx.clear()
+        self._plot_cy.clear()
+        self._frame_list.clear()
+        self._table.setRowCount(0)
+        self.progress_bar.setValue(0)
+        self._lbl_progress.setText("—")
+        self.plot_panel.clear()
 
     def set_motor_panel(self, motor_panel):
         """Live 탭의 MotorPanel 공유 — 위치 읽기 + 이동 명령."""
@@ -1067,6 +728,7 @@ class ScanTab(QWidget):
     def _stop_scan(self):
         if self._worker and self._worker.isRunning():
             self._worker.request_stop()
+            self.btn_stop.setEnabled(False)  # 중복 요청 방지
         self._log("■ 정지 요청...")
 
     # ── 워커 콜백 ─────────────────────────────────────────────────────
@@ -1077,10 +739,9 @@ class ScanTab(QWidget):
         pos_snapshot = [p if p is not None else 0 for p in positions]
         self._image_list.append((idx, result.raw.copy(), pos_snapshot))
         if len(self._image_list) > max_frames:
-            evicted_idx, _, _ = self._image_list.pop(0)
+            self._image_list.pop(0)
             self._frame_list.takeItem(0)
-            if len(self._image_list) == max_frames:
-                self._log(f"⚠️ 프레임 상한 {max_frames}개 도달 — RAM에서 제거 (SPE는 디스크에 유지)")
+            self._log(f"⚠️ 프레임 상한 {max_frames}개 — 가장 오래된 RAM 복사본 제거 (SPE는 디스크에 유지)")
 
         # 프레임 스핀박스 최대값 갱신
         n = len(self._image_list) - 1
@@ -1283,8 +944,15 @@ class ScanTab(QWidget):
             "settle_ms":   self.spin_settle.value(),
             "motors":      motors,
         }
+        total_steps = 1 + len(motors) * 2
+        self.progress_bar.setMaximum(total_steps)
+        self.progress_bar.setValue(0)
+        self._lbl_progress.setText(f"0 / {total_steps}")
+
+        self.scan_starting.emit()   # Live 스트림 정지 (Picam 리소스 충돌 방지)
         self._calib_worker = _CalibWorker(self._cam, self._motor_panel, params)
         self._calib_worker.log_message.connect(self._log)
+        self._calib_worker.progress.connect(self._on_progress)
         self._calib_worker.result_ready.connect(self._on_calib_result)
         self._set_controls_locked(True)
         self._calib_worker.start()
@@ -1293,6 +961,7 @@ class ScanTab(QWidget):
     def _on_calib_result(self, results: dict):
         self._calib_worker = None
         self._set_controls_locked(False)
+        self.scan_done.emit()   # Live 재개
         self._log("── 캘리브레이션 결과 ──")
         for motor_num, res in results.items():
             parts = [f"M{motor_num}:"]

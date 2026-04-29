@@ -408,20 +408,68 @@ class PicamCameraWrapper:
 
     # ── 이미지 획득 ───────────────────────────────────────────────────
 
-    def snap(self):
-        """이미지 1장을 취득한다."""
+    def _get_frame_total_s(self) -> float:
+        """노출 시간 + 리드아웃 시간(초)를 반환한다.
+
+        Picam SDK의 'Readout Time Calculation' 파라미터(ms)를 우선 사용하고,
+        조회 실패 시 노출 시간만 반환한다.
+        """
+        try:
+            exp_s = self.get_exposure_ms() / 1000.0
+        except Exception:
+            exp_s = 1.0
+
+        readout_s = 0.0
+        if self.cam is not None:
+            for name in ("Readout Time Calculation", "ReadoutTimeCalculation",
+                         "Readout Time", "Frame Rate Calculation"):
+                val = _get_attr_safe(self.cam, name)
+                if val is not None:
+                    ms = _parse_first_float(val)
+                    if ms is not None:
+                        # Picam SDK는 ms 단위; Frame Rate는 fps → 역수
+                        if "Rate" in name and ms > 0:
+                            readout_s = max(1.0 / ms - exp_s, 0.0)
+                        else:
+                            readout_s = ms / 1000.0
+                        break
+
+        return exp_s + readout_s
+
+    def _auto_timeout(self, margin: float = 5.0, multiplier: float = 2.0,
+                      minimum: float = 10.0) -> float:
+        """프레임 총 시간 기반 자동 타임아웃(초)을 계산한다."""
+        return max(self._get_frame_total_s() * multiplier + margin, minimum)
+
+    def snap(self, timeout: Optional[float] = None):
+        """이미지 1장을 취득한다. timeout=None이면 노출+리드아웃 기반 자동 계산."""
         cam = _require_open_camera(self)
-        return cam.snap()
+        # 혹시 이전 acquisition 상태가 남아있을 경우 먼저 정리
+        try:
+            cam.stop_acquisition()
+        except Exception:
+            pass
+        if timeout is None:
+            timeout = self._auto_timeout()
+        return cam.snap(timeout=float(timeout))
 
     def acquire_images(
         self,
         nframes: int,
-        timeout_s: float = 10.0,
+        timeout_s: Optional[float] = None,
         progress_cb: Optional[Callable[[int, int], None]] = None,
     ):
-        """이미지를 여러 장 취득해서 리스트로 반환한다."""
+        """이미지를 여러 장 취득해서 리스트로 반환한다.
+        timeout_s=None이면 노출+리드아웃 기반 자동 계산."""
         cam = _require_open_camera(self)
         n = max(1, int(nframes))
+        # 혹시 이전 acquisition 상태가 남아있을 경우 먼저 정리
+        try:
+            cam.stop_acquisition()
+        except Exception:
+            pass
+        if timeout_s is None:
+            timeout_s = self._auto_timeout()
         if n == 1:
             frame = cam.snap(timeout=float(timeout_s))
             if progress_cb is not None:
@@ -431,12 +479,19 @@ class PicamCameraWrapper:
         cam.start_acquisition()
         try:
             for idx in range(n):
-                if cam.wait_for_frame(timeout=float(timeout_s)):
+                try:
+                    got = cam.wait_for_frame(timeout=float(timeout_s))
+                except Exception:
+                    got = False
+                if got:
                     frames.append(cam.read_oldest_image())
                     if progress_cb is not None:
                         progress_cb(idx + 1, n)
                 else:
-                    break
+                    raise RuntimeError(
+                        f"프레임 {idx+1}/{n} 대기 타임아웃 ({timeout_s:.1f}초) — "
+                        "Timeout 설정 또는 노출 시간을 확인하세요"
+                    )
         finally:
             try:
                 cam.stop_acquisition()
@@ -452,14 +507,29 @@ class PicamCameraWrapper:
     ):
         """실시간 프리뷰를 수행한다. frame_cb에 새 프레임이 들어올 때마다 호출한다."""
         cam = _require_open_camera(self)
+        # 이전 acquisition 상태가 남아있을 경우 먼저 정리
+        try:
+            cam.stop_acquisition()
+        except Exception:
+            pass
+
+        # poll 간격 = 노출+리드아웃 + 1초 여유, 최소 2초
+        # (프레임 총 시간보다 짧으면 pylablib이 TimeoutError를 발생시킴)
+        poll_s = max(self._get_frame_total_s() + 1.0, 2.0)
+
         cam.start_acquisition()
-        # stop_condition을 빠르게 감지하기 위해 단위 시간마다 체크
-        poll_s = min(0.5, timeout_s)
         try:
             while True:
                 if stop_condition and stop_condition():
                     break
-                if cam.wait_for_frame(timeout=poll_s):
+                try:
+                    got_frame = cam.wait_for_frame(timeout=poll_s)
+                except Exception:
+                    # pylablib은 타임아웃 시 False 대신 예외를 던지기도 함 — 무시하고 계속
+                    if stop_condition and stop_condition():
+                        break
+                    continue
+                if got_frame:
                     if stop_condition and stop_condition():
                         break
                     frame = cam.read_oldest_image()
@@ -806,6 +876,7 @@ class PicamCameraWrapper:
 class _LiveWorker(QObject):
     """별도 스레드에서 Picam live_preview를 돌리며 프레임 시그널 전달."""
     frame_ready = pyqtSignal(np.ndarray)
+    error       = pyqtSignal(str)
 
     def __init__(self, wrapper: PicamCameraWrapper):
         super().__init__()
@@ -814,10 +885,13 @@ class _LiveWorker(QObject):
 
     def run(self):
         self._stop_event.clear()
-        self._wrapper.live_preview(
-            frame_cb=lambda f: self.frame_ready.emit(np.asarray(f)),
-            stop_condition=self._stop_event.is_set,
-        )
+        try:
+            self._wrapper.live_preview(
+                frame_cb=lambda f: self.frame_ready.emit(np.asarray(f)),
+                stop_condition=self._stop_event.is_set,
+            )
+        except Exception as e:
+            self.error.emit(str(e))
 
     def stop(self):
         self._stop_event.set()
@@ -925,6 +999,7 @@ class PicamCamera(BaseCamera):
 
     def snap(self) -> np.ndarray:
         self._require_connected()
+        # timeout=None → PicamCameraWrapper._auto_timeout() 자동 계산
         return np.asarray(self._wrapper.snap())
 
     def start_live(self, frame_cb: Callable[[np.ndarray], None]) -> None:
@@ -938,6 +1013,9 @@ class PicamCamera(BaseCamera):
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.frame_ready.connect(frame_cb)
+        self._worker.error.connect(
+            lambda msg: print(f"[PicamCamera] Live 오류: {msg}")
+        )
         self._thread.start()
         self._live = True
 
@@ -1207,31 +1285,7 @@ def acquire_images(
 ):
     """이미지를 여러 장 취득해서 리스트로 반환한다."""
     wrapper = _as_wrapper(cam_or_wrapper)
-    cam = _require_open_camera(wrapper)
-
-    n = max(1, int(nframes))
-    if n == 1:
-        frame = cam.snap()
-        if progress_cb is not None:
-            progress_cb(1, 1)
-        return [frame]
-
-    frames = []
-    cam.start_acquisition()
-    try:
-        for idx in range(n):
-            if cam.wait_for_frame(timeout=float(timeout_s)):
-                frames.append(cam.read_oldest_image())
-                if progress_cb is not None:
-                    progress_cb(idx + 1, n)
-            else:
-                break
-    finally:
-        try:
-            cam.stop_acquisition()
-        except Exception:
-            pass
-    return frames
+    return wrapper.acquire_images(nframes, timeout_s=timeout_s, progress_cb=progress_cb)
 
 
 def apply_camera_block(

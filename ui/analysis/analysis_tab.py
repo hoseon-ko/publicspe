@@ -216,9 +216,17 @@ class AnalysisTab(QMainWindow):
         worker.progress.connect(self.progress_bar.setValue)
         worker.finished.connect(self._on_spe_loaded)
         worker.error.connect(self._on_load_error)
-        worker.finished.connect(lambda *_: self.progress_bar.setVisible(False))
+        worker.finished.connect(lambda *_, w=worker: self._cleanup_worker(w))
+        worker.error.connect(lambda *_, w=worker: self._cleanup_worker(w))
         self._workers.append(worker)
         worker.start()
+
+    def _cleanup_worker(self, worker):
+        self.progress_bar.setVisible(False)
+        try:
+            self._workers.remove(worker)
+        except ValueError:
+            pass
 
     def _on_spe_loaded(self, filepath: str, spe_obj):
         num_frames = getattr(spe_obj, 'num_frames', 1)

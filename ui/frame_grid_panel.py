@@ -131,7 +131,7 @@ class FrameThumbItem(QWidget):
         # 라벨
         self.name_label = QLabel(label)
         self.name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.name_label.setStyleSheet("color: #a0a0b0; font-size: 9px;")
+        self.name_label.setStyleSheet("color: #a0a0b0; font-family: 'Courier New'; font-size: 10px;")
         self.name_label.setWordWrap(True)
         self.name_label.setFixedHeight(28)
         layout.addWidget(self.name_label)
@@ -139,7 +139,7 @@ class FrameThumbItem(QWidget):
         # 체크박스
         cb_row = QHBoxLayout()
         cb_label = QLabel("✓")
-        cb_label.setStyleSheet("color: #a0a0b0; font-size: 9px;")
+        cb_label.setStyleSheet("color: #a0a0b0; font-family: 'Courier New'; font-size: 10px;")
         self.checkbox = QCheckBox()
         self.checkbox.setStyleSheet("QCheckBox::indicator { width: 14px; height: 14px; }")
         self.checkbox.toggled.connect(
@@ -155,7 +155,7 @@ class FrameThumbItem(QWidget):
         self._set_style(selected)
         color = "#e94560" if selected else "#a0a0b0"
         weight = "bold" if selected else "normal"
-        self.name_label.setStyleSheet(f"color: {color}; font-size: 9px; font-weight: {weight};")
+        self.name_label.setStyleSheet(f"color: {color}; font-family: 'Courier New'; font-size: 10px; font-weight: {weight};")
 
     def _set_style(self, selected: bool):
         if selected:

@@ -64,7 +64,7 @@ class ColorMapWorker(QThread):
             if self.cmap == 'off':
                 self.colormap_applied.emit(self._to_grayscale_rgba(self.image))
                 return
-            from ui.image_viewer import apply_colormap
+            from ui.colormap_utils import apply_colormap
             rgba = apply_colormap(self.image, self.cmap)
             self.colormap_applied.emit(rgba)
         except Exception as e:
