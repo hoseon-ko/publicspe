@@ -646,6 +646,15 @@ class CameraControlPanel(QWidget):
             self._temp_thread.temp_read.connect(self._on_temp_read)
             self._temp_thread.start()
 
+        if self._caps.has_fps_control:
+            try:
+                mn, mx = self._caps.fps_range
+                self.spin_fps.setRange(mn, mx)
+                current_fps = cam.get_fps()
+                self.spin_fps.setValue(current_fps)
+            except Exception:
+                pass
+
         if self._caps.has_adc:
             self._adc_combos["adc_quality"].addItems(
                 [str(x) for x in self._caps.adc_quality_options]
@@ -659,6 +668,18 @@ class CameraControlPanel(QWidget):
             self._adc_combos["bit_depth"].addItems(
                 [str(x) for x in self._caps.adc_bit_depth_options]
             )
+            # 현재 카메라에 적용된 ADC 값으로 콤보박스 선택
+            try:
+                current_adc = cam.get_adc_settings()
+                for key, val in current_adc.items():
+                    cb = self._adc_combos.get(key)
+                    if cb is None or val is None:
+                        continue
+                    idx = cb.findText(str(val))
+                    if idx >= 0:
+                        cb.setCurrentIndex(idx)
+            except Exception:
+                pass
 
     def detach_camera(self):
         if self._temp_thread is not None:

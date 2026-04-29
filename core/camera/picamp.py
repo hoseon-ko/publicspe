@@ -840,6 +840,19 @@ class PicamCameraWrapper:
 
     # ── ADC ───────────────────────────────────────────────────────────
 
+    def get_adc_settings(self) -> Dict[str, Any]:
+        """현재 카메라에 설정된 ADC 값을 반환한다."""
+        if self.cam is None:
+            raise RuntimeError("Camera is not opened")
+        result: Dict[str, Any] = {}
+        for logical_name, aliases in ADC_ATTR_ALIASES.items():
+            for name in aliases:
+                val = _get_attr_safe(self.cam, name, default=None)
+                if val is not None:
+                    result[logical_name] = val
+                    break
+        return result
+
     def apply_adc_settings(
         self,
         *,
@@ -1089,6 +1102,11 @@ class PicamCamera(BaseCamera):
     def get_adc_candidates(self) -> dict:
         self._require_connected()
         return self._wrapper.get_adc_candidate_map()
+
+    def get_adc_settings(self) -> dict:
+        """현재 카메라에 적용된 ADC 설정값을 반환한다."""
+        self._require_connected()
+        return self._wrapper.get_adc_settings()
 
     # ── 카메라 정보 ───────────────────────────────────────────────────
 
