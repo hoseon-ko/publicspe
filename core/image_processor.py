@@ -92,6 +92,11 @@ class ProcessedFrame:
     fit_sigma_x:  float = 0.0   # Gaussian fit X 폭 (pixel), GAUSSIAN_FIT 모드 전용
     fit_sigma_y:  float = 0.0   # Gaussian fit Y 폭 (pixel)
 
+    # Moment analysis (ignore_mask 적용 후 intensity-weighted 2차 모먼트)
+    beam_total:   float = 0.0   # M00: 유효 영역 총 광량 (a.u.)
+    beam_sigma_x: float = 0.0   # x 방향 빔 너비 RMS (픽셀)
+    beam_sigma_y: float = 0.0   # y 방향 빔 너비 RMS (픽셀)
+
     # 포화 감지
     saturated:    bool  = False
     sat_ratio:    float = 0.0            # 포화 픽셀 비율 [0.0 – 1.0]
@@ -159,6 +164,10 @@ class ImageProcessor:
         # ── Centroid ─────────────────────────────────────────────────
         self.centroid_enabled: bool         = True
         self.centroid_mode:    CentroidMode = CentroidMode.BINARY
+
+        # ── 무시 마스크 ───────────────────────────────────────────────
+        # bool ndarray (True = 무시). centroid/moment 계산 시 해당 픽셀 0 처리
+        self.ignore_mask: Optional[np.ndarray] = None
 
         # ── 프레임 차분 이미지 ────────────────────────────────────────
         self.temporal_diff_enabled: bool = False
@@ -370,42 +379,53 @@ class ImageProcessor:
         frame_max  = float(filtered.max())
         snr        = float(frame_max / frame_std) if frame_std > 0 else 0.0
 
-        # ── 13. Centroid ──────────────────────────────────────────────
+        # ── 13. 분석용 이미지 (무시 마스크 적용) ─────────────────────
+        h, w = raw.shape[:2]
+        if self.ignore_mask is not None and self.ignore_mask.shape == filtered.shape:
+            analysis_f = filtered.copy()
+            analysis_f[self.ignore_mask] = 0.0
+        else:
+            analysis_f = filtered
+
+        # ── 14. Centroid ──────────────────────────────────────────────
         cx = cy = None
         brightness = 0
         has_centroid = False
         fit_sigma_x = fit_sigma_y = 0.0
-        h, w = raw.shape[:2]
+        beam_total = beam_sigma_x = beam_sigma_y = 0.0
 
         if self.centroid_enabled:
+            # mgrid은 centroid + moment 양쪽에서 공유
+            ys_g, xs_g = np.mgrid[0:h, 0:w]
+
             if self.centroid_mode == CentroidMode.BINARY and _CV2_OK:
-                src = bin_img_u8 if bin_img_u8 is not None \
-                      else self._to_display(filtered)
-                M = cv2.moments(src)
+                src_u8 = self._to_display(analysis_f)
+                cv2_mode = _BIN_MODE_MAP.get(self.bin_mode, 0)
+                _, bin_a = cv2.threshold(src_u8, self.bin_threshold, 255, cv2_mode)
+                M = cv2.moments(bin_a)
                 if M["m00"] != 0:
                     cx = M["m10"] / M["m00"]
                     cy = M["m01"] / M["m00"]
                     has_centroid = True
 
             elif self.centroid_mode == CentroidMode.WEIGHTED:
-                total = float(filtered.sum())
+                total = float(analysis_f.sum())
                 if total > 0:
-                    ys, xs = np.mgrid[0:h, 0:w]
-                    cx = float((xs * filtered).sum() / total)
-                    cy = float((ys * filtered).sum() / total)
+                    cx = float((xs_g * analysis_f).sum() / total)
+                    cy = float((ys_g * analysis_f).sum() / total)
                     has_centroid = True
 
             elif self.centroid_mode == CentroidMode.PEAK_MAX:
-                idx = int(filtered.argmax())
+                idx = int(analysis_f.argmax())
                 cy, cx = divmod(idx, w)
                 cx, cy = float(cx), float(cy)
                 has_centroid = True
 
             elif self.centroid_mode == CentroidMode.GAUSSIAN_FIT:
-                cx, cy, fit_sigma_x, fit_sigma_y = self._gaussian_fit(filtered, h, w)
+                cx, cy, fit_sigma_x, fit_sigma_y = self._gaussian_fit(analysis_f, h, w)
                 has_centroid = cx is not None
                 if not has_centroid:  # 피팅 실패 시 peak max fallback
-                    idx = int(filtered.argmax())
+                    idx = int(analysis_f.argmax())
                     cy, cx = divmod(idx, w)
                     cx, cy = float(cx), float(cy)
                     has_centroid = True
@@ -414,6 +434,20 @@ class ImageProcessor:
                 iy = min(int(round(cy)), h - 1)
                 ix = min(int(round(cx)), w - 1)
                 brightness = int(display[iy, ix])
+
+            # ── Moment analysis (intensity-weighted 2차) ──────────────
+            total_m = float(analysis_f.sum())
+            if total_m > 0:
+                beam_total = total_m
+                # centroid가 없으면 모먼트 1차로 별도 계산
+                cx_m = cx if cx is not None else float((xs_g * analysis_f).sum() / total_m)
+                cy_m = cy if cy is not None else float((ys_g * analysis_f).sum() / total_m)
+                beam_sigma_x = float(
+                    np.sqrt(((xs_g - cx_m) ** 2 * analysis_f).sum() / total_m)
+                )
+                beam_sigma_y = float(
+                    np.sqrt(((ys_g - cy_m) ** 2 * analysis_f).sum() / total_m)
+                )
 
         return ProcessedFrame(
             raw=raw,
@@ -425,6 +459,9 @@ class ImageProcessor:
             has_centroid=has_centroid,
             fit_sigma_x=fit_sigma_x,
             fit_sigma_y=fit_sigma_y,
+            beam_total=beam_total,
+            beam_sigma_x=beam_sigma_x,
+            beam_sigma_y=beam_sigma_y,
             saturated=saturated,
             sat_ratio=sat_ratio,
             frame_mean=frame_mean,

@@ -196,6 +196,7 @@ class _ScanWorker(QThread):
         self._save_dir    = params["save_dir"]
         self._scan_name   = params["scan_name"]
         self._flush_snaps = params.get("flush_snaps", 0)
+        self._mask_rects  = params.get("ignore_mask_rects", [])
         self._proc        = proc if proc is not None else ImageProcessor()
         self._proc.centroid_enabled = True
         self._proc.temporal_mode = TemporalMode.SINGLE
@@ -205,12 +206,23 @@ class _ScanWorker(QThread):
     def request_stop(self):
         self._stop = True
 
+    def _build_ignore_mask(self, shape):
+        """ignore_mask_rects → numpy bool 마스크. 빈 목록이면 None 반환."""
+        if not self._mask_rects:
+            return None
+        h, w = shape[:2]
+        mask = np.zeros((h, w), dtype=bool)
+        for (x1, y1, x2, y2) in self._mask_rects:
+            mask[max(0, y1):min(h, y2), max(0, x1):min(w, x2)] = True
+        return mask
+
     def run(self):
         os.makedirs(self._save_dir, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         csv_path = os.path.join(self._save_dir, f"{self._scan_name}_{ts}_summary.csv")
 
         cam_name = type(self._cam).__name__.replace("Camera", "")
+        mask_built = False   # 첫 스냅 후 한 번만 빌드
 
         for i in range(self._num_steps):
             if self._stop:
@@ -223,6 +235,11 @@ class _ScanWorker(QThread):
             except Exception as e:
                 self.error.emit(f"Step {i+1} 촬영 실패: {e}")
                 break
+
+            # 첫 스냅 후 이미지 크기에 맞춰 마스크 한 번 빌드
+            if not mask_built:
+                self._proc.ignore_mask = self._build_ignore_mask(raw.shape)
+                mask_built = True
 
             # ── 분석 ──────────────────────────────────────────────────
             result = self._proc.process(raw)
@@ -320,14 +337,17 @@ class _ScanWorker(QThread):
             self._records.append({
                 "step": i + 1,
                 "M1": _pos[0], "M2": _pos[1], "M3": _pos[2], "M4": _pos[3],
-                "centroid_x": result.centroid_x,
-                "centroid_y": result.centroid_y,
-                "brightness": result.brightness,
-                "snr":        result.snr,
-                "frame_mean": result.frame_mean,
-                "spe_file":   os.path.basename(spe_path),
-                "raw_img":    os.path.basename(raw_img_path),
-                "disp_img":   os.path.basename(disp_img_path),
+                "centroid_x":   result.centroid_x,
+                "centroid_y":   result.centroid_y,
+                "beam_sigma_x": f"{result.beam_sigma_x:.3f}",
+                "beam_sigma_y": f"{result.beam_sigma_y:.3f}",
+                "beam_total":   f"{result.beam_total:.1f}",
+                "brightness":   result.brightness,
+                "snr":          result.snr,
+                "frame_mean":   result.frame_mean,
+                "spe_file":     os.path.basename(spe_path),
+                "raw_img":      os.path.basename(raw_img_path),
+                "disp_img":     os.path.basename(disp_img_path),
             })
 
             self.step_done.emit(i, result, positions, spe_path)

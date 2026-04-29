@@ -6,6 +6,7 @@ ui/scan/scan_tab.py
 """
 from __future__ import annotations
 
+import os
 from typing import Optional
 
 import numpy as np
@@ -24,6 +25,7 @@ from core.image_processor import ImageProcessor, TemporalMode
 from ui.image_viewer import ImageViewer
 from ui.plot_panel import PlotPanel
 from ui.scan.scan_workers import _CalibWorker, _ScanWorker, _draw_centroid_cross
+from ui.scan.mask_editor import MaskEditorDialog
 
 # ── 공통 폰트/색상 토큰 ──────────────────────────────────────────────
 _F  = "Segoe UI"        # 기본 UI 폰트
@@ -126,6 +128,9 @@ class ScanTab(QWidget):
         # 공유 ImageProcessor — 이진화/임계값 설정이 스캔 전반에 유지됨
         self._proc = ImageProcessor()
         self._proc.centroid_enabled = True
+
+        # 무시 마스크 영역 목록 [(x1,y1,x2,y2), ...]
+        self._mask_rects: list[tuple[int, int, int, int]] = []
 
         self._plot_x:  list = []
         self._plot_cx: list = []
@@ -398,6 +403,31 @@ class ScanTab(QWidget):
         self.btn_absdiff.clicked.connect(self._show_abs_diff)
         ctrl_layout.addWidget(grp_frame)
 
+        # ── 무시 마스크 ────────────────────────────────────────────────
+        grp_mask = QGroupBox("IGNORE MASK")
+        grp_mask.setStyleSheet(_GRP.format(c="#ff7675"))
+        gm = QVBoxLayout(grp_mask)
+        gm.setSpacing(5)
+
+        self._lbl_mask_count = QLabel("비활성")
+        self._lbl_mask_count.setStyleSheet(
+            f"color:#4a6a8a; font-family:'{_FC}'; font-size:13px;"
+        )
+        gm.addWidget(self._lbl_mask_count)
+
+        mask_btn_row = QHBoxLayout()
+        self.btn_edit_mask = QPushButton("영역 편집")
+        self.btn_clear_mask = QPushButton("초기화")
+        self.btn_edit_mask.setStyleSheet(_BTN_PRIMARY)
+        self.btn_clear_mask.setStyleSheet(_BTN_DANGER)
+        self.btn_edit_mask.clicked.connect(self._edit_mask)
+        self.btn_clear_mask.clicked.connect(self._clear_mask)
+        mask_btn_row.addWidget(self.btn_edit_mask)
+        mask_btn_row.addWidget(self.btn_clear_mask)
+        gm.addLayout(mask_btn_row)
+
+        ctrl_layout.addWidget(grp_mask)
+
         # ── 캘리브레이션 ───────────────────────────────────────────────
         grp_calib = QGroupBox("CALIBRATION")
         grp_calib.setStyleSheet(_GRP.format(c="#fd79a8"))
@@ -582,9 +612,9 @@ class ScanTab(QWidget):
 
         # ── 패널 4: 결과 테이블 ───────────────────────────────────────
         self._table = QTableWidget()
-        self._table.setColumnCount(9)
+        self._table.setColumnCount(11)
         self._table.setHorizontalHeaderLabels(
-            ["Step", "M1", "M2", "M3", "M4", "CentX", "CentY", "SNR", "SPE"]
+            ["Step", "M1", "M2", "M3", "M4", "CentX", "CentY", "σX", "σY", "SNR", "SPE"]
         )
         self._table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.ResizeToContents
@@ -708,14 +738,17 @@ class ScanTab(QWidget):
         self._plot_cy.clear()
 
         params = {
-            "motor_num":   motor_num,
-            "steps_move":  steps_move,
-            "num_steps":   num_steps,
-            "settle_ms":   settle_ms,
-            "save_dir":    save_dir,
-            "scan_name":   scan_name,
-            "flush_snaps": self.spin_flush.value(),
+            "motor_num":         motor_num,
+            "steps_move":        steps_move,
+            "num_steps":         num_steps,
+            "settle_ms":         settle_ms,
+            "save_dir":          save_dir,
+            "scan_name":         scan_name,
+            "flush_snaps":       self.spin_flush.value(),
+            "ignore_mask_rects": list(self._mask_rects),
         }
+        # 마스크는 워커가 첫 스냅 후 크기에 맞게 빌드하므로 여기서 리셋
+        self._proc.ignore_mask = None
         self._worker = _ScanWorker(self._cam, self._motor_panel, params, proc=self._proc)
         self._worker.step_done.connect(self._on_step_done)
         self._worker.progress.connect(self._on_progress)
@@ -764,6 +797,8 @@ class ScanTab(QWidget):
             str(idx + 1),
             str(p[0]), str(p[1]), str(p[2]), str(p[3]),
             cx, cy,
+            f"{result.beam_sigma_x:.1f}",
+            f"{result.beam_sigma_y:.1f}",
             f"{result.snr:.2f}",
             os.path.basename(spe_path),
         ]
@@ -884,39 +919,91 @@ class ScanTab(QWidget):
             self._log("⚠️ A와 B가 같은 프레임")
             return
 
-        step_a, raw_a, pos_a = self._image_list[a_idx]
-        step_b, raw_b, pos_b = self._image_list[b_idx]
-        a = raw_a.astype(np.float32)
-        b = raw_b.astype(np.float32)
-        dp = [pb - pa for pa, pb in zip(pos_a, pos_b)]
-        self._log(
-            f"A=Step#{step_a+1} → B=Step#{step_b+1}  "
-            f"ΔM1={dp[0]:+d}  ΔM2={dp[1]:+d}  ΔM3={dp[2]:+d}  ΔM4={dp[3]:+d}"
-        )
-        diff = a - b  # 부호 있는 차이
+        try:
+            step_a, raw_a, pos_a = self._image_list[a_idx]
+            step_b, raw_b, pos_b = self._image_list[b_idx]
+            a = raw_a.astype(np.float32)
+            b = raw_b.astype(np.float32)
+            dp = [pb - pa for pa, pb in zip(pos_a, pos_b)]
+            self._log(
+                f"A=Step#{step_a+1} → B=Step#{step_b+1}  "
+                f"ΔM1={dp[0]:+d}  ΔM2={dp[1]:+d}  ΔM3={dp[2]:+d}  ΔM4={dp[3]:+d}"
+            )
+            diff = a - b
 
-        if absolute:
-            arr = np.abs(diff)
-            vmin, vmax = 0.0, float(arr.max()) or 1.0
-            # 0~255 단순 정규화
-            disp8 = ((arr - vmin) / (vmax - vmin) * 255).astype(np.uint8)
+            if absolute:
+                # |A-B|: hot 컬러맵 (0=검정 → 빨강 → 노랑 → 흰색)
+                arr = np.abs(diff)
+                vmax = float(arr.max()) or 1.0
+                f = arr / vmax                r_ch = np.clip(f * 3.0,       0, 1)
+                g_ch = np.clip(f * 3.0 - 1.0, 0, 1)
+                b_ch = np.clip(f * 3.0 - 2.0, 0, 1)
+                rgb = np.stack(
+                    [(r_ch * 255).astype(np.uint8),
+                     (g_ch * 255).astype(np.uint8),
+                     (b_ch * 255).astype(np.uint8)],
+                    axis=-1
+                )
+                self._log(f"|A-B|  max={arr.max():.1f}  mean={arr.mean():.2f}")
+            else:
+                # A-B: diverging — 양수(A>B)→빨강, 음수(B>A)→파랑
+                peak = float(max(abs(diff.min()), abs(diff.max()))) or 1.0
+                norm = diff / peak  # -1 ~ +1
+                r_ch = np.clip( norm * 255, 0, 255).astype(np.uint8)
+                b_ch = np.clip(-norm * 255, 0, 255).astype(np.uint8)
+                g_ch = np.zeros_like(r_ch)
+                rgb = np.stack([r_ch, g_ch, b_ch], axis=-1)
+                self._log(
+                    f"A-B  min={diff.min():.1f}  max={diff.max():.1f}  "
+                    f"mean={diff.mean():.2f}"
+                )
+
+            self.image_viewer.set_live_frame(
+                np.ascontiguousarray(rgb), fit=False
+            )
+        except Exception as e:
+            self._log(f"❌ diff 렌더링 오류: {e}")
+
+    # ── 무시 마스크 ───────────────────────────────────────────────────
+
+    def _edit_mask(self):
+        """스냅 또는 마지막 프레임을 불러와 MaskEditorDialog를 열고 결과를 저장."""
+        img = None
+        if self._cam is not None:
             try:
-                import cv2
-                rgb = cv2.cvtColor(disp8, cv2.COLOR_GRAY2RGB) if disp8.ndim == 2 else disp8.copy()
-            except ImportError:
-                rgb = np.stack([disp8, disp8, disp8], axis=-1)
-            self._log(f"|A-B|  max={arr.max():.1f}  mean={arr.mean():.2f}")
-        else:
-            # diverging 컬러맵: 음수→파랑, 0→검정, 양수→빨강
-            peak = float(max(abs(diff.min()), abs(diff.max()))) or 1.0
-            norm = diff / peak  # -1 ~ +1
-            r_ch = np.clip( norm * 255, 0, 255).astype(np.uint8)
-            b_ch = np.clip(-norm * 255, 0, 255).astype(np.uint8)
-            g_ch = np.zeros_like(r_ch)
-            rgb = np.stack([r_ch, g_ch, b_ch], axis=-1)
-            self._log(f"A-B  min={diff.min():.1f}  max={diff.max():.1f}  mean={diff.mean():.2f}")
+                img = np.asarray(self._cam.snap())
+            except Exception as e:
+                self._log(f"⚠️ 스냅 실패 — 마지막 프레임으로 대체: {e}")
+        if img is None and self._image_list:
+            _, img, _ = self._image_list[-1]
+        if img is None:
+            self._log("⚠️ 편집할 이미지 없음 — 먼저 스캔하거나 카메라 연결")
+            return
+        dlg = MaskEditorDialog(img, self._mask_rects, parent=self)
+        if dlg.exec():
+            self._mask_rects = dlg.get_rects()
+            self._update_mask_label()
+            n = len(self._mask_rects)
+            self._log(f"✅ 마스크 {n}개 영역 설정" if n else "마스크 초기화")
 
-        self.image_viewer.set_live_frame(rgb, fit=False)
+    def _clear_mask(self):
+        self._mask_rects.clear()
+        self._proc.ignore_mask = None
+        self._update_mask_label()
+        self._log("마스크 초기화")
+
+    def _update_mask_label(self):
+        n = len(self._mask_rects)
+        if n > 0:
+            self._lbl_mask_count.setText(f"{n}개 영역 활성")
+            self._lbl_mask_count.setStyleSheet(
+                f"color:#ff7675; font-family:'{_FC}'; font-size:13px; font-weight:bold;"
+            )
+        else:
+            self._lbl_mask_count.setText("비활성")
+            self._lbl_mask_count.setStyleSheet(
+                f"color:#4a6a8a; font-family:'{_FC}'; font-size:13px;"
+            )
 
     # ── 캘리브레이션 ──────────────────────────────────────────────────
 
