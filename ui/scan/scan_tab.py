@@ -26,6 +26,7 @@ from ui.image_viewer import ImageViewer
 from ui.plot_panel import PlotPanel
 from ui.scan.scan_workers import _CalibWorker, _ScanWorker, _draw_centroid_cross
 from ui.scan.mask_editor import MaskEditorDialog
+from datetime import datetime
 
 # ── 공통 폰트/색상 토큰 ──────────────────────────────────────────────
 _F  = "Segoe UI"        # 기본 UI 폰트
@@ -380,27 +381,48 @@ class ScanTab(QWidget):
             ab_row.addWidget(sp)
         gf.addLayout(ab_row)
 
-        # 표시 버튼
+        # 표시 버튼 (checkable — 마지막으로 표시된 모드 강조)
+        _VIEW_BTN = f"""
+            QPushButton {{
+                background: #0d2820; color: #4ecdc4;
+                border: 1px solid #4ecdc4; border-radius: 4px;
+                font-family: '{_F}'; font-weight: bold;
+                font-size: {_FS_BTN}; padding: 7px 14px;
+            }}
+            QPushButton:hover  {{ background: #1a4838; }}
+            QPushButton:checked {{
+                background: #0d3828; color: #ffe66d;
+                border: 2px solid #ffe66d;
+            }}
+            QPushButton:disabled {{ color: #1a2840; background: #080e1e; border-color: #0a1828; }}
+        """
         btn_row_f1 = QHBoxLayout()
         self.btn_show_a = QPushButton("Show A")
         self.btn_show_b = QPushButton("Show B")
-        for btn in (self.btn_show_a, self.btn_show_b):
-            btn.setStyleSheet(_BTN_PRIMARY)
-            btn_row_f1.addWidget(btn)
-        gf.addLayout(btn_row_f1)
-
         btn_row_f2 = QHBoxLayout()
         self.btn_diff    = QPushButton("A − B")
         self.btn_absdiff = QPushButton("|A − B|")
+
+        self._view_btns = (self.btn_show_a, self.btn_show_b,
+                           self.btn_diff, self.btn_absdiff)
+        for btn in self._view_btns:
+            btn.setCheckable(True)
+            btn.setStyleSheet(_VIEW_BTN)
+        for btn in (self.btn_show_a, self.btn_show_b):
+            btn_row_f1.addWidget(btn)
         for btn in (self.btn_diff, self.btn_absdiff):
-            btn.setStyleSheet(_BTN_PRIMARY)
             btn_row_f2.addWidget(btn)
+        gf.addLayout(btn_row_f1)
         gf.addLayout(btn_row_f2)
 
-        self.btn_show_a.clicked.connect(lambda: self._show_frame_idx(self.spin_frame_a.value()))
-        self.btn_show_b.clicked.connect(lambda: self._show_frame_idx(self.spin_frame_b.value()))
-        self.btn_diff.clicked.connect(self._show_diff)
-        self.btn_absdiff.clicked.connect(self._show_abs_diff)
+        self.btn_show_a.clicked.connect(lambda: self._show_frame_view(
+            self.btn_show_a, lambda: self._show_frame_idx(self.spin_frame_a.value())))
+        self.btn_show_b.clicked.connect(lambda: self._show_frame_view(
+            self.btn_show_b, lambda: self._show_frame_idx(self.spin_frame_b.value())))
+        self.btn_diff.clicked.connect(lambda: self._show_frame_view(
+            self.btn_diff, self._show_diff))
+        self.btn_absdiff.clicked.connect(lambda: self._show_frame_view(
+            self.btn_absdiff, self._show_abs_diff))
         ctrl_layout.addWidget(grp_frame)
 
         # ── 무시 마스크 ────────────────────────────────────────────────
@@ -834,6 +856,11 @@ class ScanTab(QWidget):
             last = len(self._image_list) - 1
             self.spin_frame_b.setValue(last)
             self.spin_frame_a.setValue(0)
+            # 마지막 프레임(B)을 자동 표시하고 Show B 버튼 active로
+            self._show_frame_view(
+                self.btn_show_b,
+                lambda: self._show_frame_idx(last),
+            )
         if csv_path:
             self._log(f"✅ 스캔 완료 — CSV: {csv_path}")
         else:
@@ -888,6 +915,12 @@ class ScanTab(QWidget):
 
     # ── 프레임 분석 ───────────────────────────────────────────────────
 
+    def _show_frame_view(self, active_btn, action):
+        """view 버튼 중 active_btn만 checked 상태로 만들고 action 실행."""
+        for btn in self._view_btns:
+            btn.setChecked(btn is active_btn)
+        action()
+
     def _show_frame_idx(self, idx: int):
         if not self._image_list:
             self._log("⚠️ 저장된 프레임 없음")
@@ -935,7 +968,8 @@ class ScanTab(QWidget):
                 # |A-B|: hot 컬러맵 (0=검정 → 빨강 → 노랑 → 흰색)
                 arr = np.abs(diff)
                 vmax = float(arr.max()) or 1.0
-                f = arr / vmax                r_ch = np.clip(f * 3.0,       0, 1)
+                f = arr / vmax                
+                r_ch = np.clip(f * 3.0,       0, 1)
                 g_ch = np.clip(f * 3.0 - 1.0, 0, 1)
                 b_ch = np.clip(f * 3.0 - 2.0, 0, 1)
                 rgb = np.stack(
