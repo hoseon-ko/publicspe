@@ -694,15 +694,33 @@ class ScanTab(QWidget):
     # ── 이미지 표시 옵션 ─────────────────────────────────────────────
 
     def _set_view_mode(self, binary: bool):
-        """원본/이진화 토글."""
+        """원본/이진화 토글 — 설정 변경 후 현재 뷰를 즉시 재렌더링."""
         self._proc.show_binary = binary
         self.btn_view_raw.setChecked(not binary)
         self.btn_view_bin.setChecked(binary)
         self.slider_thresh.setEnabled(binary)
+        self._refresh_current_view()
 
     def _on_thresh_changed(self, val: int):
         self._proc.bin_threshold = val
         self.lbl_thresh_val.setText(str(val))
+        self._refresh_current_view()
+
+    def _refresh_current_view(self):
+        """현재 active view 버튼에 맞게 이미지뷰어를 재렌더링한다."""
+        if not self._image_list:
+            return
+        if self.btn_show_a.isChecked():
+            self._show_frame_idx(self.spin_frame_a.value())
+        elif self.btn_show_b.isChecked():
+            self._show_frame_idx(self.spin_frame_b.value())
+        elif self.btn_diff.isChecked():
+            self._show_diff()
+        elif self.btn_absdiff.isChecked():
+            self._show_abs_diff()
+        else:
+            # 아무것도 선택 안 된 경우 — 마지막 프레임 표시
+            self._show_frame_idx(len(self._image_list) - 1)
 
     # ── 이미지 뷰어에 RGB + 중심점 마커 표시 ─────────────────────────
 
