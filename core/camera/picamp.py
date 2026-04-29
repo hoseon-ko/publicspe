@@ -386,6 +386,9 @@ class PicamCameraWrapper:
         """노출시간(ms)을 설정하고 적용된 ms 값을 반환한다."""
         cam = _require_open_camera(self)
         cam.set_exposure(float(exposure_ms) / 1000.0)
+        # set_attribute_value 단독으로는 하드웨어에 반영 안 됨 — Commit 필요
+        if hasattr(cam, "_commit_parameters"):
+            cam._commit_parameters()
         return cam.get_exposure() * 1000.0
 
     def get_roi(self):
@@ -404,7 +407,10 @@ class PicamCameraWrapper:
     ):
         """ROI를 설정하고 적용된 ROI를 반환한다."""
         cam = _require_open_camera(self)
-        return cam.set_roi(hstart=hstart, hend=hend, vstart=vstart, vend=vend, hbin=hbin, vbin=vbin)
+        result = cam.set_roi(hstart=hstart, hend=hend, vstart=vstart, vend=vend, hbin=hbin, vbin=vbin)
+        if hasattr(cam, "_commit_parameters"):
+            cam._commit_parameters()
+        return result
 
     # ── 이미지 획득 ───────────────────────────────────────────────────
 
@@ -867,6 +873,10 @@ class PicamCameraWrapper:
                 report["applied"].append((logical_name, real_name, current_value))
             else:
                 report["missing"].append(logical_name)
+
+        # 모든 ADC 파라미터 설정 후 한 번에 Commit
+        if report["applied"] and hasattr(self.cam, "_commit_parameters"):
+            self.cam._commit_parameters()
 
         return report
 

@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
     QGraphicsLineItem, QGraphicsRectItem,
     QSizePolicy, QToolButton
 )
-from PyQt6.QtCore import pyqtSignal, Qt, QRectF
+from PyQt6.QtCore import pyqtSignal, Qt, QRectF, QTimer
 from PyQt6.QtGui import (
     QPixmap, QImage, QPen, QColor, QBrush, QPainter,
     QWheelEvent, QMouseEvent, QFont, QTransform
@@ -751,8 +751,13 @@ class ImageViewer(QWidget):
         self._active_hist_roi_id:    int | None = None
         self._last_profile_t: float = 0.0   # profile throttle용 타임스탬프
         self._colormap_worker = None
+        self._pending_workers: set = set()   # GC 방지용 실행중 워커 참조
         self._display_vmin: float | None = None
         self._display_vmax: float | None = None
+        self._range_debounce = QTimer()
+        self._range_debounce.setSingleShot(True)
+        self._range_debounce.setInterval(50)
+        self._range_debounce.timeout.connect(lambda: self._refresh_pixmap(fit=False))
         self._setup_ui()
 
     def _setup_ui(self):
@@ -952,12 +957,13 @@ class ImageViewer(QWidget):
             self._hist_range_widget.update_image(image, self._current_cmap)
 
     def set_image_first(self, image: np.ndarray):
-        """첫 로드 (뷰 fit)"""
+        """첫 로드 (뷰 fit) — range 리셋"""
         self._current_image = image
         self._display_vmin = None
         self._display_vmax = None
         if self._hist_range_widget.isVisible():
-            self._hist_range_widget.update_image(image, self._current_cmap)
+            self._hist_range_widget.update_image(image, self._current_cmap,
+                                                 reset_range=True)
         self._refresh_pixmap(fit=True)
 
     def set_live_frame(self, rgb: np.ndarray, fit: bool = False):
@@ -1023,8 +1029,8 @@ class ImageViewer(QWidget):
     def _refresh_pixmap(self, fit: bool = False):
         if self._current_image is None:
             return
-        # 기존 워커가 있으면 결과 시그널만 끊음.
-        # 종료/해제는 각 워커가 finished → deleteLater 로 자율 처리.
+        # 이전 워커: 결과 시그널만 끊어 화면 업데이트 방지.
+        # 스레드 자체는 계속 실행되며 finished → _pending_workers 제거 → deleteLater 순으로 자율 정리.
         if self._colormap_worker is not None:
             try:
                 self._colormap_worker.colormap_applied.disconnect()
@@ -1038,6 +1044,12 @@ class ImageViewer(QWidget):
         worker = ColorMapWorker(img, cmap,
                                 vmin=self._display_vmin, vmax=self._display_vmax)
         self._colormap_worker = worker
+        self._pending_workers.add(worker)   # Python 레퍼런스 유지 → GC 방지
+
+        def _cleanup():
+            self._pending_workers.discard(worker)
+
+        worker.finished.connect(_cleanup)
         worker.finished.connect(worker.deleteLater)
 
         def on_colormap_ready(rgba):
@@ -1314,12 +1326,14 @@ class ImageViewer(QWidget):
     def _on_range_panel_toggled(self, checked: bool):
         self._hist_range_widget.setVisible(checked)
         if checked and self._current_image is not None:
-            self._hist_range_widget.update_image(self._current_image, self._current_cmap)
+            # 패널 처음 열 때는 항상 실제 데이터 범위로 초기화
+            self._hist_range_widget.update_image(self._current_image, self._current_cmap,
+                                                 reset_range=True)
 
     def _on_range_changed(self, vmin: float, vmax: float):
         self._display_vmin = vmin
         self._display_vmax = vmax
-        self._refresh_pixmap(fit=False)
+        self._range_debounce.start()  # 50ms 후 렌더 — 빠른 드래그 시 중간 프레임 스킵
 
     def _on_cmap_changed(self, name: str):
         # 'Off'는 내부적으로 'off'로 처리

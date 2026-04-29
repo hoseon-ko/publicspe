@@ -262,21 +262,32 @@ class HistogramRangeWidget(QWidget):
 
     # ── 공개 API ─────────────────────────────────────────────────────
 
-    def update_image(self, image: np.ndarray, cmap: str = 'jet'):
-        """이미지 갱신: 히스토그램 재계산 + 슬라이더 범위 반영."""
+    def update_image(self, image: np.ndarray, cmap: str = 'jet',
+                     reset_range: bool = False):
+        """이미지 갱신: 히스토그램 재계산 + 슬라이더 범위 반영.
+
+        reset_range=True  → vmin/vmax를 실제 데이터 범위로 초기화 (새 파일 로드 시)
+        reset_range=False → 사용자가 조절한 vmin/vmax 유지 (프레임 전환 시)
+        """
         if image is None or image.size == 0:
             return
+        first_load = (self._image is None)
         self._image = image
         self._cmap = cmap
         flat = image.ravel().astype(np.float64)
         self._data_min = float(flat.min())
         self._data_max = float(flat.max())
 
+        if first_load or reset_range:
+            self._vmin = self._data_min
+            self._vmax = self._data_max
+
         counts, _ = np.histogram(flat, bins=256,
                                   range=(self._data_min, self._data_max))
         self._slider.set_histogram(counts)
         self._slider.set_colormap(cmap)
         self._sync_fracs()
+        self._update_labels()
 
     def set_vrange(self, vmin: float, vmax: float):
         """외부에서 범위를 직접 설정한다."""

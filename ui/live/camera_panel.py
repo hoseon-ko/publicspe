@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QCheckBox, QSlider, QGroupBox, QRadioButton,
     QButtonGroup, QListWidget, QSizePolicy
 )
-from PyQt6.QtCore import Qt, QObject, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QObject, QThread, pyqtSignal, QSettings
 from core.async_worker import TempPollerThread
 
 from core.camera.base import BaseCamera, CameraCapabilities
@@ -621,10 +621,24 @@ class CameraControlPanel(QWidget):
                     self.spin_temp.setMaximum(mx)
             except Exception:
                 pass
-            # 현재 setpoint를 읽어 스핀박스 초기화
+            # setpoint 읽기: SDK가 25°C로 리셋했으면 저장된 마지막값 복원
             try:
                 reading, setpoint, status = cam.get_temperature()
-                if setpoint is not None:
+                saved_sp = QSettings("SpeAnalyze", "CameraPanel").value(
+                    "last_temp_setpoint", None, type=float
+                )
+                if saved_sp is not None and (setpoint is None or abs(float(setpoint) - 25.0) < 0.5):
+                    # SDK가 25°C로 초기화했으면 이전 설정값 복원
+                    self.spin_temp.setValue(saved_sp)
+                    self.log_message.emit(
+                        f"🌡 온도 Setpoint 복원: {saved_sp:.1f}°C → 적용 중..."
+                    )
+                    self._run_sdk(
+                        lambda sp=saved_sp: cam.set_temperature(sp),
+                        lambda _: None,
+                        "온도 복원 오류",
+                    )
+                elif setpoint is not None:
                     self.spin_temp.setValue(float(setpoint))
             except Exception:
                 pass
@@ -836,6 +850,10 @@ class CameraControlPanel(QWidget):
                 setpoint = requested
             self.update_temperature_display(reading, setpoint, status)
             confirmed = float(setpoint)
+            # 성공한 setpoint를 QSettings에 저장 (다음 연결 시 자동 복원)
+            QSettings("SpeAnalyze", "CameraPanel").setValue(
+                "last_temp_setpoint", confirmed
+            )
             if abs(confirmed - requested) > 0.1:
                 self.log_message.emit(
                     f"⚠ SP 요청 {requested:.1f}°C → 카메라 확인 {confirmed:.1f}°C (범위 클램프됨)"
