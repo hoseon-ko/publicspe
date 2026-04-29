@@ -39,10 +39,14 @@ class ColorMapWorker(QThread):
     """
     colormap_applied = pyqtSignal(object)  # (rgba ndarray)
 
-    def __init__(self, image: np.ndarray, cmap: str, parent=None):
+    def __init__(self, image: np.ndarray, cmap: str,
+                 vmin: float | None = None, vmax: float | None = None,
+                 parent=None):
         super().__init__(parent)
         self.image = image
         self.cmap = cmap
+        self.vmin = vmin
+        self.vmax = vmax
 
     @staticmethod
     def _to_grayscale_rgba(img: np.ndarray) -> np.ndarray:
@@ -65,7 +69,8 @@ class ColorMapWorker(QThread):
                 self.colormap_applied.emit(self._to_grayscale_rgba(self.image))
                 return
             from ui.colormap_utils import apply_colormap
-            rgba = apply_colormap(self.image, self.cmap)
+            rgba = apply_colormap(self.image, self.cmap,
+                                  vmin=self.vmin, vmax=self.vmax)
             self.colormap_applied.emit(rgba)
         except Exception as e:
             print(f"[ColorMapWorker] Error: {e}")

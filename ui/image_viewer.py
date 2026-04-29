@@ -12,6 +12,7 @@ QGraphicsView 기반 이미지 뷰어
 import numpy as np
 from ui.roi_items import LineROI, BoxROI, HistROI, HandleItem
 from ui.colormap_utils import apply_colormap, ndarray_to_qpixmap  # re-export for backward compat
+from ui.histogram_range_widget import HistogramRangeWidget
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
     QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
@@ -750,6 +751,8 @@ class ImageViewer(QWidget):
         self._active_hist_roi_id:    int | None = None
         self._last_profile_t: float = 0.0   # profile throttle용 타임스탬프
         self._colormap_worker = None
+        self._display_vmin: float | None = None
+        self._display_vmax: float | None = None
         self._setup_ui()
 
     def _setup_ui(self):
@@ -834,6 +837,25 @@ class ImageViewer(QWidget):
         self.btn_export_img.clicked.connect(self._export_image)
         toolbar.addWidget(self.btn_export_img)
 
+        # Range 슬라이더 패널 토글
+        self.btn_range = QToolButton()
+        self.btn_range.setText("📊 Range")
+        self.btn_range.setCheckable(True)
+        self.btn_range.setToolTip("컬러맵 Min/Max 히스토그램 슬라이더 표시")
+        self.btn_range.setStyleSheet("""
+            QToolButton {
+                background: transparent; color: #a0a0b0;
+                border: 1px solid #0f3460; border-radius: 3px;
+                padding: 2px 6px; font-size: 11px;
+            }
+            QToolButton:checked {
+                background: #1a3a20; color: #4ecdc4; border-color: #4ecdc4;
+            }
+            QToolButton:hover { border-color: #4ecdc4; }
+        """)
+        self.btn_range.toggled.connect(self._on_range_panel_toggled)
+        toolbar.addWidget(self.btn_range)
+
         toolbar.addStretch()
 
         # 포화 경고 레이블 (P3-3)
@@ -909,6 +931,14 @@ class ImageViewer(QWidget):
 
         layout.addWidget(viewer_area)
 
+        # ── 히스토그램 Range 슬라이더 패널 (기본 숨김) ──
+        self._hist_range_widget = HistogramRangeWidget()
+        self._hist_range_widget.setVisible(False)
+        self._hist_range_widget.setFixedHeight(100)
+        self._hist_range_widget.setStyleSheet("background: #0d1020;")
+        self._hist_range_widget.range_changed.connect(self._on_range_changed)
+        layout.addWidget(self._hist_range_widget)
+
     # ─────────────────────────────────────────
     # Public API
     # ─────────────────────────────────────────
@@ -918,10 +948,16 @@ class ImageViewer(QWidget):
         self._current_image = image
         self._refresh_pixmap(fit=False)
         self._recompute_profile()
+        if self._hist_range_widget.isVisible():
+            self._hist_range_widget.update_image(image, self._current_cmap)
 
     def set_image_first(self, image: np.ndarray):
         """첫 로드 (뷰 fit)"""
         self._current_image = image
+        self._display_vmin = None
+        self._display_vmax = None
+        if self._hist_range_widget.isVisible():
+            self._hist_range_widget.update_image(image, self._current_cmap)
         self._refresh_pixmap(fit=True)
 
     def set_live_frame(self, rgb: np.ndarray, fit: bool = False):
@@ -999,7 +1035,8 @@ class ImageViewer(QWidget):
         cmap = self._current_cmap
 
         from core.async_worker import ColorMapWorker
-        worker = ColorMapWorker(img, cmap)
+        worker = ColorMapWorker(img, cmap,
+                                vmin=self._display_vmin, vmax=self._display_vmax)
         self._colormap_worker = worker
         worker.finished.connect(worker.deleteLater)
 
@@ -1274,9 +1311,21 @@ class ImageViewer(QWidget):
         self._view.set_crosshair_color(color)
 
 
+    def _on_range_panel_toggled(self, checked: bool):
+        self._hist_range_widget.setVisible(checked)
+        if checked and self._current_image is not None:
+            self._hist_range_widget.update_image(self._current_image, self._current_cmap)
+
+    def _on_range_changed(self, vmin: float, vmax: float):
+        self._display_vmin = vmin
+        self._display_vmax = vmax
+        self._refresh_pixmap(fit=False)
+
     def _on_cmap_changed(self, name: str):
-    # 'Off'는 내부적으로 'off'로 처리
+        # 'Off'는 내부적으로 'off'로 처리
         self._current_cmap = name.lower() if name.lower() == 'off' else name
+        if self._hist_range_widget.isVisible() and self._current_image is not None:
+            self._hist_range_widget.update_image(self._current_image, self._current_cmap)
         self._refresh_pixmap(fit=False)
 
     # ─────────────────────────────────────────

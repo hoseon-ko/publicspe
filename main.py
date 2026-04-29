@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QFont
 
 from theme.dark_theme import DARK_THEME_QSS
+#from ui.histogram_range_widget import HistogramRangeWidget
 from ui.main_window import MainWindow
 from spe_reader import SpeFile
 
@@ -33,4 +34,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+   main()
+
+# if __name__ == "__main__":
+#     import sys
+#     from PySide6.QtWidgets import QApplication
+#     app = QApplication(sys.argv)
+#     window = HistogramRangeWidget() # 본인의 클래스 명칭으로 변경
+#     window.show()
+#     sys.exit(app.exec())

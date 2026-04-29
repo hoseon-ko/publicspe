@@ -6,12 +6,16 @@ import numpy as np
 from PyQt6.QtGui import QPixmap, QImage
 
 
-def apply_colormap(image: np.ndarray, cmap: str = 'jet') -> np.ndarray:
-    """2D float 이미지 → RGBA uint8"""
+def apply_colormap(image: np.ndarray, cmap: str = 'jet',
+                   vmin: float | None = None,
+                   vmax: float | None = None) -> np.ndarray:
+    """2D float 이미지 → RGBA uint8.
+    vmin/vmax 지정 시 해당 범위를 [0,1]로 클리핑·정규화한다."""
     f = image.astype(np.float64)
-    vmin, vmax = f.min(), f.max()
-    if vmax > vmin:
-        f = (f - vmin) / (vmax - vmin)
+    lo = float(f.min()) if vmin is None else float(vmin)
+    hi = float(f.max()) if vmax is None else float(vmax)
+    if hi > lo:
+        f = np.clip((f - lo) / (hi - lo), 0.0, 1.0)
     else:
         f = np.zeros_like(f)
 
