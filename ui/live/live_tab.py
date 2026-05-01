@@ -32,6 +32,7 @@ from PyQt6.QtGui import QAction
 from core.camera.base import BaseCamera
 from core.camera.hikvision import HikvisionCamera, list_devices as hik_devices
 from core.camera.picamp import PicamCamera, list_devices as picam_devices
+from core.camera.simulated import SimulatedCamera, list_devices as sim_devices
 from core.image_processor import ImageProcessor
 from core.spe_writer import save_spe   # #14 라이브 SPE 저장
 from ui.image_viewer import ImageViewer
@@ -44,6 +45,12 @@ try:
     _CV2_OK = True
 except ImportError:
     _CV2_OK = False
+
+_FC         = "Courier New"
+_FS_TOOLBAR = "11px"   # 툴바 버튼·저장 버튼
+_FS_LOG     = "11px"   # 로그·ROI 목록 텍스트
+_FS_HDR     = "10px"   # 도크 헤더 레이블·버튼
+_FS_SMALL   = "10px"   # 줌·이미지 크기 등 보조 레이블
 
 
 # ── 카메라 연결 백그라운드 워커 ──────────────────────────────────────────────
@@ -104,12 +111,12 @@ class _ConnectWorker(QObject):
 
 # ── 이미지 처리 백그라운드 워커 ─────────────────────────────────────────────────
 
-def _build_rgb(result, cmap: str, show_binary: bool) -> np.ndarray:
+def _build_rgb(result, cmap: str, show_binary: bool, vmin: int, vmax: int) -> np.ndarray:
     """ProcessedFrame → display RGB. 백그라운드 스레드에서 호출됨."""
     disp = result.display
     if cmap and cmap != 'off' and disp.ndim == 2 and not show_binary:
         from ui.image_viewer import apply_colormap
-        rgba = apply_colormap(disp, cmap)
+        rgba = apply_colormap(disp, cmap, vmin=vmin, vmax=vmax)
         rgb  = rgba[:, :, :3].copy()
     elif disp.ndim == 2:
         rgb = cv2.cvtColor(disp, cv2.COLOR_GRAY2RGB) if _CV2_OK else \
@@ -149,6 +156,8 @@ class _ProcessWorker(QObject):
         self._thread = threading.Thread(
             target=self._run, name="ImgProcWorker", daemon=True
         )
+        self._vmax = 65535
+        self._vmin = 0
         self._thread.start()
 
     def submit(self, raw: np.ndarray):
@@ -173,7 +182,7 @@ class _ProcessWorker(QObject):
                 try:
                     result = self._proc.process(raw)
                     show_binary = getattr(self._proc, 'show_binary', False)
-                    rgb = _build_rgb(result, self._cmap, show_binary)
+                    rgb = _build_rgb(result, self._cmap, show_binary, self._vmin, self._vmax)
                     self.result_ready.emit(result, rgb)
                 except Exception as e:
                     print(f"[ProcessWorker] {e}")
@@ -196,6 +205,10 @@ class LiveTab(QMainWindow):
     status_message      = pyqtSignal(str)
     camera_connected    = pyqtSignal(object)   # BaseCamera — Acquisition 탭 공유
     camera_disconnected = pyqtSignal()
+
+    def on_range_changed(self, vmin, vmax):
+        self._proc_worker._vmin = vmin
+        self._proc_worker._vmax = vmax
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -249,7 +262,7 @@ class LiveTab(QMainWindow):
         # ── 중앙: ImageViewer ─────────────────────────────────────────
         self.image_viewer = ImageViewer()
         self.setCentralWidget(self.image_viewer)
-
+        self.image_viewer.range_changed.connect(self.on_range_changed)
         # ── Dock: Camera Control (좌측 상단) ──────────────────────────
         self.cam_panel = CameraControlPanel(self._proc)
         cam_scroll = QScrollArea()
@@ -313,14 +326,14 @@ class LiveTab(QMainWindow):
         hdr_row.setContentsMargins(8, 3, 4, 3)
         lbl_log_title = QLabel("SYSTEM LOG")
         lbl_log_title.setStyleSheet(
-            "color: #4a5a7a; font-family: 'Courier New'; font-size: 10px; font-weight: bold; letter-spacing: 2px;"
+            f"color: #4a5a7a; font-family: '{_FC}'; font-size: {_FS_HDR}; font-weight: bold; letter-spacing: 2px;"
         )
         btn_clear_log = QPushButton("CLEAR")
         btn_clear_log.setFixedHeight(20)
-        btn_clear_log.setStyleSheet("""
-            QPushButton { background: transparent; color: #304060; border: 1px solid #1a2840;
-                border-radius: 2px; font-family: 'Courier New'; font-size: 10px; padding: 0 6px; }
-            QPushButton:hover { color: #e94560; border-color: #e94560; }
+        btn_clear_log.setStyleSheet(f"""
+            QPushButton {{ background: transparent; color: #304060; border: 1px solid #1a2840;
+                border-radius: 2px; font-family: '{_FC}'; font-size: {_FS_HDR}; padding: 0 6px; }}
+            QPushButton:hover {{ color: #e94560; border-color: #e94560; }}
         """)
         btn_clear_log.clicked.connect(lambda: self.log_display.clear())
         hdr_row.addWidget(lbl_log_title, 1)
@@ -329,9 +342,9 @@ class LiveTab(QMainWindow):
 
         self.log_display = QTextEdit()
         self.log_display.setReadOnly(True)
-        self.log_display.setStyleSheet("""
-            QTextEdit { background: #080e1e; border: none;
-                color: #00cc88; font-family: 'Courier New'; font-size: 11px; }
+        self.log_display.setStyleSheet(f"""
+            QTextEdit {{ background: #080e1e; border: none;
+                color: #00cc88; font-family: '{_FC}'; font-size: {_FS_LOG}; }}
         """)
         log_layout.addWidget(self.log_display, 1)
 
@@ -356,16 +369,16 @@ class LiveTab(QMainWindow):
         roi_hdr_row.setContentsMargins(8, 3, 4, 3)
         lbl_roi_title = QLabel("ROI LIST")
         lbl_roi_title.setStyleSheet(
-            "color:#4a5a7a; font-family:'Courier New'; font-size:10px;"
+            f"color:#4a5a7a; font-family:'{_FC}'; font-size:{_FS_HDR};"
             " font-weight:bold; letter-spacing:2px;"
         )
         self._btn_del_roi = QPushButton("DEL")
         self._btn_del_roi.setFixedHeight(20)
         self._btn_del_roi.setToolTip("선택한 ROI 삭제 (Delete)")
-        self._btn_del_roi.setStyleSheet("""
-            QPushButton { background:transparent; color:#304060; border:1px solid #1a2840;
-                border-radius:2px; font-family:'Courier New'; font-size:10px; padding:0 6px; }
-            QPushButton:hover { color:#e94560; border-color:#e94560; }
+        self._btn_del_roi.setStyleSheet(f"""
+            QPushButton {{ background:transparent; color:#304060; border:1px solid #1a2840;
+                border-radius:2px; font-family:'{_FC}'; font-size:{_FS_HDR}; padding:0 6px; }}
+            QPushButton:hover {{ color:#e94560; border-color:#e94560; }}
         """)
         self._btn_del_roi.clicked.connect(self._delete_selected_roi)
         btn_del_all = QPushButton("ALL")
@@ -379,12 +392,12 @@ class LiveTab(QMainWindow):
         roi_v.addWidget(roi_hdr)
 
         self._roi_list_widget = QListWidget()
-        self._roi_list_widget.setStyleSheet("""
-            QListWidget { background:#080e1e; border:none; color:#c0d0ff;
-                font-family:'Courier New'; font-size:11px; }
-            QListWidget::item { padding:4px 8px; border-bottom:1px solid #0f2040; }
-            QListWidget::item:selected { background:#1a3a60; color:#4ecdc4; }
-            QListWidget::item:hover { background:#0f1f3a; }
+        self._roi_list_widget.setStyleSheet(f"""
+            QListWidget {{ background:#080e1e; border:none; color:#c0d0ff;
+                font-family:'{_FC}'; font-size:{_FS_LOG}; }}
+            QListWidget::item {{ padding:4px 8px; border-bottom:1px solid #0f2040; }}
+            QListWidget::item:selected {{ background:#1a3a60; color:#4ecdc4; }}
+            QListWidget::item:hover {{ background:#0f1f3a; }}
         """)
         self._roi_list_widget.itemClicked.connect(self._on_roi_list_click)
         roi_v.addWidget(self._roi_list_widget, 1)
@@ -411,13 +424,13 @@ class LiveTab(QMainWindow):
         tb.setObjectName("live_toolbar")
         tb.setMovable(False)
         tb.setIconSize(QSize(16, 16))
-        tb.setStyleSheet("""
-            QToolBar { background: #0a0f1e; border-bottom: 1px solid #0f3460; spacing: 4px; padding: 2px 6px; }
-            QToolButton { background: #0d1e38; color: #4ecdc4; border: 1px solid #1a4060;
+        tb.setStyleSheet(f"""
+            QToolBar {{ background: #0a0f1e; border-bottom: 1px solid #0f3460; spacing: 4px; padding: 2px 6px; }}
+            QToolButton {{ background: #0d1e38; color: #4ecdc4; border: 1px solid #1a4060;
                 border-radius: 3px; padding: 3px 8px;
-                font-family: 'Courier New'; font-size: 11px; }
-            QToolButton:hover { background: #1a3a60; }
-            QToolButton:checked { background: #1a3010; color: #4ecdc4; border-color: #2a6020; }
+                font-family: '{_FC}'; font-size: {_FS_TOOLBAR}; }}
+            QToolButton:hover {{ background: #1a3a60; }}
+            QToolButton:checked {{ background: #1a3010; color: #4ecdc4; border-color: #2a6020; }}
         """)
         self.addToolBar(tb)
 
@@ -458,15 +471,15 @@ class LiveTab(QMainWindow):
         tb.addSeparator()
 
         # #23 SAVE — QAction 대신 QPushButton 위젯으로 강조
-        _save_style = """
-            QPushButton {
+        _save_style = f"""
+            QPushButton {{
                 background: #0d2820; color: #4ecdc4;
                 border: 1px solid #4ecdc4; border-radius: 3px;
-                font-family: 'Courier New'; font-weight: bold; font-size: 11px;
+                font-family: '{_FC}'; font-weight: bold; font-size: {_FS_TOOLBAR};
                 padding: 3px 10px; min-width: 72px;
-            }
-            QPushButton:hover { background: #1a4838; border-color: #6aefdc; }
-            QPushButton:pressed { background: #2a6048; }
+            }}
+            QPushButton:hover {{ background: #1a4838; border-color: #6aefdc; }}
+            QPushButton:pressed {{ background: #2a6048; }}
         """
         btn_save_tb = QPushButton("📍 SAVE")
         btn_save_tb.setToolTip("Image + Centroid + Motor Position 저장 (S)")
@@ -490,21 +503,21 @@ class LiveTab(QMainWindow):
         # #20 이미지 크기 표시
         self._lbl_imgsize = QLabel("—×—px")
         self._lbl_imgsize.setStyleSheet(
-            "color: #4a6a8a; font-family: 'Courier New'; font-size: 10px; padding: 0 4px;"
+            f"color: #4a6a8a; font-family: '{_FC}'; font-size: {_FS_SMALL}; padding: 0 4px;"
         )
         tb.addWidget(self._lbl_imgsize)
 
         # #12 줌 레벨 표시
         self._lbl_zoom = QLabel("🔍 100%")
         self._lbl_zoom.setStyleSheet(
-            "color: #4a6a8a; font-family: 'Courier New'; font-size: 10px; padding: 0 4px;"
+            f"color: #4a6a8a; font-family: '{_FC}'; font-size: {_FS_SMALL}; padding: 0 4px;"
         )
         tb.addWidget(self._lbl_zoom)
 
         # #13 ROI 크기 표시
         self._lbl_roi = QLabel("ROI: —")
         self._lbl_roi.setStyleSheet(
-            "color: #4a6a8a; font-family: 'Courier New'; font-size: 10px; padding: 0 4px;"
+            f"color: #4a6a8a; font-family: '{_FC}'; font-size: {_FS_SMALL}; padding: 0 4px;"
         )
         tb.addWidget(self._lbl_roi)
 
@@ -545,7 +558,12 @@ class LiveTab(QMainWindow):
         cam_type = self.cam_panel.get_selected_camera_type()
         self._log(f"🔄 {cam_type} 스캔 중...")
         try:
-            items = hik_devices() if cam_type == "HIKVISION" else picam_devices()
+            if cam_type == "HIKVISION":
+                items = hik_devices()
+            elif cam_type == "SIMULATED":
+                items = sim_devices()
+            else:
+                items = picam_devices()
         except Exception as e:
             self._log(f"❌ 스캔 오류: {e}")
             items = []
@@ -554,10 +572,12 @@ class LiveTab(QMainWindow):
             self._log(f"✅ {len(items)}개 발견 ({cam_type})")
         else:
             self.cam_panel.populate_camera_list([])
-            hint = ("USB/네트워크 연결 확인"
-                    if cam_type == "HIKVISION"
-                    else "Picam 라이브러리/하드웨어 확인")
-            self._log(f"⚠️ 카메라 없음 — {hint}")
+            hints = {
+                "HIKVISION":  "USB/네트워크 연결 확인",
+                "SIMULATED":  "simulated.py 임포트 오류",
+                "Picam":      "Picam 라이브러리/하드웨어 확인",
+            }
+            self._log(f"⚠️ 카메라 없음 — {hints.get(cam_type, '연결 확인')}")
 
     def _connect_camera(self, index: int):
         """#6 카메라 연결을 백그라운드 스레드에서 실행 — UI 응답 유지."""
@@ -567,11 +587,13 @@ class LiveTab(QMainWindow):
         # 다른 카메라가 연결되어 있으면 먼저 해제 후 재연결
         if self._cam is not None:
             new_type = self.cam_panel.get_selected_camera_type()
-            cur_type = type(self._cam).__name__
-            # 같은 타입이면 재연결 불필요
-            same = (new_type == "HIKVISION" and "Hikvision" in cur_type) or \
-                   (new_type != "HIKVISION" and "Hikvision" not in cur_type)
-            if same:
+            cur_cls  = type(self._cam)
+            _same_map = {
+                "HIKVISION":  HikvisionCamera,
+                "SIMULATED":  SimulatedCamera,
+                "Picam":      PicamCamera,
+            }
+            if cur_cls is _same_map.get(new_type):
                 self._log("⚠️ 이미 동일 카메라 연결됨"); return
             self._log(f"🔄 카메라 변경 — 기존 연결 해제 후 재연결...")
             self._pending_connect_index = index
@@ -580,8 +602,12 @@ class LiveTab(QMainWindow):
 
         cam_type = self.cam_panel.get_selected_camera_type()
         try:
-            cam = HikvisionCamera(device_index=max(0, index)) \
-                  if cam_type == "HIKVISION" else PicamCamera()
+            if cam_type == "HIKVISION":
+                cam = HikvisionCamera(device_index=max(0, index))
+            elif cam_type == "SIMULATED":
+                cam = SimulatedCamera()
+            else:
+                cam = PicamCamera()
         except Exception as e:
             self._log(f"❌ 카메라 생성 실패: {e}"); return
 
@@ -1003,7 +1029,7 @@ class LiveTab(QMainWindow):
         else:
             color = "#00cc88"   # default green
 
-        ts_html  = f"<span style='color:#2a4060;font-size:10px'>[{ts}]</span>"
+        ts_html  = f"<span style='color:#2a4060;font-size:{_FS_SMALL}'>[{ts}]</span>"
         msg_html = f"<span style='color:{color}'>{msg}</span>"
         self.log_display.append(f"{ts_html} {msg_html}")
 

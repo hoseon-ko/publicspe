@@ -740,6 +740,7 @@ class ScanTab(QWidget):
             rgb = _draw_centroid_cross(rgb, result.centroid_x, result.centroid_y)
 
         self.image_viewer.set_live_frame(rgb, fit=fit)
+        self.image_viewer.set_source_image(disp)  # 컬러맵/range slider용 원본 — set_live_frame 이후 호출해야 _current_image 덮어씀
 
     # ── 스캔 제어 ─────────────────────────────────────────────────────
 

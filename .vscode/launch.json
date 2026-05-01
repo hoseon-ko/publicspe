@@ -11,7 +11,8 @@
             "program": "${file}",
             "console": "integratedTerminal",
             // 현재 VS Code 하단에서 선택된 인터프리터를 자동으로 사용
-            "python": "${command:python.interpreterPath}"
+            "python": "${command:python.interpreterPath}",
+            "justMyCode": false
         }
     ]
 }

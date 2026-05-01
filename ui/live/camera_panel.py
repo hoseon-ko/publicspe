@@ -121,7 +121,7 @@ class CameraControlPanel(QWidget):
         # 카메라 종류 선택
         type_row = QHBoxLayout()
         self.combo_cam_type = QComboBox()
-        self.combo_cam_type.addItems(["HIKVISION", "Picam"])
+        self.combo_cam_type.addItems(["HIKVISION", "Picam", "SIMULATED"])
         self.combo_cam_type.setStyleSheet("""
             QComboBox { background: #080e1e; border: 1px solid #0f3460;
                 color: #c0d0ff; border-radius: 3px;

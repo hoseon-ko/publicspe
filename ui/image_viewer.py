@@ -8,6 +8,7 @@ QGraphicsView 기반 이미지 뷰어
 - ROI 드래그 (Line / Box / Histogram)
 - 컬러맵 numpy 직접 적용
 """
+from __future__ import annotations
 
 import numpy as np
 from ui.roi_items import LineROI, BoxROI, HistROI, HandleItem
@@ -17,7 +18,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
     QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
     QGraphicsLineItem, QGraphicsRectItem,
-    QSizePolicy, QToolButton
+    QSizePolicy, QToolButton, QPushButton
 )
 from PyQt6.QtCore import pyqtSignal, Qt, QRectF, QTimer
 from PyQt6.QtGui import (
@@ -717,6 +718,74 @@ class ImageGraphicsView(QGraphicsView):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Range 슬라이더 플로팅 팝업
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _RangePopup(QWidget):
+    """히스토그램 + 듀얼 핸들 Range 슬라이더를 담는 드래그 가능 플로팅 팝업."""
+
+    closed = pyqtSignal()
+
+    def __init__(self, hist_widget: 'HistogramRangeWidget', parent=None):
+        super().__init__(parent, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
+        self.setMinimumSize(480, 200)
+        self._drag_pos = None
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(1, 1, 1, 1)
+        outer.setSpacing(0)
+
+        # ── 타이틀 바 ──
+        self._title_bar = QWidget()
+        self._title_bar.setFixedHeight(26)
+        self._title_bar.setStyleSheet(
+            "background:#0d1a2e; border-bottom:1px solid #1a3a60;"
+        )
+        tb_row = QHBoxLayout(self._title_bar)
+        tb_row.setContentsMargins(10, 0, 4, 0)
+        lbl = QLabel("📊  COLOR RANGE")
+        lbl.setStyleSheet(
+            "color:#4a6a8a; font-family:'Courier New'; font-size:10px;"
+            " font-weight:bold; letter-spacing:2px; background:transparent;"
+        )
+        btn_close = QPushButton("✕")
+        btn_close.setFixedSize(20, 20)
+        btn_close.setStyleSheet(
+            "QPushButton{background:transparent;color:#506080;border:none;font-size:13px;}"
+            "QPushButton:hover{color:#e94560;}"
+        )
+        tb_row.addWidget(lbl, 1)
+        tb_row.addWidget(btn_close)
+        outer.addWidget(self._title_bar)
+
+        # ── 히스토그램 위젯 ──
+        outer.addWidget(hist_widget, 1)
+
+        self.setObjectName("rangePopup")
+        self.setStyleSheet(
+            "#rangePopup{background:#0a1020; border:1px solid #1a3a60; border-radius:4px;}"
+        )
+
+        btn_close.clicked.connect(self._on_close)
+        self._title_bar.mousePressEvent   = self._tb_press
+        self._title_bar.mouseMoveEvent    = self._tb_move
+        self._title_bar.mouseReleaseEvent = lambda e: setattr(self, '_drag_pos', None)
+
+    def _on_close(self):
+        self.hide()
+        self.closed.emit()
+
+    def _tb_press(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+
+    def _tb_move(self, event):
+        if self._drag_pos is not None and event.buttons() & Qt.MouseButton.LeftButton:
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 메인 ImageViewer 위젯
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -735,6 +804,7 @@ class ImageViewer(QWidget):
     box_profile_updated  = pyqtSignal(object, object, str)
     histogram_updated    = pyqtSignal(object, object)
     pixel_info_updated   = pyqtSignal(int, int, float)
+    range_changed        = pyqtSignal(float, float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -936,13 +1006,12 @@ class ImageViewer(QWidget):
 
         layout.addWidget(viewer_area)
 
-        # ── 히스토그램 Range 슬라이더 패널 (기본 숨김) ──
+        # ── 히스토그램 Range 슬라이더 팝업 ──
         self._hist_range_widget = HistogramRangeWidget()
-        self._hist_range_widget.setVisible(False)
-        self._hist_range_widget.setFixedHeight(100)
-        self._hist_range_widget.setStyleSheet("background: #0d1020;")
-        self._hist_range_widget.range_changed.connect(self._on_range_changed)
-        layout.addWidget(self._hist_range_widget)
+        # self._hist_range_widget.range_changed.connect(self._on_range_changed)
+        self._hist_range_widget.range_changed.connect(self.range_changed)
+        self._range_popup = _RangePopup(self._hist_range_widget, parent=self)
+        self._range_popup.closed.connect(lambda: self.btn_range.setChecked(False))
 
     # ─────────────────────────────────────────
     # Public API
@@ -1324,11 +1393,19 @@ class ImageViewer(QWidget):
 
 
     def _on_range_panel_toggled(self, checked: bool):
-        self._hist_range_widget.setVisible(checked)
-        if checked and self._current_image is not None:
-            # 패널 처음 열 때는 항상 실제 데이터 범위로 초기화
-            self._hist_range_widget.update_image(self._current_image, self._current_cmap,
-                                                 reset_range=True)
+        if checked:
+            btn_global = self.btn_range.mapToGlobal(
+                self.btn_range.rect().bottomLeft()
+            )
+            self._range_popup.move(btn_global.x(), btn_global.y() + 4)
+            if self._current_image is not None:
+                self._hist_range_widget.update_image(
+                    self._current_image, self._current_cmap, reset_range=True
+                )
+            self._range_popup.show()
+            self._range_popup.raise_()
+        else:
+            self._range_popup.hide()
 
     def _on_range_changed(self, vmin: float, vmax: float):
         self._display_vmin = vmin

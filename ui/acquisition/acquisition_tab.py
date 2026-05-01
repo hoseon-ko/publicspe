@@ -33,29 +33,36 @@ from core.camera.picamp import PicamCamera
 from core.spe_writer import save_spe
 from ui.image_viewer import ImageViewer   # #15 프리뷰
 
-_GRP_STYLE = """
-QGroupBox {
+_FC      = "Courier New"
+_FS_TITLE = "16px"   # 페이지 제목
+_FS_BTN   = "13px"   # 주요 액션 버튼
+_FS_CTRL  = "11px"   # 레이블·스핀박스·콤보·에디트
+_FS_LOG   = "11px"   # 로그 텍스트
+_FS_SMALL = "10px"   # 소형 보조 레이블
+
+_GRP_STYLE = f"""
+QGroupBox {{
     border: 1px solid #0f3460; border-radius: 6px;
-    margin-top: 10px; font-family: 'Courier New';
-    font-size: 11px; color: #e94560;
+    margin-top: 10px; font-family: '{_FC}';
+    font-size: {_FS_CTRL}; color: #e94560;
     letter-spacing: 2px; font-weight: bold;
-}
-QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }
+}}
+QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 4px; }}
 """
-_LBL = "color: #606880; font-family: 'Courier New'; font-size: 11px;"
-_SPIN = """
-QDoubleSpinBox, QSpinBox {
+_LBL = f"color: #606880; font-family: '{_FC}'; font-size: {_FS_CTRL};"
+_SPIN = f"""
+QDoubleSpinBox, QSpinBox {{
     background: #080e1e; border: 1px solid #0f3460; color: #c0d0ff;
-    border-radius: 3px; font-family: 'Courier New'; font-size: 11px; padding: 2px 4px;
-}
+    border-radius: 3px; font-family: '{_FC}'; font-size: {_FS_CTRL}; padding: 2px 4px;
+}}
 """
-_BTN = """
-QPushButton {
+_BTN = f"""
+QPushButton {{
     background: #0d1e38; color: #4ecdc4; border: 1px solid #1a4060;
-    border-radius: 4px; font-family: 'Courier New'; font-weight: bold; padding: 5px 10px;
-}
-QPushButton:hover { background: #1a3a60; }
-QPushButton:disabled { color: #1a2840; background: #080e1e; }
+    border-radius: 4px; font-family: '{_FC}'; font-weight: bold; padding: 5px 10px;
+}}
+QPushButton:hover {{ background: #1a3a60; }}
+QPushButton:disabled {{ color: #1a2840; background: #080e1e; }}
 """
 
 
@@ -175,7 +182,7 @@ class AcquisitionTab(QWidget):
 
         title = QLabel("PICAM ACQUISITION")
         title.setStyleSheet(
-            "color: #e94560; font-family: 'Courier New'; font-size: 16px;"
+            f"color: #e94560; font-family: '{_FC}'; font-size: {_FS_TITLE};"
             "font-weight: bold; letter-spacing: 4px;"
         )
         left.addWidget(title)
@@ -192,13 +199,13 @@ class AcquisitionTab(QWidget):
         banner_row.addWidget(lbl_cam_icon)
         self.lbl_cam_status = QLabel("카메라 미연결 — Live 탭에서 먼저 연결하세요")
         self.lbl_cam_status.setStyleSheet(
-            "color: #e94560; font-family: 'Courier New'; font-size: 11px;"
+            f"color: #e94560; font-family: '{_FC}'; font-size: {_FS_CTRL};"
         )
         banner_row.addWidget(self.lbl_cam_status, 1)
         # #16 온도 실시간 표시
         self.lbl_temp_live = QLabel("🌡 —")
         self.lbl_temp_live.setStyleSheet(
-            "color: #a0c8ff; font-family: 'Courier New'; font-size: 10px;"
+            f"color: #a0c8ff; font-family: '{_FC}'; font-size: {_FS_SMALL};"
         )
         self.lbl_temp_live.setVisible(False)
         banner_row.addWidget(self.lbl_temp_live)
@@ -207,7 +214,7 @@ class AcquisitionTab(QWidget):
         # Picam 전용 경고 (HIKVISION 연결 시 표시)
         self.lbl_picam_warn = QLabel("⚠️  Acquisition은 Picam 전용입니다")
         self.lbl_picam_warn.setStyleSheet(
-            "color: #ffe66d; font-family: 'Courier New'; font-size: 11px; padding: 2px 0;"
+            f"color: #ffe66d; font-family: '{_FC}'; font-size: {_FS_CTRL}; padding: 2px 0;"
         )
         self.lbl_picam_warn.setVisible(False)
         left.addWidget(self.lbl_picam_warn)
@@ -245,7 +252,7 @@ class AcquisitionTab(QWidget):
         gt = QVBoxLayout(self.grp_temp)
         self.check_temp = QCheckBox("온도 설정 활성화")
         self.check_temp.setStyleSheet(
-            "QCheckBox { color: #8090a8; font-family: 'Courier New'; font-size: 11px; }"
+            f"QCheckBox {{ color: #8090a8; font-family: '{_FC}'; font-size: {_FS_CTRL}; }}"
         )
         temp_row = QHBoxLayout()
         lbl_t = QLabel("Setpoint (°C):")
@@ -258,11 +265,11 @@ class AcquisitionTab(QWidget):
         self.spin_temp.setStyleSheet(_SPIN)
         self.check_wait_lock = QCheckBox("Lock 대기")
         self.check_wait_lock.setStyleSheet(
-            "QCheckBox { color: #8090a8; font-family: 'Courier New'; font-size: 11px; }"
+            f"QCheckBox {{ color: #8090a8; font-family: '{_FC}'; font-size: {_FS_CTRL}; }}"
         )
         self.lbl_temp_reading = QLabel("Reading: —")
         self.lbl_temp_reading.setStyleSheet(
-            "color: #a0c8ff; font-family: 'Courier New'; font-size: 11px;"
+            f"color: #a0c8ff; font-family: '{_FC}'; font-size: {_FS_CTRL};"
         )
         temp_row.addWidget(lbl_t)
         temp_row.addWidget(self.spin_temp, 1)
@@ -289,10 +296,10 @@ class AcquisitionTab(QWidget):
             lbl.setFixedWidth(80)
             cb = QComboBox()
             cb.addItem("(default)")
-            cb.setStyleSheet("""
-                QComboBox { background: #080e1e; border: 1px solid #0f3460; color: #c0d0ff;
-                    border-radius: 3px; font-family: 'Courier New'; font-size: 11px; padding: 2px 4px; }
-                QComboBox QAbstractItemView { background: #0f1729; color: #c0d0ff; }
+            cb.setStyleSheet(f"""
+                QComboBox {{ background: #080e1e; border: 1px solid #0f3460; color: #c0d0ff;
+                    border-radius: 3px; font-family: '{_FC}'; font-size: {_FS_CTRL}; padding: 2px 4px; }}
+                QComboBox QAbstractItemView {{ background: #0f1729; color: #c0d0ff; }}
             """)
             row.addWidget(lbl)
             row.addWidget(cb, 1)
@@ -308,9 +315,9 @@ class AcquisitionTab(QWidget):
         lbl_dir = QLabel("Dir:")
         lbl_dir.setStyleSheet(_LBL)
         self.edit_save_dir = QLineEdit("acquisitions")
-        self.edit_save_dir.setStyleSheet("""
-            QLineEdit { background: #080e1e; border: 1px solid #0f3460; color: #c0d0ff;
-                border-radius: 3px; font-family: 'Courier New'; font-size: 11px; padding: 2px 4px; }
+        self.edit_save_dir.setStyleSheet(f"""
+            QLineEdit {{ background: #080e1e; border: 1px solid #0f3460; color: #c0d0ff;
+                border-radius: 3px; font-family: '{_FC}'; font-size: {_FS_CTRL}; padding: 2px 4px; }}
         """)
         btn_browse = QPushButton("…")
         btn_browse.setFixedWidth(30)
@@ -324,7 +331,7 @@ class AcquisitionTab(QWidget):
         self.check_auto_open = QCheckBox("획득 후 Analysis 탭에서 자동으로 열기")
         self.check_auto_open.setChecked(True)
         self.check_auto_open.setStyleSheet(
-            "QCheckBox { color: #8090a8; font-family: 'Courier New'; font-size: 11px; }"
+            f"QCheckBox {{ color: #8090a8; font-family: '{_FC}'; font-size: {_FS_CTRL}; }}"
         )
         gs.addWidget(self.check_auto_open)
         left.addWidget(grp_save)
@@ -333,20 +340,20 @@ class AcquisitionTab(QWidget):
         self.btn_acquire = QPushButton("▶  START ACQUISITION")
         self.btn_acquire.setFixedHeight(48)
         self.btn_acquire.setEnabled(False)
-        self.btn_acquire.setStyleSheet("""
-            QPushButton { background: #0d2820; color: #4ecdc4; border: 1px solid #1a5040;
-                border-radius: 4px; font-family: 'Courier New'; font-weight: bold; font-size: 13px; }
-            QPushButton:hover { background: #1a4838; }
-            QPushButton:disabled { color: #1a2840; background: #080e1e; }
+        self.btn_acquire.setStyleSheet(f"""
+            QPushButton {{ background: #0d2820; color: #4ecdc4; border: 1px solid #1a5040;
+                border-radius: 4px; font-family: '{_FC}'; font-weight: bold; font-size: {_FS_BTN}; }}
+            QPushButton:hover {{ background: #1a4838; }}
+            QPushButton:disabled {{ color: #1a2840; background: #080e1e; }}
         """)
         left.addWidget(self.btn_acquire)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
-        self.progress_bar.setStyleSheet("""
-            QProgressBar { background: #080e1e; border: 1px solid #0f3460; border-radius: 3px;
-                color: #4ecdc4; font-family: 'Courier New'; font-size: 11px; text-align: center; }
-            QProgressBar::chunk { background: #e94560; border-radius: 2px; }
+        self.progress_bar.setStyleSheet(f"""
+            QProgressBar {{ background: #080e1e; border: 1px solid #0f3460; border-radius: 3px;
+                color: #4ecdc4; font-family: '{_FC}'; font-size: {_FS_CTRL}; text-align: center; }}
+            QProgressBar::chunk {{ background: #e94560; border-radius: 2px; }}
         """)
         left.addWidget(self.progress_bar)
 
@@ -355,7 +362,7 @@ class AcquisitionTab(QWidget):
         self.lbl_eta.setVisible(False)
         self.lbl_eta.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_eta.setStyleSheet(
-            "color: #ffe66d; font-family: 'Courier New'; font-size: 11px;"
+            f"color: #ffe66d; font-family: '{_FC}'; font-size: {_FS_CTRL};"
             "background: #0a1020; border: 1px solid #1a3050; border-radius: 3px; padding: 3px;"
         )
         left.addWidget(self.lbl_eta)
@@ -373,7 +380,7 @@ class AcquisitionTab(QWidget):
         # #15 프리뷰
         lbl_prev = QLabel("PREVIEW")
         lbl_prev.setStyleSheet(
-            "color: #e94560; font-family: 'Courier New'; font-size: 11px;"
+            f"color: #e94560; font-family: '{_FC}'; font-size: {_FS_CTRL};"
             "font-weight: bold; letter-spacing: 2px;"
         )
         right_layout.addWidget(lbl_prev)
@@ -384,15 +391,15 @@ class AcquisitionTab(QWidget):
         # 로그
         lbl_log = QLabel("ACQUISITION LOG")
         lbl_log.setStyleSheet(
-            "color: #e94560; font-family: 'Courier New'; font-size: 11px;"
+            f"color: #e94560; font-family: '{_FC}'; font-size: {_FS_CTRL};"
             "font-weight: bold; letter-spacing: 2px;"
         )
         right_layout.addWidget(lbl_log)
         self.log_display = QTextEdit()
         self.log_display.setReadOnly(True)
-        self.log_display.setStyleSheet("""
-            QTextEdit { background: #080e1e; border: 1px solid #0f3460;
-                color: #00cc88; font-family: 'Courier New'; font-size: 11px; }
+        self.log_display.setStyleSheet(f"""
+            QTextEdit {{ background: #080e1e; border: 1px solid #0f3460;
+                color: #00cc88; font-family: '{_FC}'; font-size: {_FS_LOG}; }}
         """)
         right_layout.addWidget(self.log_display, 1)
 
@@ -421,7 +428,7 @@ class AcquisitionTab(QWidget):
             name = type(cam).__name__
         self.lbl_cam_status.setText(f"● {name}")
         self.lbl_cam_status.setStyleSheet(
-            "color: #4ecdc4; font-family: 'Courier New'; font-size: 11px;"
+            f"color: #4ecdc4; font-family: '{_FC}'; font-size: {_FS_CTRL};"
         )
         self.lbl_picam_warn.setVisible(not is_picam)
         self.btn_acquire.setEnabled(is_picam)
@@ -483,7 +490,7 @@ class AcquisitionTab(QWidget):
         self._cam = None
         self.lbl_cam_status.setText("카메라 미연결 — Live 탭에서 먼저 연결하세요")
         self.lbl_cam_status.setStyleSheet(
-            "color: #e94560; font-family: 'Courier New'; font-size: 11px;"
+            f"color: #e94560; font-family: '{_FC}'; font-size: {_FS_CTRL};"
         )
         self.lbl_picam_warn.setVisible(False)
         self.btn_acquire.setEnabled(False)
@@ -680,7 +687,7 @@ class AcquisitionTab(QWidget):
             color = "#4a5a7a"
         else:
             color = "#00cc88"
-        ts_html = f"<span style='color:#2a4060;font-size:10px'>[{ts}]</span>"
+        ts_html = f"<span style='color:#2a4060;font-size:{_FS_SMALL}'>[{ts}]</span>"
         self.log_display.append(
             f"{ts_html} <span style='color:{color}'>{msg}</span>"
         )

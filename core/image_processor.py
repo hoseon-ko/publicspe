@@ -26,6 +26,7 @@ from enum import IntEnum
 from typing import Optional
 
 import numpy as np
+import time
 
 # cv2 는 선택적 의존성
 try:
@@ -245,7 +246,6 @@ class ImageProcessor:
         raw: uint8 / uint16 2D (H×W) 배열.
         내부 연산은 모두 float32 — 원본 다이나믹 레인지 보존.
         """
-        import time
         now = time.time()
         fps = 1.0 / max(now - self._last_time, 1e-9) if self._last_time > 0 else 0.0
         self._last_time = now
