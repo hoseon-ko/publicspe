@@ -131,6 +131,12 @@ class RulerWidget(QWidget):
         else:
             super().mouseReleaseEvent(event)
 
+    def leaveEvent(self, ev):
+        if self._resizing:
+            self._resizing = False
+            self.unsetCursor()
+        super().leaveEvent(ev)
+
     # ── 페인트 ──────────────────────────────────────────────────────────
 
     def paintEvent(self, event):
@@ -933,7 +939,15 @@ class ImageGraphicsView(QGraphicsView):
             self.fit_to_view()
 
     def leaveEvent(self, ev):
-        """마우스가 뷰어 밖으로 나가면 크로스헤어 숨김"""
+        """마우스가 뷰어 밖으로 나가면 크로스헤어 숨김 + 드래그 상태 초기화"""
+        # 탭 전환 등으로 마우스 이탈 시 드래그 상태 잔류 방지
+        if self._sel_drag_mode is not None:
+            self._sel_drag_mode = None
+            self.viewport().unsetCursor()
+        if self._drawing:
+            self._drawing = False
+            self._draw_start = None
+            self._clear_roi_item()
         self._cross_h.setVisible(False)
         self._cross_v.setVisible(False)
         if hasattr(self, '_cross_h_bg'):
@@ -1290,6 +1304,7 @@ class ImageViewer(QWidget):
     histogram_updated    = pyqtSignal(object, object)
     pixel_info_updated   = pyqtSignal(int, int, float)
     range_changed        = pyqtSignal(float, float)
+    colormap_changed     = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1617,7 +1632,10 @@ class ImageViewer(QWidget):
         """
         import time
         from PyQt6.QtGui import QImage, QPixmap
-        self._current_image = rgb
+        # 라이브에서는 set_source_image(raw)가 먼저 들어오면 그 값을 유지한다.
+        # (프로파일/룰러/픽셀값은 raw 기준)
+        if self._current_image is None:
+            self._current_image = rgb
         disp = np.rot90(rgb, k=self._rotation_k) if self._rotation_k else rgb
         h, w = disp.shape[:2]
         if disp.ndim == 3 and disp.shape[2] == 3:
@@ -2175,6 +2193,17 @@ class ImageViewer(QWidget):
     def _on_cmap_changed(self, name: str):
         # 'Off'는 내부적으로 'off'로 처리
         self._current_cmap = name.lower() if name.lower() == 'off' else name
+        is_off = (self._current_cmap == 'off')
+
+        # Colormap Off에서는 Range UI를 자동으로 닫아 혼란을 줄인다.
+        if is_off:
+            if self.btn_range.isChecked():
+                self.btn_range.setChecked(False)
+            self.btn_range.setEnabled(False)
+        else:
+            self.btn_range.setEnabled(True)
+
+        self.colormap_changed.emit(self._current_cmap)
         if self._hist_range_widget.isVisible() and self._current_image is not None:
             self._hist_range_widget.update_image(self._current_image, self._current_cmap)
         if not self._external_render_control:

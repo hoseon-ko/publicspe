@@ -39,6 +39,7 @@ from ui.image_viewer import ImageViewer
 from ui.plot_panel import PlotPanel, HistogramPanel
 from ui.live.camera_panel import CameraControlPanel
 from ui.live.motor_panel import MotorPanel
+from ui.live.kimm_z_panel import KIMMZPanel
 
 try:
     import cv2
@@ -224,6 +225,14 @@ class LiveTab(QMainWindow):
         # - snap 후 정지: 카메라 프레임 없어도 갱신
         # - 라이브 스트리밍 중: 다음 프레임이 곧 오지만 한 장 추가 처리로 즉각 반영
         if self._last_raw is not None:
+            self._last_display_t = 0.0  # 30fps 캡 우회
+            self._proc_worker.submit(self._last_raw)
+
+    def _on_viewer_colormap_changed(self, cmap: str):
+        """ImageViewer 컬러맵 변경을 라이브 처리 파이프라인에 즉시 반영한다."""
+        self._proc_worker.set_cmap(cmap)
+        if self._last_raw is not None:
+            self._last_display_t = 0.0  # 스냅/정지 상태에서도 즉시 redraw
             self._proc_worker.submit(self._last_raw)
 
     def __init__(self, parent=None):
@@ -312,6 +321,24 @@ class LiveTab(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_motor)
         self.splitDockWidget(self.dock_cam, self.dock_motor, Qt.Orientation.Vertical)
         self.dock_motor.setObjectName("dock_motor")
+
+        # ── Dock: KIMM Z (좌측, Motors 아래) ─────────────────────────
+        self.kimm_z_panel = KIMMZPanel()
+        self.kimm_z_panel.log_message.connect(self._log)
+        kimm_scroll = QScrollArea()
+        kimm_scroll.setWidget(self.kimm_z_panel)
+        kimm_scroll.setWidgetResizable(True)
+        kimm_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        kimm_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+
+        self.dock_kimm = QDockWidget("🎯  KIMM Z", self)
+        self.dock_kimm.setWidget(kimm_scroll)
+        self.dock_kimm.setAllowedAreas(
+            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
+        )
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_kimm)
+        self.splitDockWidget(self.dock_motor, self.dock_kimm, Qt.Orientation.Vertical)
+        self.dock_kimm.setObjectName("dock_kimm")
 
         # ── Dock: Profile Plot (하단 좌) ──────────────────────────────
         self.plot_panel = PlotPanel("Profile")
@@ -560,6 +587,7 @@ class LiveTab(QMainWindow):
             lambda d1, d2, lbl: self.plot_panel.plot_two_lines(d1, d2, "X mean", "Y mean")
         )
         self.image_viewer.histogram_updated.connect(self.hist_panel.plot_histogram)
+        self.image_viewer.colormap_changed.connect(self._on_viewer_colormap_changed)
 
         # #12 줌 레벨
         self.image_viewer._view.scale_changed.connect(self._on_zoom_changed)
@@ -828,11 +856,12 @@ class LiveTab(QMainWindow):
         self._lbl_imgsize.setText(f"{w}×{h}px")
         _, _, _, _, _, _, sat, sat_r = self._last_centroid
         self.image_viewer.set_saturated(sat, sat_r)
-        self.image_viewer.set_live_frame(rgb, fit=self._first_frame)
-        # set_live_frame이 _current_image에 RGB를 저장하므로, 원본 grayscale로 덮어써
-        # colormap 변경 시 이중 적용 및 export 오류를 방지한다.
+        # 프로파일/룰러 계산 기준을 raw로 맞추기 위해 먼저 source를 갱신한다.
         if raw_display is not None:
             self.image_viewer.set_source_image(raw_display)
+        else:
+            self.image_viewer.set_source_image(rgb)
+        self.image_viewer.set_live_frame(rgb, fit=self._first_frame)
         self._first_frame = False
 
     def _refresh_centroid_labels(self):

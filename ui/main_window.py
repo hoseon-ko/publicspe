@@ -97,6 +97,10 @@ class MainWindow(QMainWindow):
         self.live_tab.cam_panel.exposure_applied.connect(self.scan_tab.set_exposure_ui)
         self.scan_tab.exposure_changed.connect(self.live_tab.sync_exposure_ui)
 
+        # 노출 동기화 (Live ↔ Acquisition 양방향)
+        self.live_tab.cam_panel.exposure_applied.connect(self.acq_tab.set_exposure_ui)
+        self.acq_tab.exposure_changed.connect(self.live_tab.sync_exposure_ui)
+
         # ── Tab 4: Analysis ───────────────────────────────────────────
         self.analysis_tab = AnalysisTab(spe_class=self._spe_class)
         self.analysis_tab.status_message.connect(self._on_status)

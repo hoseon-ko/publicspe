@@ -25,7 +25,7 @@ from PyQt6.QtWidgets import (
     QComboBox, QCheckBox, QLineEdit, QProgressBar,
     QTextEdit, QFileDialog, QSizePolicy, QFrame
 )
-from PyQt6.QtCore import Qt, QThread, QObject, QSettings, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, QObject, QSettings, QTimer, pyqtSignal
 
 from core.async_worker import TempPollerThread
 from core.camera.base import BaseCamera
@@ -159,6 +159,7 @@ class AcquisitionTab(QWidget):
     log_message          = pyqtSignal(str)
     acquisition_starting = pyqtSignal()      # 라이브 스트림 정지 요청
     acquisition_done     = pyqtSignal()      # 획득 완료/오류 — 라이브 재개 요청
+    exposure_changed     = pyqtSignal(float) # 노출 UI 변경 (Live 탭과 동기화)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -166,8 +167,71 @@ class AcquisitionTab(QWidget):
         self._worker: Optional[_AcqWorker] = None
         self._thread: Optional[QThread] = None
         self._acq_start_time: float = 0.0                     # ETA 계산용
+        self._acq_cur_frame: int = 0
+        self._acq_total_frames: int = 0
+        self._frame_exposure_s: float = 0.0
+        self._frame_readout_s: float = 0.0
+        self._frame_delta_s: float = 0.0
+        self._frame_model_s: float = 0.0
+        self._acq_expected_total_s: float = 0.0
+        self._progress_timer = QTimer(self)
+        self._progress_timer.setInterval(100)
+        self._progress_timer.timeout.connect(self._on_progress_tick)
         self._temp_thread: Optional[TempPollerThread] = None  # 온도 폴링 (백그라운드)
         self._build_ui()
+
+    def _estimate_frame_timing(self, exposure_ms: float, timeout_s: float) -> tuple[float, float, float, float]:
+        """프레임 시간 모델(Exposure + Readout + Delta)을 계산한다.
+
+        - Exposure: UI 설정값(ms)
+        - Readout : Picam wrapper 계산값 우선 사용
+        - Delta   : 스레드/큐/호출 오버헤드 완충(보수적 상수 범위)
+        """
+        exp_s = max(float(exposure_ms) / 1000.0, 0.0)
+        readout_s = 0.0
+
+        if isinstance(self._cam, PicamCamera):
+            try:
+                total_s = float(self._cam._wrapper._get_frame_total_s())
+                readout_s = max(total_s - exp_s, 0.0)
+            except Exception:
+                readout_s = 0.0
+
+        # 타임아웃 여유를 과대 반영하지 않도록 작은 상한(50ms) 적용
+        slack = max(float(timeout_s) - (exp_s + readout_s), 0.0)
+        delta_s = min(slack, 0.05)
+        # 너무 작은 값으로 0에 수렴하지 않도록 최소 오버헤드 5ms
+        delta_s = max(delta_s, 0.005)
+
+        frame_s = exp_s + readout_s + delta_s
+        return exp_s, readout_s, delta_s, frame_s
+
+    def _format_duration(self, sec: float) -> str:
+        sec = max(float(sec), 0.0)
+        if sec < 60:
+            return f"{sec:.1f}초"
+        if sec < 3600:
+            return f"{sec/60:.1f}분 ({sec:.0f}초)"
+        return f"{sec/3600:.2f}시간"
+
+    def _update_progress_ui(self, cur: int, total: int):
+        elapsed = time.monotonic() - self._acq_start_time
+        expected_total = max(self._acq_expected_total_s, 1e-6)
+        frame_ratio = (cur / total) if total > 0 else 0.0
+        time_ratio = min(elapsed / expected_total, 1.0)
+        ratio = min(max(frame_ratio, time_ratio), 1.0)
+        self.progress_bar.setValue(int(ratio * 1000))
+
+        remaining = max(expected_total - elapsed, 0.0)
+        self.lbl_eta.setText(
+            f"⏱ {cur}/{total} 완료  |  남음 {remaining:.1f}s  ({elapsed:.1f}s 경과)"
+            f"  |  1프레임={self._frame_model_s*1000:.1f}ms"
+        )
+
+    def _on_progress_tick(self):
+        if not self.progress_bar.isVisible() or self._acq_total_frames <= 0:
+            return
+        self._update_progress_ui(self._acq_cur_frame, self._acq_total_frames)
 
     # ── UI 빌드 ───────────────────────────────────────────────────────
 
@@ -413,6 +477,17 @@ class AcquisitionTab(QWidget):
 
         # ── 시그널 연결 ───────────────────────────────────────────────
         self.btn_acquire.clicked.connect(self._start_acquisition)
+        self.spin_exposure.valueChanged.connect(self._on_exposure_spin_changed)
+
+    def _on_exposure_spin_changed(self, ms: float):
+        """Acquisition 노출 UI 변경을 외부 탭에 전달한다 (카메라 즉시 적용 안 함)."""
+        self.exposure_changed.emit(float(ms))
+
+    def set_exposure_ui(self, ms: float):
+        """다른 탭에서 노출값 변경 시 Acquisition UI만 업데이트한다."""
+        self.spin_exposure.blockSignals(True)
+        self.spin_exposure.setValue(float(ms))
+        self.spin_exposure.blockSignals(False)
 
     # ── 공유 카메라 수신 ──────────────────────────────────────────────
 
@@ -529,25 +604,37 @@ class AcquisitionTab(QWidget):
                 if val and val != "(default)":
                     adc_kwargs[key] = val
 
-        # #7 예상 시간 계산
-        total_s = n_frames * exposure_ms / 1000.0
-        if total_s < 60:
-            eta_str = f"{total_s:.1f}초"
-        elif total_s < 3600:
-            eta_str = f"{total_s/60:.1f}분 ({total_s:.0f}초)"
-        else:
-            eta_str = f"{total_s/3600:.2f}시간"
+        # 프레임 시간 모델: Exposure + Readout + Delta
+        exp_s, readout_s, delta_s, frame_s = self._estimate_frame_timing(exposure_ms, timeout)
+        total_s = n_frames * frame_s
+        eta_str = self._format_duration(total_s)
 
         self.btn_acquire.setEnabled(False)
         self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, n_frames)
+        self.progress_bar.setRange(0, 1000)
         self.progress_bar.setValue(0)
-        self.lbl_eta.setText(f"⏱ 예상: {eta_str}  |  0/{n_frames} 완료")
+        self.lbl_eta.setText(
+            f"⏱ 예상: {eta_str}  |  0/{n_frames} 완료"
+            f"  |  Exp {exp_s*1000:.1f}ms + Read {readout_s*1000:.1f}ms + Δ {delta_s*1000:.1f}ms"
+        )
         self.lbl_eta.setVisible(True)
         self._acq_start_time = time.monotonic()   # #7
+        self._acq_cur_frame = 0
+        self._acq_total_frames = n_frames
+        self._frame_exposure_s = exp_s
+        self._frame_readout_s = readout_s
+        self._frame_delta_s = delta_s
+        self._frame_model_s = frame_s
+        self._acq_expected_total_s = total_s
+        self._progress_timer.start()
         self._log(
             f"▶ 획득 시작: {n_frames} 프레임, "
             f"노출 {exposure_ms:.3f} ms"
+        )
+        self._log(
+            "⏱ 프레임 시간 모델: "
+            f"Exp {exp_s*1000:.1f}ms + Readout {readout_s*1000:.1f}ms + Delta {delta_s*1000:.1f}ms "
+            f"= {frame_s*1000:.1f}ms/frame"
         )
         self._log(f"⏱ 예상 소요 시간: {eta_str}")
 
@@ -569,27 +656,16 @@ class AcquisitionTab(QWidget):
         self._thread.start()
 
     def _on_progress(self, cur: int, total: int):
-        self.progress_bar.setValue(cur)
-
-        # #7 실측 경과 시간 기반 ETA 계산
-        elapsed = time.monotonic() - self._acq_start_time
-        if cur > 0:
-            rate = elapsed / cur          # 초/프레임
-            remaining = rate * (total - cur)
-            if remaining < 60:
-                rem_str = f"{remaining:.0f}초 남음"
-            else:
-                rem_str = f"{remaining/60:.1f}분 남음"
-            self.lbl_eta.setText(
-                f"⏱ {cur}/{total} 완료  |  {rem_str}  ({elapsed:.1f}s 경과)"
-            )
-        else:
-            self.lbl_eta.setText(f"⏱ 0/{total} 완료  |  —")
+        self._acq_cur_frame = cur
+        self._acq_total_frames = total
+        self._update_progress_ui(cur, total)
         self._log(f"  Frame {cur}/{total}")
 
     def _on_acquired(self, frames: list):
+        self._progress_timer.stop()
         self._thread.quit()
         self._thread.wait()
+        self.progress_bar.setValue(1000)
         self.progress_bar.setVisible(False)
         self.btn_acquire.setEnabled(self._cam is not None and isinstance(self._cam, PicamCamera))
         self.acquisition_done.emit()
@@ -612,6 +688,7 @@ class AcquisitionTab(QWidget):
             self._log(f"❌ 저장 오류: {e}")
 
     def _on_acq_error(self, msg: str):
+        self._progress_timer.stop()
         self._thread.quit()
         self._thread.wait()
         self.progress_bar.setVisible(False)

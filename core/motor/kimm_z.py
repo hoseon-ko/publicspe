@@ -1,0 +1,187 @@
+"""
+core/motor/kimm_z.py
+KIMM Fine Stage — Z축 TCP 소켓 통신 (위치 조회 전용 우선 구현)
+
+프로토콜 (KIMMCtrl.cs 기반):
+  위치 요청 : Get(6)\r\n
+  위치 응답 : Get(x,y,z,tx,ty,_,servo,af,)
+              index 0=X, 1=Y, 2=Z, 3=Tx, 4=Ty
+
+이동 명령은 connect/위치 확인 후 별도 활성화 예정.
+"""
+
+from __future__ import annotations
+
+import socket
+import threading
+import logging
+from typing import Optional
+
+log = logging.getLogger(__name__)
+
+AXIS_Z = 2  # ENUM_FINE_STAGE_AXIS_NUM.AXIS_Z (KIMMCtrl.cs 기준)
+
+
+class KIMMZController:
+    """
+    KIMM Fine Stage Z축 컨트롤러.
+
+    사용 순서:
+        ctrl = KIMMZController("192.168.1.100", 5000)
+        ok   = ctrl.connect()
+        z    = ctrl.current_z          # 폴링으로 최신값
+        ctrl.disconnect()
+    """
+
+    def __init__(self, ip: str, port: int):
+        self.ip = ip
+        self.port = port
+
+        self._sock: Optional[socket.socket] = None
+        self._connected = False
+        self._lock = threading.Lock()
+
+        # 마지막으로 수신된 각 축 위치
+        self._positions: list[float] = [0.0] * 6
+        self._servo_on: bool = False
+
+        self._recv_buf = ""
+        self._recv_thread: Optional[threading.Thread] = None
+
+    # ── 속성 ────────────────────────────────────────────────────────
+
+    @property
+    def is_connected(self) -> bool:
+        return self._connected
+
+    @property
+    def current_z(self) -> float:
+        """마지막으로 수신된 Z 위치 (um)."""
+        return self._positions[AXIS_Z]
+
+    @property
+    def servo_on(self) -> bool:
+        return self._servo_on
+
+    # ── 연결 / 해제 ─────────────────────────────────────────────────
+
+    def connect(self) -> bool:
+        """TCP 연결. 성공 시 True."""
+        if self._connected:
+            return True
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5.0)
+            sock.connect((self.ip, self.port))
+            sock.settimeout(None)           # 이후 recv는 블로킹
+            self._sock = sock
+            self._connected = True
+            self._recv_buf = ""
+
+            self._recv_thread = threading.Thread(
+                target=self._recv_loop, daemon=True, name="kimm_recv"
+            )
+            self._recv_thread.start()
+            log.info(f"[KIMM] Connected → {self.ip}:{self.port}")
+            return True
+        except Exception as e:
+            log.error(f"[KIMM] Connection failed: {e}")
+            self._connected = False
+            return False
+
+    def disconnect(self):
+        """연결 종료."""
+        self._connected = False
+        if self._sock:
+            try:
+                self._sock.close()
+            except Exception:
+                pass
+            self._sock = None
+        log.info("[KIMM] Disconnected")
+
+    # ── 위치 요청 ────────────────────────────────────────────────────
+
+    def request_position(self):
+        """Get(6) 명령 전송 — 응답은 수신 루프에서 _positions 갱신."""
+        self._send("Get(6)\r\n")
+
+    # ── 내부: 전송 ────────────────────────────────────────────────────
+
+    def _send(self, command: str) -> bool:
+        with self._lock:
+            if not self._connected or self._sock is None:
+                return False
+            try:
+                self._sock.sendall(command.encode("utf-8"))
+                return True
+            except Exception as e:
+                log.error(f"[KIMM] Send error: {e}")
+                self._connected = False
+                return False
+
+    # ── 내부: 수신 루프 ───────────────────────────────────────────────
+
+    def _recv_loop(self):
+        """백그라운드 daemon 스레드에서 소켓 데이터를 수신·파싱."""
+        try:
+            while self._connected and self._sock:
+                try:
+                    data = self._sock.recv(4096)
+                except OSError:
+                    break
+                if not data:
+                    log.warning("[KIMM] Server closed connection")
+                    break
+                self._recv_buf += data.decode("utf-8", errors="replace")
+                self._parse_buffer()
+        finally:
+            self._connected = False
+            log.info("[KIMM] Recv loop exited")
+
+    def _parse_buffer(self):
+        """버퍼에서 '\r\n' 또는 '\n' 단위로 메시지 분리 후 처리."""
+        while True:
+            for sep in ("\r\n", "\n"):
+                if sep in self._recv_buf:
+                    line, self._recv_buf = self._recv_buf.split(sep, 1)
+                    line = line.strip()
+                    if line:
+                        self._handle(line)
+                    break
+            else:
+                break
+
+    def _handle(self, msg: str):
+        # 위치 응답은 디버그 레벨 (빈번해서 로그 노이즈 방지)
+        if msg.startswith("Get"):
+            self._parse_get(msg)
+        elif msg.startswith("Error"):
+            log.error(f"[KIMM] {msg}")
+        elif msg.startswith("Notification"):
+            log.warning("[KIMM] Warning notification received")
+        else:
+            log.info(f"[KIMM RX] {msg}")
+
+    def _parse_get(self, msg: str):
+        """
+        Get(x,y,z,tx,ty,_,servo,af,)  →  _positions 갱신.
+        KIMMCtrl.cs ReceiveData의 Get 파싱 로직과 동일.
+        """
+        try:
+            # ')' → ',' 치환 후 '(' 기준 분리
+            params_str = msg.replace(")", ",").split("(", 1)
+            if len(params_str) < 2:
+                return
+            params = [p.strip() for p in params_str[1].split(",") if p.strip()]
+            if len(params) >= 8:
+                for i in range(5):      # X Y Z Tx Ty
+                    self._positions[i] = float(params[i])
+                self._servo_on = params[6] == "1"
+            elif len(params) >= 2:
+                # 단일 축 응답
+                axis = int(params[0]) - 1
+                if 0 <= axis < 6:
+                    self._positions[axis] = float(params[1])
+        except Exception as e:
+            log.debug(f"[KIMM] Get parse error ({msg}): {e}")

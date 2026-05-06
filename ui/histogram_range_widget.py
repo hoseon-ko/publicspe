@@ -237,6 +237,12 @@ class _DualHandleSlider(QWidget):
         self._dragging = None
         self.setCursor(Qt.CursorShape.ArrowCursor)
 
+    def hideEvent(self, ev):
+        if self._dragging is not None:
+            self._dragging = None
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        super().hideEvent(ev)
+
 
 # ── 좌우 값 패널 ──────────────────────────────────────────────────────────────
 
