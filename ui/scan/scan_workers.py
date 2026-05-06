@@ -179,11 +179,12 @@ class _ScanWorker(QThread):
     Snap → 분석 → 저장 → 이동 → 반복.
     각 스텝마다 step_done 시그널로 결과 전달.
     """
-    step_done   = pyqtSignal(int, object, list, str)  # (idx, ProcessedFrame, positions, spe_path)
-    progress    = pyqtSignal(int, int)                # (current, total)
-    log_message = pyqtSignal(str)
-    finished    = pyqtSignal(str)                     # CSV 요약 경로
-    error       = pyqtSignal(str)
+    step_done     = pyqtSignal(int, object, list, str)  # (idx, ProcessedFrame, positions, spe_path)
+    progress      = pyqtSignal(int, int)                # (current, total)
+    log_message   = pyqtSignal(str)
+    finished      = pyqtSignal(str)                     # CSV 요약 경로
+    error         = pyqtSignal(str)
+    step_started  = pyqtSignal(int, float)              # (step_idx, estimated_ms)
 
     def __init__(self, cam, motor_panel, params: dict, proc=None, parent=None):
         super().__init__(parent)
@@ -197,6 +198,7 @@ class _ScanWorker(QThread):
         self._scan_name   = params["scan_name"]
         self._flush_snaps = params.get("flush_snaps", 0)
         self._mask_rects  = params.get("ignore_mask_rects", [])
+        self._exposure_ms = params.get("exposure_ms", 30.0)
         self._proc        = proc if proc is not None else ImageProcessor()
         self._proc.centroid_enabled = True
         self._proc.temporal_mode = TemporalMode.SINGLE
@@ -230,6 +232,7 @@ class _ScanWorker(QThread):
                 break
 
             # ── Snap ──────────────────────────────────────────────────
+            self.step_started.emit(i, self._exposure_ms + 200.0)
             try:
                 raw = np.asarray(self._cam.snap())
             except Exception as e:

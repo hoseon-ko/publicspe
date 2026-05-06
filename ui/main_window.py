@@ -93,6 +93,10 @@ class MainWindow(QMainWindow):
         # 모터 패널 공유: Live 탭의 motor_panel → Scan 탭
         self.scan_tab.set_motor_panel(self.live_tab.motor_panel)
 
+        # 노출 동기화 (Live ↔ Scan 양방향)
+        self.live_tab.cam_panel.exposure_applied.connect(self.scan_tab.set_exposure_ui)
+        self.scan_tab.exposure_changed.connect(self.live_tab.sync_exposure_ui)
+
         # ── Tab 4: Analysis ───────────────────────────────────────────
         self.analysis_tab = AnalysisTab(spe_class=self._spe_class)
         self.analysis_tab.status_message.connect(self._on_status)

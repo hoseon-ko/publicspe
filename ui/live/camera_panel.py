@@ -95,6 +95,7 @@ class CameraControlPanel(QWidget):
     snap_requested          = pyqtSignal()          # 1장 촬영
     bg_capture_requested    = pyqtSignal()
     log_message             = pyqtSignal(str)
+    exposure_applied        = pyqtSignal(float)
 
     def __init__(self, processor: ImageProcessor, parent=None):
         super().__init__(parent)
@@ -761,6 +762,9 @@ class CameraControlPanel(QWidget):
         def _ok(actual):
             if actual is not None:
                 self.spin_exposure.setValue(actual)
+                self.exposure_applied.emit(float(actual))
+            else:
+                self.exposure_applied.emit(float(ms))
             self.log_message.emit(f"Exposure → {ms:.2f} ms")
         self._run_sdk(lambda: self._cam.set_exposure_ms(ms),
                       _ok, "Exposure 오류", self.btn_apply_exp)

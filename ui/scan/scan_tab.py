@@ -10,10 +10,10 @@ import os
 from typing import Optional
 
 import numpy as np
-from PyQt6.QtCore import Qt, pyqtSignal, QSettings, QSize
+from PyQt6.QtCore import Qt, pyqtSignal, QSettings, QSize, QTimer
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
-    QGroupBox, QLabel, QPushButton, QSpinBox,
+    QGroupBox, QLabel, QPushButton, QSpinBox, QDoubleSpinBox,
     QComboBox, QLineEdit, QFileDialog,
     QProgressBar, QTextEdit, QTableWidget,
     QTableWidgetItem, QHeaderView, QScrollArea,
@@ -109,9 +109,10 @@ def _sep_v() -> QWidget:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class ScanTab(QWidget):
-    scan_starting = pyqtSignal()   # → MainWindow → live_tab.stop_live()
-    scan_done     = pyqtSignal()   # → MainWindow → live_tab.resume_live()
-    log_message   = pyqtSignal(str)
+    scan_starting    = pyqtSignal()   # → MainWindow → live_tab.stop_live()
+    scan_done        = pyqtSignal()   # → MainWindow → live_tab.resume_live()
+    log_message      = pyqtSignal(str)
+    exposure_changed = pyqtSignal(float)  # 노출 동기화용
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -133,12 +134,22 @@ class ScanTab(QWidget):
         # 무시 마스크 영역 목록 [(x1,y1,x2,y2), ...]
         self._mask_rects: list[tuple[int, int, int, int]] = []
 
+        self._background: 'np.ndarray | None' = None
+        self._scan_start_time: float = 0.0
+        self._step_acq_timer = None  # set after build_ui
+
         self._plot_x:  list = []
         self._plot_cx: list = []
         self._plot_cy: list = []
         self.enable_profile_plot = True
         self._build_ui()
         self._restore_settings()
+
+        self._step_acq_timer = QTimer()
+        self._step_acq_timer.setInterval(50)
+        self._step_acq_timer.timeout.connect(self._tick_acq_progress)
+        self._acq_step_elapsed_ms: float = 0.0
+        self._acq_step_duration_ms: float = 1000.0
 
     # ── Public API ────────────────────────────────────────────────────
 
@@ -153,6 +164,11 @@ class ScanTab(QWidget):
         self._lbl_cam.setStyleSheet(f"color: #4ecdc4; font-family: '{_F}'; font-size: {_FS_LBL};")
         self.btn_start.setEnabled(True)
         self.btn_calibrate.setEnabled(True)
+        try:
+            exp = cam.get_exposure_ms()
+            self.spin_exposure.setValue(exp)
+        except Exception:
+            pass
 
     def clear_shared_camera(self):
         if not (self._worker and self._worker.isRunning()):
@@ -232,6 +248,39 @@ class ScanTab(QWidget):
         self.btn_sim.setCheckable(True)
         self.btn_sim.clicked.connect(self._toggle_sim_mode)
         gc.addWidget(self.btn_sim)
+
+        # 노출 시간
+        exp_row = QHBoxLayout()
+        lbl_exp = QLabel("노출(ms):")
+        lbl_exp.setStyleSheet(f"color:{_C_LBL}; font-family:'{_F}'; font-size:{_FS_LBL};")
+        lbl_exp.setFixedWidth(70)
+        self.spin_exposure = QDoubleSpinBox()
+        self.spin_exposure.setRange(0.01, 1_000_000.0)
+        self.spin_exposure.setDecimals(2)
+        self.spin_exposure.setValue(30.0)
+        self.spin_exposure.setStyleSheet(_SPIN_STYLE)
+        self.btn_apply_exposure = QPushButton("APPLY")
+        self.btn_apply_exposure.setStyleSheet(_BTN_PRIMARY)
+        self.btn_apply_exposure.clicked.connect(self._apply_scan_exposure)
+        exp_row.addWidget(lbl_exp)
+        exp_row.addWidget(self.spin_exposure)
+        exp_row.addWidget(self.btn_apply_exposure)
+        gc.addLayout(exp_row)
+
+        # 백그라운드
+        bg_row = QHBoxLayout()
+        self.btn_capture_bg = QPushButton("BG 획득")
+        self.btn_capture_bg.setStyleSheet(_BTN_PRIMARY)
+        self.btn_capture_bg.clicked.connect(self._capture_background)
+        self.chk_bg_active = QCheckBox("BG 차감")
+        self.chk_bg_active.setStyleSheet(f"QCheckBox {{ color:{_C_VAL}; font-family:'{_F}'; font-size:{_FS_LBL}; }}")
+        self._lbl_bg_status = QLabel("없음")
+        self._lbl_bg_status.setStyleSheet(f"color:{_C_DIM}; font-family:'{_FC}'; font-size:13px;")
+        bg_row.addWidget(self.btn_capture_bg)
+        bg_row.addWidget(self.chk_bg_active)
+        bg_row.addWidget(self._lbl_bg_status)
+        gc.addLayout(bg_row)
+
         ctrl_layout.addWidget(grp_cam)
 
         # 스캔 파라미터
@@ -342,6 +391,18 @@ class ScanTab(QWidget):
             QProgressBar::chunk {{ background:#0d2820; border-radius:3px; }}
         """)
         ctrl_layout.addWidget(self.progress_bar)
+
+        # 현재 스텝 획득 진행바
+        self._acq_bar = QProgressBar()
+        self._acq_bar.setRange(0, 100)
+        self._acq_bar.setValue(0)
+        self._acq_bar.setTextVisible(False)
+        self._acq_bar.setFixedHeight(6)
+        self._acq_bar.setStyleSheet("""
+            QProgressBar { background:#080e1e; border:1px solid #0f3460; border-radius:2px; }
+            QProgressBar::chunk { background:#ffe66d; border-radius:2px; }
+        """)
+        ctrl_layout.addWidget(self._acq_bar)
 
         self._lbl_progress = QLabel("—")
         self._lbl_progress.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -664,6 +725,53 @@ class ScanTab(QWidget):
         splitter.addWidget(center_right)
         splitter.setSizes([290, 1110])
 
+    # ── 노출 제어 ─────────────────────────────────────────────────────
+
+    def _apply_scan_exposure(self):
+        if self._cam is None:
+            return
+        ms = self.spin_exposure.value()
+        try:
+            actual = self._cam.set_exposure_ms(ms)
+            self.spin_exposure.setValue(actual)
+            self._log(f"노출 설정: {actual:.2f} ms")
+            self.exposure_changed.emit(actual)
+        except Exception as e:
+            self._log(f"⚠️ 노출 설정 실패: {e}")
+
+    def set_exposure_ui(self, ms: float):
+        """다른 탭에서 노출값 변경 시 UI만 업데이트."""
+        self.spin_exposure.blockSignals(True)
+        self.spin_exposure.setValue(ms)
+        self.spin_exposure.blockSignals(False)
+
+    # ── 백그라운드 제어 ───────────────────────────────────────────────
+
+    def _capture_background(self):
+        if self._cam is None:
+            self._log("❌ 카메라 연결 필요")
+            return
+        try:
+            raw = np.asarray(self._cam.snap())
+            self._background = raw.astype(np.float32)
+            self._lbl_bg_status.setText(f"{raw.shape[1]}×{raw.shape[0]}")
+            self._log(f"📸 배경 획득: {raw.shape[1]}×{raw.shape[0]}")
+        except Exception as e:
+            self._log(f"⚠️ 배경 획득 실패: {e}")
+
+    # ── 스텝 획득 진행 타이머 ─────────────────────────────────────────
+
+    def _tick_acq_progress(self):
+        self._acq_step_elapsed_ms += 50.0
+        pct = min(99, int(self._acq_step_elapsed_ms / max(self._acq_step_duration_ms, 1) * 100))
+        self._acq_bar.setValue(pct)
+
+    def _on_step_started(self, idx: int, estimated_ms: float):
+        self._acq_step_elapsed_ms = 0.0
+        self._acq_step_duration_ms = max(estimated_ms, 100.0)
+        self._acq_bar.setValue(0)
+        self._step_acq_timer.start()
+
     # ── 컨트롤 잠금 ──────────────────────────────────────────────────
 
     def _set_controls_locked(self, locked: bool):
@@ -686,6 +794,8 @@ class ScanTab(QWidget):
             self.edit_scan_name, self.edit_save_dir,
             self.btn_show_a, self.btn_show_b,
             self.btn_diff, self.btn_absdiff,
+            self.spin_exposure, self.btn_apply_exposure,
+            self.btn_capture_bg,
         ):
             w.setEnabled(idle)
         for chk in self._calib_chk.values():
@@ -775,6 +885,7 @@ class ScanTab(QWidget):
         self._plot_cx.clear()
         self._plot_cy.clear()
 
+        import time
         params = {
             "motor_num":         motor_num,
             "steps_move":        steps_move,
@@ -784,15 +895,18 @@ class ScanTab(QWidget):
             "scan_name":         scan_name,
             "flush_snaps":       self.spin_flush.value(),
             "ignore_mask_rects": list(self._mask_rects),
+            "exposure_ms":       self.spin_exposure.value(),
         }
         # 마스크는 워커가 첫 스냅 후 크기에 맞게 빌드하므로 여기서 리셋
         self._proc.ignore_mask = None
+        self._scan_start_time = time.monotonic()
         self._worker = _ScanWorker(self._cam, self._motor_panel, params, proc=self._proc)
         self._worker.step_done.connect(self._on_step_done)
         self._worker.progress.connect(self._on_progress)
         self._worker.log_message.connect(self._log)
         self._worker.finished.connect(self._on_scan_finished)
         self._worker.error.connect(self._on_scan_error)
+        self._worker.step_started.connect(self._on_step_started)
         self._worker.start()
         self._log(f"▶ 스캔 시작 — M{motor_num} × {num_steps} steps ({steps_move} step/move)")
 
@@ -861,10 +975,23 @@ class ScanTab(QWidget):
             )
 
     def _on_progress(self, current: int, total: int):
+        import time
+        self._step_acq_timer.stop()
+        self._acq_bar.setValue(100)
         self.progress_bar.setValue(current)
-        self._lbl_progress.setText(f"{current} / {total}")
+        elapsed = time.monotonic() - self._scan_start_time
+        if current > 0:
+            avg = elapsed / current
+            remaining = avg * (total - current)
+            self._lbl_progress.setText(
+                f"Step {current}/{total}  |  경과 {elapsed:.0f}s  |  남은 ~{remaining:.0f}s"
+            )
+        else:
+            self._lbl_progress.setText(f"Step {current}/{total}")
 
     def _on_scan_finished(self, csv_path: str):
+        self._step_acq_timer.stop()
+        self._acq_bar.setValue(0)
         self._worker = None
         self._set_controls_locked(False)
         # B 스핀박스를 마지막 프레임 인덱스로 자동 세팅
@@ -884,6 +1011,8 @@ class ScanTab(QWidget):
         self.scan_done.emit()
 
     def _on_scan_error(self, msg: str):
+        self._step_acq_timer.stop()
+        self._acq_bar.setValue(0)
         self._log(f"❌ {msg}")
         self._worker = None
         self._set_controls_locked(False)

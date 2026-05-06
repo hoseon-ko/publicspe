@@ -212,6 +212,7 @@ class LiveTab(QMainWindow):
     status_message      = pyqtSignal(str)
     camera_connected    = pyqtSignal(object)   # BaseCamera — Acquisition 탭 공유
     camera_disconnected = pyqtSignal()
+    exposure_applied    = pyqtSignal(float)
 
     def on_range_changed(self, vmin, vmax):
         self._proc_worker._vmin = vmin
@@ -546,6 +547,7 @@ class LiveTab(QMainWindow):
         self.cam_panel.snap_requested.connect(self._snap_image)
         self.cam_panel.bg_capture_requested.connect(self._capture_bg)
         self.cam_panel.log_message.connect(self._log)
+        self.cam_panel.exposure_applied.connect(self.exposure_applied)
 
         self.motor_panel.log_message.connect(self._log)
         self.motor_panel.pre_move_info_cb = self._get_pre_move_info
@@ -566,6 +568,12 @@ class LiveTab(QMainWindow):
         # ROI 목록 패널 연동
         self.image_viewer._view.on_roi_added   = self._on_roi_added_to_list
         self.image_viewer._view.on_roi_selected = self._on_roi_selected_in_list
+
+    def sync_exposure_ui(self, ms: float):
+        """다른 탭에서 노출값 변경 시 UI만 업데이트 (카메라 재적용 안 함)."""
+        self.cam_panel.spin_exposure.blockSignals(True)
+        self.cam_panel.spin_exposure.setValue(ms)
+        self.cam_panel.spin_exposure.blockSignals(False)
 
     # ── 카메라 제어 ───────────────────────────────────────────────────
 
