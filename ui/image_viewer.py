@@ -729,7 +729,7 @@ class _RangePopup(QWidget):
     def __init__(self, hist_widget: 'HistogramRangeWidget', parent=None):
         super().__init__(parent, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
-        self.setMinimumSize(480, 200)
+        self.setMinimumSize(480, 156)
         self._drag_pos = None
 
         outer = QVBoxLayout(self)
@@ -824,6 +824,7 @@ class ImageViewer(QWidget):
         self._pending_workers: set = set()   # GC 방지용 실행중 워커 참조
         self._display_vmin: float | None = None
         self._display_vmax: float | None = None
+        self._external_render_control = False  # True면 외부(예: LiveTab) 렌더 파이프라인 사용
         self._range_debounce = QTimer()
         self._range_debounce.setSingleShot(True)
         self._range_debounce.setInterval(50)
@@ -1008,7 +1009,7 @@ class ImageViewer(QWidget):
 
         # ── 히스토그램 Range 슬라이더 팝업 ──
         self._hist_range_widget = HistogramRangeWidget()
-        # self._hist_range_widget.range_changed.connect(self._on_range_changed)
+        self._hist_range_widget.range_changed.connect(self._on_range_changed)
         self._hist_range_widget.range_changed.connect(self.range_changed)
         self._range_popup = _RangePopup(self._hist_range_widget, parent=self)
         self._range_popup.closed.connect(lambda: self.btn_range.setChecked(False))
@@ -1060,6 +1061,14 @@ class ImageViewer(QWidget):
         set_live_frame은 display용 RGB를 받으므로, 원본은 별도로 저장해야
         _refresh_pixmap/_export_image에서 이중 colormap 적용이 발생하지 않는다."""
         self._current_image = img
+
+    def set_external_render_control(self, enabled: bool) -> None:
+        """외부 렌더 파이프라인 사용 여부를 설정한다.
+
+        True  : range/cmap 변경 시 내부 _refresh_pixmap 호출을 생략.
+        False : 기존 동작(내부 ColorMapWorker 렌더) 사용.
+        """
+        self._external_render_control = bool(enabled)
 
     def set_saturated(self, saturated: bool, sat_ratio: float = 0.0) -> None:
         """포화 경고 오버레이 표시/숨김 (P3-3)."""
@@ -1410,14 +1419,16 @@ class ImageViewer(QWidget):
     def _on_range_changed(self, vmin: float, vmax: float):
         self._display_vmin = vmin
         self._display_vmax = vmax
-        self._range_debounce.start()  # 50ms 후 렌더 — 빠른 드래그 시 중간 프레임 스킵
+        if not self._external_render_control:
+            self._range_debounce.start()  # 50ms 후 렌더 — 빠른 드래그 시 중간 프레임 스킵
 
     def _on_cmap_changed(self, name: str):
         # 'Off'는 내부적으로 'off'로 처리
         self._current_cmap = name.lower() if name.lower() == 'off' else name
         if self._hist_range_widget.isVisible() and self._current_image is not None:
             self._hist_range_widget.update_image(self._current_image, self._current_cmap)
-        self._refresh_pixmap(fit=False)
+        if not self._external_render_control:
+            self._refresh_pixmap(fit=False)
 
     # ─────────────────────────────────────────
     # 마우스 정보

@@ -112,11 +112,18 @@ class _ConnectWorker(QObject):
 # ── 이미지 처리 백그라운드 워커 ─────────────────────────────────────────────────
 
 def _build_rgb(result, cmap: str, show_binary: bool, vmin: int, vmax: int) -> np.ndarray:
-    """ProcessedFrame → display RGB. 백그라운드 스레드에서 호출됨."""
+    """ProcessedFrame → display RGB. 백그라운드 스레드에서 호출됨.
+
+    colormap 경로: result.raw (원본 dtype, uint16 등) 기준으로 vmin/vmax 적용.
+    그래야 Range 슬라이더(raw 좌표계)와 단위계가 일치한다.
+    colormap 없는 경로: result.display (uint8) 그대로 사용.
+    """
     disp = result.display
-    if cmap and cmap != 'off' and disp.ndim == 2 and not show_binary:
+    if cmap and cmap != 'off' and not show_binary:
+        # raw 원본에 vmin/vmax 적용 — Range 슬라이더 단위계와 일치
+        src = result.raw if result.raw.ndim == 2 else disp
         from ui.image_viewer import apply_colormap
-        rgba = apply_colormap(disp, cmap, vmin=vmin, vmax=vmax)
+        rgba = apply_colormap(src.astype(np.float64), cmap, vmin=vmin, vmax=vmax)
         rgb  = rgba[:, :, :3].copy()
     elif disp.ndim == 2:
         rgb = cv2.cvtColor(disp, cv2.COLOR_GRAY2RGB) if _CV2_OK else \
@@ -209,6 +216,14 @@ class LiveTab(QMainWindow):
     def on_range_changed(self, vmin, vmax):
         self._proc_worker._vmin = vmin
         self._proc_worker._vmax = vmax
+        self.image_viewer._display_vmin = vmin
+        self.image_viewer._display_vmax = vmax
+        # frozen 여부와 무관하게 last_raw 가 있으면 재처리:
+        # - freeze 모드: 고정 프레임 즉시 갱신
+        # - snap 후 정지: 카메라 프레임 없어도 갱신
+        # - 라이브 스트리밍 중: 다음 프레임이 곧 오지만 한 장 추가 처리로 즉각 반영
+        if self._last_raw is not None:
+            self._proc_worker.submit(self._last_raw)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -261,6 +276,7 @@ class LiveTab(QMainWindow):
     def _build_ui(self):
         # ── 중앙: ImageViewer ─────────────────────────────────────────
         self.image_viewer = ImageViewer()
+        self.image_viewer.set_external_render_control(True)
         self.setCentralWidget(self.image_viewer)
         self.image_viewer.range_changed.connect(self.on_range_changed)
         # ── Dock: Camera Control (좌측 상단) ──────────────────────────
@@ -789,11 +805,13 @@ class LiveTab(QMainWindow):
             return
         self._last_display_t = now
         self._viewer_raw = result.raw   # 뷰어에 실제 그려지는 프레임과 1:1 대응
-        self._show_frame(rgb, result.display)
+        # Range/colormap 기준은 display(uint8) 아니라 raw(원본 bit-depth)여야 한다.
+        self._show_frame(rgb, result.raw)
 
     def _show_frame(self, rgb: np.ndarray, raw_display: Optional[np.ndarray] = None):
         """#4 Freeze: 고정 중이면 표시 갱신 안 함. #5 AutoFIT: 첫 프레임만 fit.
-        raw_display: colormap 적용 전 원본 grayscale — _refresh_pixmap/_export_image용.
+        raw_display: colormap 적용 전 원본 grayscale(가능하면 raw 원본 dtype 유지)
+                     — _refresh_pixmap/_export_image/range slider 기준 데이터.
                      None이면 rgb를 그대로 저장 (정적 이미지 경로에서 사용).
         """
         if self._frozen:

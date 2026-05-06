@@ -201,7 +201,10 @@ _BTN = (
     "border-radius:3px; font-size:11px; padding:2px 8px; }"
     "QPushButton:hover { background:#1a3a60; color:#fff; }"
 )
-_LBL = "color:#8090b0; font-family:'Courier New'; font-size:11px;"
+_LBL = (
+    "color:#8090b0; font-family:'Courier New'; font-size:11px;"
+    "background:transparent; border:none;"
+)
 
 
 class HistogramRangeWidget(QWidget):
@@ -216,6 +219,11 @@ class HistogramRangeWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("histRangeWidget")
+        self.setStyleSheet(
+            "#histRangeWidget{background:#0a1020;}"
+            "#histRangeWidget QLabel{background:transparent;}"
+        )
         self._data_min = 0.0
         self._data_max = 1.0
         self._vmin = 0.0
@@ -239,11 +247,18 @@ class HistogramRangeWidget(QWidget):
         self._lbl_min = QLabel("0")
         self._lbl_min.setStyleSheet(_LBL)
         self._lbl_min.setFixedWidth(70)
+        self._lbl_min.setFixedHeight(22)
+        self._lbl_min.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
 
         self._lbl_max = QLabel("65535")
         self._lbl_max.setStyleSheet(_LBL)
         self._lbl_max.setFixedWidth(70)
-        self._lbl_max.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self._lbl_max.setFixedHeight(22)
+        self._lbl_max.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
 
         btn_opt  = QPushButton("Optimal Scale")
         btn_full = QPushButton("Full Scale")

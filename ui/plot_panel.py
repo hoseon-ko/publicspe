@@ -91,6 +91,28 @@ class PlotPanel(QWidget):
             self.plot_widget.getAxis(axis).setTextPen('#a0a0b0')
         layout.addWidget(self.plot_widget)
 
+        # ── 마우스 호버 crosshair ──
+        _dash = 2  # Qt.PenStyle.DashLine
+        self._vline = pg.InfiniteLine(angle=90, movable=False,
+                                      pen=pg.mkPen('#ffe66d', width=1, style=_dash))
+        self._hline = pg.InfiniteLine(angle=0,  movable=False,
+                                      pen=pg.mkPen('#ffe66d', width=1, style=_dash))
+        self._vline.setVisible(False)
+        self._hline.setVisible(False)
+        self.plot_widget.addItem(self._vline, ignoreBounds=True)
+        self.plot_widget.addItem(self._hline, ignoreBounds=True)
+
+        self.hover_label = QLabel("—")
+        self.hover_label.setStyleSheet(
+            "color: #ffe66d; font-size: 10px; padding: 0 4px;"
+        )
+        header_row.addWidget(self.hover_label)
+
+        self._proxy = pg.SignalProxy(
+            self.plot_widget.scene().sigMouseMoved,
+            rateLimit=30, slot=self._on_mouse_moved
+        )
+
     # ─────────────────────────────────────────
     # Public API
     # ─────────────────────────────────────────
@@ -121,6 +143,41 @@ class PlotPanel(QWidget):
         self.clear()
         for data, label in zip(profiles, labels):
             self._add_line(data, label)
+
+    def _on_mouse_moved(self, evt):
+        pos = evt[0]
+        vb = self.plot_widget.getPlotItem().getViewBox()
+        if not self.plot_widget.sceneBoundingRect().contains(pos):
+            self._vline.setVisible(False)
+            self._hline.setVisible(False)
+            self.hover_label.setText("—")
+            return
+        mouse_point = vb.mapSceneToView(pos)
+        x = mouse_point.x()
+        y = mouse_point.y()
+        self._vline.setPos(x)
+        self._hline.setPos(y)
+        self._vline.setVisible(True)
+        self._hline.setVisible(True)
+
+        nearest_y = None
+        nearest_label = ""
+        for item in self._plot_items:
+            xdata, ydata = item.getData()
+            if xdata is None or ydata is None or len(xdata) == 0:
+                continue
+            idx = int(round(x))
+            if 0 <= idx < len(ydata):
+                val = ydata[idx]
+                if nearest_y is None:
+                    nearest_y = val
+                    nearest_label = item.name() or ""
+
+        if nearest_y is not None:
+            lbl = f" [{nearest_label}]" if nearest_label else ""
+            self.hover_label.setText(f"X:{int(x)}  Y:{nearest_y:.1f}{lbl}")
+        else:
+            self.hover_label.setText(f"X:{x:.1f}  Y:{y:.1f}")
 
     def _on_freeze_toggled(self, checked: bool):
         """#22 플롯 Freeze 상태 변경."""
@@ -215,6 +272,12 @@ class PlotPanel(QWidget):
         self._plot_items.clear()
         self._color_idx = 0
         self.peak_label.setText("")
+        self.hover_label.setText("—")
+        # crosshair는 clear() 후 다시 추가 (plot_widget.clear()가 제거함)
+        self.plot_widget.addItem(self._vline, ignoreBounds=True)
+        self.plot_widget.addItem(self._hline, ignoreBounds=True)
+        self._vline.setVisible(False)
+        self._hline.setVisible(False)
         # 범례 재생성
         self.plot_widget.addLegend(offset=(10, 10))
 
