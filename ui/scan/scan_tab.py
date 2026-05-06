@@ -725,22 +725,19 @@ class ScanTab(QWidget):
     # ── 이미지 뷰어에 RGB + 중심점 마커 표시 ─────────────────────────
 
     def _display_result(self, result, fit: bool = False):
-        """ProcessResult → display RGB + centroid 오버레이 → image_viewer."""
+        """ProcessResult → image_viewer (컬러맵 유지) + 센트로이드 씬 오버레이."""
         disp = result.display
-        if disp.ndim == 2:
-            try:
-                import cv2
-                rgb = cv2.cvtColor(disp, cv2.COLOR_GRAY2RGB)
-            except ImportError:
-                rgb = np.stack([disp, disp, disp], axis=-1)
+        # set_image_first/set_image 경로를 타서 _current_cmap / range 설정을 그대로 유지
+        if fit:
+            self.image_viewer.set_image_first(disp)
         else:
-            rgb = disp.copy()
+            self.image_viewer.set_image(disp)
 
+        # 센트로이드는 픽셀에 굽지 않고 씬 오버레이로 표시 → 컬러맵 재적용 시에도 유지
         if self.chk_centroid_marker.isChecked() and result.has_centroid:
-            rgb = _draw_centroid_cross(rgb, result.centroid_x, result.centroid_y)
-
-        self.image_viewer.set_live_frame(rgb, fit=fit)
-        self.image_viewer.set_source_image(disp)  # 컬러맵/range slider용 원본 — set_live_frame 이후 호출해야 _current_image 덮어씀
+            self.image_viewer.set_centroid_overlay(result.centroid_x, result.centroid_y)
+        else:
+            self.image_viewer.clear_centroid_overlay()
 
     # ── 스캔 제어 ─────────────────────────────────────────────────────
 

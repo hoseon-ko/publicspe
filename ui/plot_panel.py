@@ -88,9 +88,14 @@ class PlotPanel(QWidget):
         self.plot_widget.showGrid(x=True, y=True, alpha=0.3)
         self.plot_widget.addLegend(offset=(10, 10))
         for axis in ('bottom', 'left'):
-            self.plot_widget.getAxis(axis).setPen('#0f3460')
-            self.plot_widget.getAxis(axis).setTextPen('#a0a0b0')
-        # 확대/축소/패닝 시에도 Y축이 0 아래로 내려가지 않도록 ViewBox에 하한선 고정
+            ax = self.plot_widget.getAxis(axis)
+            ax.setPen('#0f3460')
+            ax.setTextPen('#a0a0b0')
+        self.plot_widget.setLabel('bottom', 'X',
+                                  **{'color': '#607090', 'font-size': '10pt'})
+        self.plot_widget.setLabel('left',   'Y',
+                                  **{'color': '#607090', 'font-size': '10pt'})
+        # 확대/축소/패닝 시에도 X축이 0 아래로 내려가지 않도록 ViewBox에 하한선 고정
         self.plot_widget.getPlotItem().getViewBox().setLimits(xMin=0)
         layout.addWidget(self.plot_widget)
 
@@ -333,10 +338,12 @@ class PlotPanel(QWidget):
         self.plot_widget.addLegend(offset=(10, 10))
 
     def set_xlabel(self, label: str):
-        self.plot_widget.setLabel('bottom', label)
+        self.plot_widget.setLabel('bottom', label,
+                                  **{'color': '#607090', 'font-size': '10pt'})
 
     def set_ylabel(self, label: str):
-        self.plot_widget.setLabel('left', label)
+        self.plot_widget.setLabel('left', label,
+                                  **{'color': '#607090', 'font-size': '10pt'})
 
     def set_title(self, title: str):
         self.title_label.setText(title)

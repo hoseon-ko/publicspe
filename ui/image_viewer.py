@@ -18,7 +18,8 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
     QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
     QGraphicsLineItem, QGraphicsRectItem,
-    QSizePolicy, QToolButton, QPushButton
+    QSizePolicy, QToolButton, QPushButton,
+    QListWidget, QListWidgetItem,
 )
 from PyQt6.QtCore import pyqtSignal, Qt, QRectF, QTimer
 from PyQt6.QtGui import (
@@ -34,100 +35,331 @@ from typing import Optional, Union
 # ─────────────────────────────────────────────────────────────────────────────
 
 class RulerWidget(QWidget):
-    """픽셀 단위 눈금자"""
+    """픽셀 단위 눈금자 + 미니 프로파일 오버레이.
+
+    수평 룰러: 상단 _prof_size px = 프로파일, 하단 _TICK px = 눈금
+    수직 룰러: 좌측 _prof_size px = 프로파일, 우측 _TICK px = 눈금
+    구분선 드래그로 프로파일 영역 크기 조절 가능.
+    """
+
+    _TICK    = 24   # 눈금 영역 고정 크기 (px)
+    _SEP_HIT = 5    # 구분선 감지 반경 (px)
+    _PROF_MIN = 20
+    _PROF_MAX = 200
 
     def __init__(self, orientation: str = 'horizontal', parent=None):
         super().__init__(parent)
-        self._orientation = orientation  # 'horizontal' | 'vertical'
-        self._scale = 1.0       # 픽셀당 화면 픽셀
-        self._offset = 0.0      # 스크롤 오프셋 (이미지 픽셀)
-        self._img_size = 1000   # 이미지 크기 (픽셀)
+        self._orientation = orientation
+        self._scale    = 1.0
+        self._offset   = 0.0
+        self._img_size = 1000
+        self._profile: np.ndarray | None = None
+        self._profile_start: int = 0   # 이미지 좌표에서 프로파일 시작 픽셀
+        self._prof_size: int = 52   # 드래그로 조절 가능
+        self._resizing = False
 
-        if orientation == 'horizontal':
-            self.setFixedHeight(24)
-            self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        else:
-            self.setFixedWidth(48)
-            self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
-
+        self.setMouseTracking(True)
+        self._update_fixed_size()
         self.setStyleSheet("background-color: #16213e;")
 
+    def _update_fixed_size(self):
+        total = self._prof_size + self._TICK
+        if self._orientation == 'horizontal':
+            self.setFixedHeight(total)
+            self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        else:
+            self.setFixedWidth(total)
+            self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+
+    def _sep_pos(self) -> int:
+        return self._prof_size
+
+    def _on_sep(self, x: int, y: int) -> bool:
+        sep = self._sep_pos()
+        if self._orientation == 'horizontal':
+            return abs(y - sep) <= self._SEP_HIT
+        else:
+            return abs(x - sep) <= self._SEP_HIT
+
+    # ── 공개 API ────────────────────────────────────────────────────────
+
     def update_transform(self, scale: float, offset: float, img_size: int):
-        self._scale = scale
-        self._offset = offset
+        self._scale    = scale
+        self._offset   = offset
         self._img_size = img_size
         self.update()
 
+    def set_profile(self, data: np.ndarray | None, data_start: int = 0):
+        self._profile = data
+        self._profile_start = data_start
+        self.update()
+
+    # ── 마우스 (구분선 드래그) ──────────────────────────────────────────
+
+    def mousePressEvent(self, event):
+        from PyQt6.QtCore import Qt
+        if event.button() == Qt.MouseButton.LeftButton and self._on_sep(event.pos().x(), event.pos().y()):
+            self._resizing = True
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        from PyQt6.QtCore import Qt
+        x, y = event.pos().x(), event.pos().y()
+        if self._resizing:
+            if self._orientation == 'horizontal':
+                new_sz = max(self._PROF_MIN, min(self._PROF_MAX, y))
+            else:
+                new_sz = max(self._PROF_MIN, min(self._PROF_MAX, x))
+            self._prof_size = new_sz
+            self._update_fixed_size()
+            self.update()
+            event.accept()
+        else:
+            if self._on_sep(x, y):
+                cur = Qt.CursorShape.SizeVerCursor if self._orientation == 'horizontal' else Qt.CursorShape.SizeHorCursor
+                self.setCursor(cur)
+            else:
+                self.unsetCursor()
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self._resizing:
+            self._resizing = False
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
+
+    # ── 페인트 ──────────────────────────────────────────────────────────
+
     def paintEvent(self, event):
         from PyQt6.QtGui import QPainter, QColor, QPen, QFont
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
 
-        bg = QColor('#16213e')
-        tick_color = QColor('#506080')
-        text_color = QColor('#a0a0b0')
+        W, H = self.width(), self.height()
+        PR, TK = self._prof_size, self._TICK
 
-        painter.fillRect(self.rect(), bg)
-        painter.setPen(QPen(tick_color, 1))
+        c_bg_prof = QColor(0x0e, 0x16, 0x24)
+        c_bg_tick = QColor(0x16, 0x21, 0x3e)
+        c_tick    = QColor(0x50, 0x60, 0x80)
+        c_text    = QColor(0xa0, 0xa0, 0xb0)
+        c_sep     = QColor(0x1a, 0x30, 0x60)
+        font      = QFont('Segoe UI', 8)
+        p.setFont(font)
 
-        font = QFont('Segoe UI', 8)
-        painter.setFont(font)
-        painter.setPen(text_color)
-
-        w = self.width()
-        h = self.height()
-
-        # 눈금 간격 결정 (화면 40px 이상 간격)
+        # ── 눈금 간격 ────────────────────────────────────────────
         target_px = 60
-        raw_step = target_px / max(self._scale, 0.001)
+        raw_step  = target_px / max(self._scale, 0.001)
         magnitude = 10 ** int(np.log10(max(raw_step, 1)))
-        for step in [magnitude, magnitude * 2, magnitude * 5, magnitude * 10]:
-            if step * self._scale >= target_px:
-                tick_step = step
+        tick_step = magnitude * 10
+        for s in [magnitude, magnitude * 2, magnitude * 5, magnitude * 10]:
+            if s * self._scale >= target_px:
+                tick_step = s
                 break
-        else:
-            tick_step = magnitude * 10
-
-        # self._offset 은 이미 이미지 픽셀 단위
-        start_img = int(self._offset)
-        start_tick = (start_img // tick_step) * tick_step
+        start_tick = (int(self._offset) // tick_step) * tick_step
 
         if self._orientation == 'horizontal':
-            painter.setPen(QPen(QColor('#304060'), 1))
-            painter.drawLine(0, h - 1, w, h - 1)
+            # 프로파일 영역 (위)
+            p.fillRect(0, 0, W, PR, c_bg_prof)
+            self._draw_h_profile(p, W, PR)
+            p.setPen(QPen(c_sep, 1))
+            p.drawLine(0, PR, W, PR)
+
+            # 눈금 영역 (아래)
+            p.fillRect(0, PR, W, TK, c_bg_tick)
+            p.setPen(QPen(QColor(0x30, 0x40, 0x60), 1))
+            p.drawLine(0, PR + TK - 1, W, PR + TK - 1)
+
             img_px = start_tick
             while True:
-                screen_x = int((img_px - self._offset) * self._scale)
-                if screen_x > w:
+                sx = int((img_px - self._offset) * self._scale)
+                if sx > W:
                     break
-                if img_px < 0:
-                    img_px += tick_step
-                    continue
-                painter.setPen(QPen(tick_color, 1))
-                painter.drawLine(screen_x, h - 8, screen_x, h - 1)
-                painter.setPen(text_color)
-                painter.drawText(screen_x + 2, h - 10, str(img_px))
+                if img_px >= 0:
+                    p.setPen(QPen(c_tick, 1))
+                    p.drawLine(sx, PR + TK - 8, sx, PR + TK - 1)
+                    p.setPen(c_text)
+                    p.drawText(sx + 2, PR + TK - 2, str(img_px))
                 img_px += tick_step
-        else:
-            painter.setPen(QPen(QColor('#304060'), 1))
-            painter.drawLine(w - 1, 0, w - 1, h)
+
+        else:  # vertical
+            # 프로파일 영역 (왼쪽)
+            p.fillRect(0, 0, PR, H, c_bg_prof)
+            self._draw_v_profile(p, H, PR)
+            p.setPen(QPen(c_sep, 1))
+            p.drawLine(PR, 0, PR, H)
+
+            # 눈금 영역 (오른쪽)
+            p.fillRect(PR, 0, TK, H, c_bg_tick)
+            p.setPen(QPen(QColor(0x30, 0x40, 0x60), 1))
+            p.drawLine(PR + TK - 1, 0, PR + TK - 1, H)
+
             img_px = start_tick
             while True:
-                screen_y = int((img_px - self._offset) * self._scale)
-                if screen_y > h:
+                sy = int((img_px - self._offset) * self._scale)
+                if sy > H:
                     break
-                if img_px < 0:
-                    img_px += tick_step
-                    continue
-                painter.setPen(QPen(tick_color, 1))
-                painter.drawLine(w - 8, screen_y, w - 1, screen_y)
-                painter.setPen(text_color)
-                painter.save()
-                painter.translate(w - 10, screen_y - 2)
-                painter.rotate(-90)
-                painter.drawText(0, 0, str(img_px))
-                painter.restore()
+                if img_px >= 0:
+                    p.setPen(QPen(c_tick, 1))
+                    p.drawLine(PR, sy, PR + 8, sy)
+                    p.setPen(c_text)
+                    p.save()
+                    p.translate(PR + TK - 2, sy - 2)
+                    p.rotate(-90)
+                    p.drawText(0, 0, str(img_px))
+                    p.restore()
                 img_px += tick_step
+
+        p.end()
+
+    # ── 프로파일 그리기 ─────────────────────────────────────────────────
+
+    def _draw_h_profile(self, p, W: int, area_h: int):
+        """수평 룰러 프로파일 — 열(column) 강도, 높을수록 아래(이미지 방향)."""
+        from PyQt6.QtGui import QPen, QColor, QPainterPath
+        if self._profile is None or len(self._profile) == 0:
+            return
+        data = self._profile
+        n    = len(data)
+        dmin = float(data.min())
+        dmax = float(data.max())
+        if dmax <= dmin:
+            return
+
+        pad  = 3
+        span = area_h - 2 * pad
+        ps = self._profile_start   # 이미지 좌표 오프셋
+
+        # 화면에 보이는 이미지 좌표 범위
+        img_view_lo = self._offset
+        img_view_hi = self._offset + W / max(self._scale, 1e-6)
+        # 데이터 배열 범위로 변환 (배열 인덱스 = 이미지좌표 - ps)
+        d0 = max(0, int(img_view_lo - ps) - 1)
+        d1 = min(n - 1, int(img_view_hi - ps) + 1)
+        if d0 > d1:
+            return
+
+        step = max(1, (d1 - d0) // max(W, 1))
+
+        # 피크 탐색 (보이는 구간)
+        visible = data[d0:d1 + 1]
+        peak_arr_idx = int(d0 + np.argmax(visible))
+        peak_val = float(data[peak_arr_idx])
+        peak_img_idx = peak_arr_idx + ps   # 이미지 좌표
+
+        path  = QPainterPath()
+        first = True
+        for i in range(d0, d1 + 1, step):
+            img_idx = i + ps   # 이미지 좌표
+            sx = (img_idx - self._offset) * self._scale
+            norm = (data[i] - dmin) / (dmax - dmin)
+            sy = pad + (1.0 - norm) * span   # 높을수록 위
+            if first:
+                path.moveTo(sx, sy)
+                first = False
+            else:
+                path.lineTo(sx, sy)
+
+        if not first:
+            p.setRenderHint(p.RenderHint.Antialiasing, True)
+            p.setPen(QPen(QColor('#d4691e'), 1))
+            p.drawPath(path)
+
+            # 피크(max) 마커 + 수치
+            pk_sx = (peak_img_idx - self._offset) * self._scale
+            pk_sy = pad + (1.0 - (peak_val - dmin) / (dmax - dmin)) * span
+            p.setPen(QPen(QColor('#ffcc44'), 1))
+            p.setBrush(QColor('#ffcc44'))
+            p.drawEllipse(int(pk_sx) - 3, int(pk_sy) - 3, 6, 6)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.setPen(QColor('#ffcc44'))
+            p.drawText(int(pk_sx) + 5, max(12, int(pk_sy) - 2), f"{peak_val:.0f}")
+
+            # min/max 범위 라벨 (우측 고정)
+            fm = p.fontMetrics()
+            max_lbl = f"{dmax:.0f}"
+            min_lbl = f"{dmin:.0f}"
+            max_lbl_w = fm.horizontalAdvance(max_lbl)
+            min_lbl_w = fm.horizontalAdvance(min_lbl)
+            lbl_x_max = W - max_lbl_w - 2
+            lbl_x_min = W - min_lbl_w - 2
+            p.setPen(QColor(0xa0, 0xb0, 0xc0))
+            p.drawText(lbl_x_max, pad + 10, max_lbl)           # 위 = max (norm=1 → sy=pad)
+            p.drawText(lbl_x_min, pad + span - 2, min_lbl)     # 아래 = min (norm=0 → sy=pad+span)
+
+            p.setRenderHint(p.RenderHint.Antialiasing, False)
+
+    def _draw_v_profile(self, p, H: int, area_w: int):
+        """수직 룰러 프로파일 — 행(row) 강도, 높을수록 왼쪽(이미지 반대 방향)."""
+        from PyQt6.QtGui import QPen, QColor, QPainterPath
+        if self._profile is None or len(self._profile) == 0:
+            return
+        data = self._profile
+        n    = len(data)
+        dmin = float(data.min())
+        dmax = float(data.max())
+        if dmax <= dmin:
+            return
+
+        pad  = 3
+        span = area_w - 2 * pad
+        ps = self._profile_start
+
+        img_view_lo = self._offset
+        img_view_hi = self._offset + H / max(self._scale, 1e-6)
+        d0 = max(0, int(img_view_lo - ps) - 1)
+        d1 = min(n - 1, int(img_view_hi - ps) + 1)
+        if d0 > d1:
+            return
+
+        step = max(1, (d1 - d0) // max(H, 1))
+
+        # 피크 탐색
+        visible = data[d0:d1 + 1]
+        peak_arr_idx = int(d0 + np.argmax(visible))
+        peak_val = float(data[peak_arr_idx])
+        peak_img_idx = peak_arr_idx + ps
+
+        path  = QPainterPath()
+        first = True
+        for i in range(d0, d1 + 1, step):
+            img_idx = i + ps
+            sy = (img_idx - self._offset) * self._scale
+            norm = (data[i] - dmin) / (dmax - dmin)
+            sx = pad + (1.0 - norm) * span   # 높을수록 왼쪽
+            if first:
+                path.moveTo(sx, sy)
+                first = False
+            else:
+                path.lineTo(sx, sy)
+
+        if not first:
+            p.setRenderHint(p.RenderHint.Antialiasing, True)
+            p.setPen(QPen(QColor('#d4691e'), 1))
+            p.drawPath(path)
+
+            # 피크(max) 마커 + 수치
+            pk_sy = (peak_img_idx - self._offset) * self._scale
+            pk_sx = pad + (1.0 - (peak_val - dmin) / (dmax - dmin)) * span
+            p.setPen(QPen(QColor('#ffcc44'), 1))
+            p.setBrush(QColor('#ffcc44'))
+            p.drawEllipse(int(pk_sx) - 3, int(pk_sy) - 3, 6, 6)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.setPen(QColor('#ffcc44'))
+            p.drawText(max(2, int(pk_sx) - 30), int(pk_sy) - 4, f"{peak_val:.0f}")
+
+            # min/max 범위 라벨 (상단/하단 고정)
+            p.setPen(QColor(0xa0, 0xb0, 0xc0))
+            fm = p.fontMetrics()
+            max_lbl = f"{dmax:.0f}"
+            min_lbl = f"{dmin:.0f}"
+            # dmax → sx=pad (왼쪽 끝), dmin → sx=pad+span (오른쪽 끝)
+            p.drawText(pad, 12, max_lbl)
+            p.drawText(max(pad, area_w - fm.horizontalAdvance(min_lbl) - 2), 12, min_lbl)
+
+            p.setRenderHint(p.RenderHint.Antialiasing, False)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -147,6 +379,9 @@ class ImageGraphicsView(QGraphicsView):
     mouse_clicked    = pyqtSignal(float, float)   # 클릭 좌표
     roi_drawn        = pyqtSignal(str, object)    # (mode, pts)
     scale_changed    = pyqtSignal(float, float, float)  # (scale, x_offset, y_offset)
+    sel_box_changed  = pyqtSignal(float, float, float, float)  # x0,y0,x1,y1 (이미지 좌표); 음수=-해제
+
+    _SEL_HN = ['NW', 'N', 'NE', 'E', 'SE', 'S', 'SW', 'W']
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -205,6 +440,7 @@ class ImageGraphicsView(QGraphicsView):
         # 클릭 마커
         self._click_marker = None
         self._click_text = None
+        self._click_crosshair = None   # 고정 크로스헤어 (클릭 시)
 
         # ROI 드로잉 임시 아이템 (드래그 중 프리뷰)
         self._roi_item = None
@@ -232,6 +468,16 @@ class ImageGraphicsView(QGraphicsView):
         self._draw_start = None
         self._drawing = False
         self._need_fit = False
+
+        # 선택 박스 (None 모드 드래그)
+        self._sel_active = False
+        self._sel_x0 = self._sel_y0 = self._sel_x1 = self._sel_y1 = 0.0
+        self._sel_drag_mode: str | None = None   # None/'create'/'move'/'resize-NW' 등
+        self._sel_press_x = self._sel_press_y = 0.0
+        self._sel_save = (0.0, 0.0, 0.0, 0.0)   # (x0,y0,x1,y1) at press
+        self._sel_rect_gfx: 'QGraphicsRectItem | None' = None
+        self._sel_hdl_gfx: list = []
+        self._sel_create_visual()
 
     # ─────────────────────────────────────────
     # 이미지 설정
@@ -315,6 +561,21 @@ class ImageGraphicsView(QGraphicsView):
     # ─────────────────────────────────────────
 
     def mousePressEvent(self, ev: QMouseEvent):
+        if ev.button() == Qt.MouseButton.RightButton:
+            # 우클릭: 마커든 박스든 제거 → 전체 평균 프로파일
+            cleared = False
+            if self._click_marker or self._click_crosshair:
+                self._clear_click_marker()
+                self.mouse_clicked.emit(-1, -1)
+                cleared = True
+            if self._sel_active:
+                self._sel_hide()
+                self.sel_box_changed.emit(-1.0, -1.0, -1.0, -1.0)
+                cleared = True
+            if cleared:
+                ev.accept()
+                return
+
         if ev.button() == Qt.MouseButton.LeftButton:
             scene_pos = self.mapToScene(ev.pos())
 
@@ -333,16 +594,134 @@ class ImageGraphicsView(QGraphicsView):
                 ev.accept()
                 return
             else:
-                # None 모드: 기존 ROI 클릭 선택 시도 → 없으면 클릭 마커
+                # None 모드: 선택 박스 > 기존 ROI > 새 드래그
+                hit_sel = self._sel_hit(x, y)
+
+                if hit_sel == 'inside':
+                    # 박스 내부 → 이동
+                    self._sel_drag_mode = 'move'
+                    self._sel_press_x, self._sel_press_y = x, y
+                    self._sel_save = self._sel_norm()
+                    ev.accept()
+                    return
+
+                if hit_sel is not None:
+                    # 핸들 → 리사이즈
+                    self._sel_drag_mode = f'resize-{hit_sel}'
+                    self._sel_press_x, self._sel_press_y = x, y
+                    self._sel_save = self._sel_norm()
+                    ev.accept()
+                    return
+
+                # 기존 ROI 선택 시도
                 hit = self._find_roi_at(x, y)
                 if hit is not None:
                     self._select_roi(hit)
                     ev.accept()
                     return
-                self.mouse_clicked.emit(x, y)
-                self._place_click_marker(x, y)
+
+                # 드래그/클릭 시작 — 마커/박스는 릴리즈 때 확정
+                self._sel_drag_mode = 'create'
+                self._sel_press_x, self._sel_press_y = x, y
 
         super().mousePressEvent(ev)
+
+    # ─────────────────────────────────────────
+    # 선택 박스 (None 모드 드래그 분석 영역)
+    # ─────────────────────────────────────────
+
+    def _sel_create_visual(self):
+        from PyQt6.QtWidgets import QGraphicsRectItem as _GRI
+        from PyQt6.QtCore import QRectF as _RF
+        pen = QPen(QColor('#ff3333'), 1, Qt.PenStyle.DashLine)
+        pen.setCosmetic(True)
+        self._sel_rect_gfx = _GRI()
+        self._sel_rect_gfx.setPen(pen)
+        self._sel_rect_gfx.setBrush(QBrush(Qt.BrushStyle.NoBrush))
+        self._sel_rect_gfx.setVisible(False)
+        self._scene.addItem(self._sel_rect_gfx)
+
+        from PyQt6.QtWidgets import QGraphicsItem
+        hdl_pen   = QPen(QColor('#ffffff'), 1)
+        hdl_brush = QBrush(QColor('#ffffff'))
+        for _ in self._SEL_HN:
+            h = _GRI(-4, -4, 8, 8)
+            h.setPen(hdl_pen)
+            h.setBrush(hdl_brush)
+            h.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
+            h.setVisible(False)
+            self._scene.addItem(h)
+            self._sel_hdl_gfx.append(h)
+
+    def _sel_norm(self):
+        return (min(self._sel_x0, self._sel_x1), min(self._sel_y0, self._sel_y1),
+                max(self._sel_x0, self._sel_x1), max(self._sel_y0, self._sel_y1))
+
+    def _sel_update_visual(self):
+        from PyQt6.QtCore import QRectF as _RF
+        x0, y0, x1, y1 = self._sel_norm()
+        self._sel_rect_gfx.setRect(_RF(x0, y0, x1 - x0, y1 - y0))
+        self._sel_rect_gfx.setVisible(True)
+        mx, my = (x0 + x1) / 2, (y0 + y1) / 2
+        positions = [(x0,y0),(mx,y0),(x1,y0),(x1,my),(x1,y1),(mx,y1),(x0,y1),(x0,my)]
+        for h, (hx, hy) in zip(self._sel_hdl_gfx, positions):
+            h.setPos(hx, hy)
+            h.setVisible(True)
+
+    def _sel_hide(self):
+        if self._sel_rect_gfx:
+            self._sel_rect_gfx.setVisible(False)
+        for h in self._sel_hdl_gfx:
+            h.setVisible(False)
+        self._sel_active = False
+
+    def _sel_hit(self, x: float, y: float) -> str | None:
+        """'NW'등 핸들명, 'inside', 또는 None 반환."""
+        if not self._sel_active:
+            return None
+        tol = 7.0 / max(self._scale, 0.01)
+        x0, y0, x1, y1 = self._sel_norm()
+        mx, my = (x0+x1)/2, (y0+y1)/2
+        positions = {
+            'NW':(x0,y0),'N':(mx,y0),'NE':(x1,y0),'E':(x1,my),
+            'SE':(x1,y1),'S':(mx,y1),'SW':(x0,y1),'W':(x0,my)
+        }
+        for name, (hx, hy) in positions.items():
+            if abs(x - hx) <= tol and abs(y - hy) <= tol:
+                return name
+        if x0 <= x <= x1 and y0 <= y <= y1:
+            return 'inside'
+        return None
+
+    _SEL_MIN_PX = 5   # 박스 최소 크기 (이미지 픽셀)
+
+    def _sel_emit(self):
+        x0, y0, x1, y1 = self._sel_norm()
+        if (x1 - x0) < self._SEL_MIN_PX or (y1 - y0) < self._SEL_MIN_PX:
+            return
+        self.sel_box_changed.emit(x0, y0, x1, y1)
+
+    def _sel_apply_resize(self, handle: str, dx: float, dy: float):
+        x0, y0, x1, y1 = self._sel_save
+        if 'W' in handle: x0 += dx
+        if 'E' in handle: x1 += dx
+        if 'N' in handle: y0 += dy
+        if 'S' in handle: y1 += dy
+        self._sel_x0, self._sel_y0 = x0, y0
+        self._sel_x1, self._sel_y1 = x1, y1
+
+    def _sel_cursor(self, hit: str | None):
+        _map = {
+            'inside': Qt.CursorShape.SizeAllCursor,
+            'NW': Qt.CursorShape.SizeFDiagCursor, 'SE': Qt.CursorShape.SizeFDiagCursor,
+            'NE': Qt.CursorShape.SizeBDiagCursor, 'SW': Qt.CursorShape.SizeBDiagCursor,
+            'N':  Qt.CursorShape.SizeVerCursor,   'S':  Qt.CursorShape.SizeVerCursor,
+            'E':  Qt.CursorShape.SizeHorCursor,   'W':  Qt.CursorShape.SizeHorCursor,
+        }
+        if hit in _map:
+            self.viewport().setCursor(_map[hit])
+        else:
+            self.viewport().unsetCursor()
 
     def _find_roi_at(self, x: float, y: float):
         """클릭 위치에서 가장 가까운 ROI id 반환 (없으면 None).
@@ -435,6 +814,38 @@ class ImageGraphicsView(QGraphicsView):
         else:
             self._cross_text.setVisible(False)
 
+        # 선택 박스 드래그 처리
+        if self._sel_drag_mode is not None:
+            dx = x - self._sel_press_x
+            dy = y - self._sel_press_y
+            if self._sel_drag_mode == 'create':
+                if abs(dx) > self._SEL_MIN_PX or abs(dy) > self._SEL_MIN_PX:
+                    # 드래그 확정 → 마커 제거, 박스 표시
+                    if self._click_marker or self._click_crosshair:
+                        self._clear_click_marker()
+                        self.mouse_clicked.emit(-1, -1)
+                    self._sel_x0, self._sel_y0 = self._sel_press_x, self._sel_press_y
+                    self._sel_x1, self._sel_y1 = x, y
+                    self._sel_active = True
+                    self._sel_update_visual()
+                    self._sel_emit()
+            elif self._sel_drag_mode == 'move':
+                sx0, sy0, sx1, sy1 = self._sel_save
+                self._sel_x0, self._sel_y0 = sx0 + dx, sy0 + dy
+                self._sel_x1, self._sel_y1 = sx1 + dx, sy1 + dy
+                self._sel_update_visual()
+                self._sel_emit()
+            elif self._sel_drag_mode.startswith('resize-'):
+                self._sel_apply_resize(self._sel_drag_mode[7:], dx, dy)
+                self._sel_update_visual()
+                self._sel_emit()
+            ev.accept()
+            return
+
+        # 커서 힌트 (드래그 없을 때)
+        if self._roi_mode is None:
+            self._sel_cursor(self._sel_hit(x, y))
+
         if self._drawing and self._draw_start is not None:
             x1, y1 = x, y
             if ev.modifiers() & Qt.KeyboardModifier.ShiftModifier:
@@ -450,6 +861,34 @@ class ImageGraphicsView(QGraphicsView):
         super().mouseMoveEvent(ev)
 
     def mouseReleaseEvent(self, ev: QMouseEvent):
+        if ev.button() == Qt.MouseButton.LeftButton and self._sel_drag_mode is not None:
+            scene_pos = self.mapToScene(ev.pos())
+            x, y = scene_pos.x(), scene_pos.y()
+            mode = self._sel_drag_mode
+            self._sel_drag_mode = None
+
+            if mode == 'create':
+                dx = x - self._sel_press_x
+                dy = y - self._sel_press_y
+                if abs(dx) > self._SEL_MIN_PX or abs(dy) > self._SEL_MIN_PX:
+                    # 드래그 → 박스 확정, 마커 없음
+                    self._sel_x1, self._sel_y1 = x, y
+                    self._sel_active = True
+                    self._sel_update_visual()
+                    self._sel_emit()
+                else:
+                    # 클릭 → 마커 생성, 기존 박스 해제
+                    if self._sel_active:
+                        self._sel_hide()
+                        self.sel_box_changed.emit(-1.0, -1.0, -1.0, -1.0)
+                    self.mouse_clicked.emit(self._sel_press_x, self._sel_press_y)
+                    self._place_click_marker(self._sel_press_x, self._sel_press_y)
+            elif self._sel_active:
+                self._sel_emit()
+
+            ev.accept()
+            return
+
         if ev.button() == Qt.MouseButton.LeftButton and self._drawing:
             scene_pos = self.mapToScene(ev.pos())
             x, y = scene_pos.x(), scene_pos.y()
@@ -470,15 +909,8 @@ class ImageGraphicsView(QGraphicsView):
 
     def mouseDoubleClickEvent(self, ev: QMouseEvent):
         if ev.button() == Qt.MouseButton.LeftButton:
-            # 더블클릭으로 클릭 마커 제거
-            if self._click_marker:
-                for item in self._click_marker:
-                    self._scene.removeItem(item)
-                self._click_marker = None
-            if self._click_text:
-                self._scene.removeItem(self._click_text)
-                self._click_text = None
-            self.mouse_clicked.emit(-1, -1)  # 마커 제거 알림
+            self._clear_click_marker()
+            self.mouse_clicked.emit(-1, -1)
             ev.accept()
             return
         super().mouseDoubleClickEvent(ev)
@@ -547,25 +979,46 @@ class ImageGraphicsView(QGraphicsView):
     # 클릭 마커
     # ─────────────────────────────────────────
 
-    def _place_click_marker(self, x: float, y: float):
-        # 기존 마커 제거
+    def _clear_click_marker(self):
+        """클릭 마커 + 고정 크로스헤어 모두 제거."""
         if self._click_marker:
             for item in (self._click_marker if isinstance(self._click_marker, list) else [self._click_marker]):
                 self._scene.removeItem(item)
+            self._click_marker = None
         if self._click_text:
             self._scene.removeItem(self._click_text)
+            self._click_text = None
+        if self._click_crosshair:
+            for item in self._click_crosshair:
+                self._scene.removeItem(item)
+            self._click_crosshair = None
 
-        size = 6 / max(self._scale, 0.1)  # scene 좌표 (cosmetic pen 사용)
+    def _place_click_marker(self, x: float, y: float):
+        self._clear_click_marker()
+
         color = self._crosshair_color
-        pen = QPen(QColor(color), 1)
-        pen.setCosmetic(True)
 
-        # + 마커
+        # 전체 이미지에 걸친 고정 크로스헤어
+        ch_pen = QPen(QColor(color), 1, Qt.PenStyle.DashLine)
+        ch_pen.setCosmetic(True)
+        ch_h = QGraphicsLineItem(0, y, self._img_w, y)
+        ch_v = QGraphicsLineItem(x, 0, x, self._img_h)
+        ch_h.setPen(ch_pen)
+        ch_v.setPen(ch_pen)
+        ch_h.setOpacity(0.6)
+        ch_v.setOpacity(0.6)
+        self._scene.addItem(ch_h)
+        self._scene.addItem(ch_v)
+        self._click_crosshair = [ch_h, ch_v]
+
+        # + 중심 마커
+        size = 6 / max(self._scale, 0.1)
+        pen = QPen(QColor(color), 2)
+        pen.setCosmetic(True)
         h_line = QGraphicsLineItem(x - size, y, x + size, y)
         v_line = QGraphicsLineItem(x, y - size, x, y + size)
         h_line.setPen(pen)
         v_line.setPen(pen)
-
         self._scene.addItem(h_line)
         self._scene.addItem(v_line)
         self._click_marker = [h_line, v_line]
@@ -573,9 +1026,7 @@ class ImageGraphicsView(QGraphicsView):
         # 좌표 텍스트
         text = self._scene.addText(f"({int(x)}, {int(y)})")
         text.setDefaultTextColor(QColor(color))
-        font = QFont('Segoe UI', 8)
-        text.setFont(font)
-        # 텍스트도 화면 픽셀 고정을 위해 역스케일 적용
+        text.setFont(QFont('Segoe UI', 8))
         text_scale = 1.0 / max(self._scale, 0.1)
         text.setScale(text_scale)
         marker_offset = 6 / max(self._scale, 0.1)
@@ -846,6 +1297,7 @@ class ImageViewer(QWidget):
         self._current_cmap = 'off'
         self._crosshair_color = '#ff0000'
         self._last_click_info = None  # (ix, iy, val)
+        self._sel_box_rect: tuple | None = None   # (x0,y0,x1,y1) 이미지 좌표
         self._roi_line_pts = None
         self._roi_box_pts  = None
         self._roi_hist_pts = None
@@ -859,6 +1311,7 @@ class ImageViewer(QWidget):
         self._display_vmin: float | None = None
         self._display_vmax: float | None = None
         self._external_render_control = False  # True면 외부(예: LiveTab) 렌더 파이프라인 사용
+        self._rotation_k: int = 0              # np.rot90 k 값 (0/1/2/3 → 0°/90°/180°/270°)
         self._range_debounce = QTimer()
         self._range_debounce.setSingleShot(True)
         self._range_debounce.setInterval(50)
@@ -966,7 +1419,45 @@ class ImageViewer(QWidget):
         self.btn_range.toggled.connect(self._on_range_panel_toggled)
         toolbar.addWidget(self.btn_range)
 
+        # ROI 목록 토글
+        self.btn_roi_list_toggle = QToolButton()
+        self.btn_roi_list_toggle.setText("📋 ROI 목록")
+        self.btn_roi_list_toggle.setCheckable(True)
+        self.btn_roi_list_toggle.setToolTip("그려진 ROI 목록 표시 / 삭제")
+        self.btn_roi_list_toggle.setStyleSheet("""
+            QToolButton {
+                background: transparent; color: #a0a0b0;
+                border: 1px solid #0f3460; border-radius: 3px;
+                padding: 2px 6px; font-size: 11px;
+            }
+            QToolButton:checked { background: #1a2840; color: #ffe66d; border-color: #ffe66d; }
+            QToolButton:hover { border-color: #ffe66d; }
+        """)
+        self.btn_roi_list_toggle.toggled.connect(self._on_roi_list_toggled)
+        toolbar.addWidget(self.btn_roi_list_toggle)
+
         toolbar.addStretch()
+
+        # 회전
+        rotate_label = QLabel("↻")
+        rotate_label.setStyleSheet("color: #a0a0b0; font-size: 13px; margin-right:0px;")
+        toolbar.addWidget(rotate_label)
+        self.rotate_combo = QComboBox()
+        self.rotate_combo.addItems(["0°", "90°", "180°", "270°"])
+        self.rotate_combo.setFixedWidth(58)
+        self.rotate_combo.setStyleSheet("""
+            QComboBox {
+                background:#080e1e; border:1px solid #1a3a60; color:#d0deff;
+                border-radius:3px; font-size:11px; padding:1px 4px; min-height:20px;
+            }
+            QComboBox::drop-down { border:none; width:14px; }
+            QComboBox QAbstractItemView {
+                background:#0a1428; color:#d0deff;
+                selection-background-color:#1a3a60;
+            }
+        """)
+        self.rotate_combo.currentIndexChanged.connect(self._on_rotation_changed)
+        toolbar.addWidget(self.rotate_combo)
 
         # 포화 경고 레이블 (P3-3)
         self.lbl_saturated = QLabel("⚠ SATURATED")
@@ -986,6 +1477,51 @@ class ImageViewer(QWidget):
         toolbar_widget.setLayout(toolbar)
         toolbar_widget.setStyleSheet("background: #16213e;")
         layout.addWidget(toolbar_widget)
+
+        # ── ROI 목록 패널 (토글) ──
+        self._roi_list_panel = QWidget()
+        self._roi_list_panel.setVisible(False)
+        self._roi_list_panel.setFixedHeight(90)
+        self._roi_list_panel.setStyleSheet(
+            "background:#0d1828; border-bottom:1px solid #0f3460;"
+        )
+        roi_panel_row = QHBoxLayout(self._roi_list_panel)
+        roi_panel_row.setContentsMargins(6, 4, 6, 4)
+        roi_panel_row.setSpacing(6)
+
+        self._roi_list_widget = QListWidget()
+        self._roi_list_widget.setStyleSheet("""
+            QListWidget {
+                background:#080e1e; color:#c0d0ff;
+                border:1px solid #0f3460; font-family:'Courier New'; font-size:11px;
+            }
+            QListWidget::item { padding:2px 4px; }
+            QListWidget::item:selected { background:#1a3a60; color:#ffe66d; }
+        """)
+        roi_panel_row.addWidget(self._roi_list_widget, 1)
+
+        _roi_del_btn = (
+            "QPushButton { background:#0d1a28; color:#e94560;"
+            "border:1px solid #e94560; border-radius:3px;"
+            "font-size:11px; padding:3px 8px; }"
+            "QPushButton:hover { background:#2a1020; }"
+        )
+        roi_btn_col = QVBoxLayout()
+        roi_btn_col.setSpacing(4)
+        roi_btn_col.setContentsMargins(0, 0, 0, 0)
+        self._btn_del_roi = QPushButton("선택 삭제")
+        self._btn_del_all_roi = QPushButton("전체 삭제")
+        self._btn_del_roi.setFixedWidth(80)
+        self._btn_del_all_roi.setFixedWidth(80)
+        self._btn_del_roi.setStyleSheet(_roi_del_btn)
+        self._btn_del_all_roi.setStyleSheet(_roi_del_btn)
+        self._btn_del_roi.clicked.connect(self._delete_selected_roi)
+        self._btn_del_all_roi.clicked.connect(self._delete_all_rois_ui)
+        roi_btn_col.addWidget(self._btn_del_roi)
+        roi_btn_col.addWidget(self._btn_del_all_roi)
+        roi_btn_col.addStretch()
+        roi_panel_row.addLayout(roi_btn_col)
+        layout.addWidget(self._roi_list_panel)
 
         # ── 눈금자 + 뷰어 영역 ──
         viewer_area = QWidget()
@@ -1018,10 +1554,12 @@ class ImageViewer(QWidget):
         self._view = ImageGraphicsView()
         self._view.mouse_moved.connect(self._on_mouse_moved)
         self._view.mouse_clicked.connect(self._on_mouse_clicked)
+        self._view.sel_box_changed.connect(self._on_sel_box_changed)
         self._view.roi_drawn.connect(self._on_roi_drawn)
         self._view.scale_changed.connect(self._on_scale_changed)
-        # ROI 선택 콜백 — 선택된 ROI 타입에 맞는 패널 갱신
+        # ROI 선택/추가 콜백
         self._view.on_roi_selected = self._on_roi_selected
+        self._view.on_roi_added    = self._on_roi_added
         self._view.horizontalScrollBar().valueChanged.connect(
             lambda _: self._on_scale_changed(
                 self._view._scale,
@@ -1057,6 +1595,7 @@ class ImageViewer(QWidget):
         self._current_image = image
         self._refresh_pixmap(fit=False)
         self._recompute_profile()
+        self._update_ruler_profiles()
         if self._hist_range_widget.isVisible():
             self._hist_range_widget.update_image(image, self._current_cmap)
 
@@ -1069,6 +1608,7 @@ class ImageViewer(QWidget):
             self._hist_range_widget.update_image(image, self._current_cmap,
                                                  reset_range=True)
         self._refresh_pixmap(fit=True)
+        self._update_ruler_profiles()
 
     def set_live_frame(self, rgb: np.ndarray, fit: bool = False):
         """라이브 스트리밍 전용 — ColorMapWorker 우회, GUI 스레드에서 직접 변환.
@@ -1078,23 +1618,54 @@ class ImageViewer(QWidget):
         import time
         from PyQt6.QtGui import QImage, QPixmap
         self._current_image = rgb
-        h, w = rgb.shape[:2]
-        if rgb.ndim == 3 and rgb.shape[2] == 3:
-            qimg = QImage(rgb.data, w, h, w * 3, QImage.Format.Format_RGB888)
+        disp = np.rot90(rgb, k=self._rotation_k) if self._rotation_k else rgb
+        h, w = disp.shape[:2]
+        if disp.ndim == 3 and disp.shape[2] == 3:
+            disp_c = np.ascontiguousarray(disp)
+            qimg = QImage(disp_c.data, w, h, w * 3, QImage.Format.Format_RGB888)
         else:
-            qimg = QImage(rgb.data, w, h, w, QImage.Format.Format_Grayscale8)
+            disp_c = np.ascontiguousarray(disp)
+            qimg = QImage(disp_c.data, w, h, w, QImage.Format.Format_Grayscale8)
         self._view.set_pixmap(QPixmap.fromImage(qimg.copy()), w, h, fit=fit)
-        # ROI 프로파일/히스토그램: 최대 10fps (0.1초 간격)
+        # ROI 프로파일/히스토그램 + 룰러: 최대 10fps (0.1초 간격)
         now = time.monotonic()
         if now - self._last_profile_t >= 0.1:
             self._last_profile_t = now
             self._recompute_profile()
+            self._update_ruler_profiles()
 
     def set_source_image(self, img: np.ndarray) -> None:
         """라이브 모드에서 colormap/export 기준이 될 원본 grayscale 이미지를 갱신.
         set_live_frame은 display용 RGB를 받으므로, 원본은 별도로 저장해야
         _refresh_pixmap/_export_image에서 이중 colormap 적용이 발생하지 않는다."""
         self._current_image = img
+
+    def set_centroid_overlay(self, cx: float, cy: float) -> None:
+        """센트로이드 위치에 십자 마커를 씬 오버레이로 표시 (픽셀에 굽지 않음)."""
+        self.clear_centroid_overlay()
+        from PyQt6.QtWidgets import QGraphicsLineItem, QGraphicsSimpleTextItem
+        pen = QPen(QColor('#4ecdc4'), 2)
+        pen.setCosmetic(True)
+        arm = 20
+        h = QGraphicsLineItem(cx - arm, cy, cx + arm, cy)
+        v = QGraphicsLineItem(cx, cy - arm, cx, cy + arm)
+        h.setPen(pen); h.setZValue(10)
+        v.setPen(pen); v.setZValue(10)
+        txt = QGraphicsSimpleTextItem(f"({cx:.1f}, {cy:.1f})")
+        txt.setBrush(QBrush(QColor('#4ecdc4')))
+        txt.setZValue(10)
+        txt.setFlag(txt.GraphicsItemFlag.ItemIgnoresTransformations)
+        txt.setPos(cx + 6, cy - 6)
+        for item in (h, v, txt):
+            self._view._scene.addItem(item)
+        self._centroid_overlay_items = [h, v, txt]
+
+    def clear_centroid_overlay(self) -> None:
+        """센트로이드 오버레이 제거."""
+        for item in getattr(self, '_centroid_overlay_items', []):
+            if item.scene():
+                self._view._scene.removeItem(item)
+        self._centroid_overlay_items = []
 
     def set_external_render_control(self, enabled: bool) -> None:
         """외부 렌더 파이프라인 사용 여부를 설정한다.
@@ -1150,6 +1721,9 @@ class ImageViewer(QWidget):
                 pass
 
         img = self._current_image
+        # 회전 적용 (k=1 → 90°CCW, k=2 → 180°, k=3 → 270°CCW)
+        if self._rotation_k:
+            img = np.rot90(img, k=self._rotation_k)
         cmap = self._current_cmap
 
         from core.async_worker import ColorMapWorker
@@ -1185,24 +1759,95 @@ class ImageViewer(QWidget):
     def _on_scale_changed(self, scale: float, x_offset: float, y_offset: float):
         if self._current_image is None:
             return
-        h, w = self._current_image.shape[:2]
-        # scrollBar.value() 는 scene좌표*scale 단위 → 이미지 픽셀로 변환
+        img = self._current_image
+        if self._rotation_k:
+            img = np.rot90(img, k=self._rotation_k)
+        h, w = img.shape[:2]
         x_img_offset = x_offset / max(scale, 0.001)
         y_img_offset = y_offset / max(scale, 0.001)
         self._ruler_x.update_transform(scale, x_img_offset, w)
         self._ruler_y.update_transform(scale, y_img_offset, h)
+
+    def _update_ruler_profiles(self):
+        """선택 박스 > 마지막 클릭 위치 > 전체 평균 순으로 룰러 프로파일 전달."""
+        if self._current_image is None:
+            self._ruler_x.set_profile(None)
+            self._ruler_y.set_profile(None)
+            return
+        img = self._current_image
+        H0, W0 = img.shape[:2]
+        if self._rotation_k:
+            img = np.rot90(img, k=self._rotation_k)
+        rH, rW = img.shape[:2]
+
+        # 1순위: 선택 박스
+        if self._sel_box_rect is not None:
+            if self._update_ruler_profiles_sel(img, rH, rW):
+                return
+
+        if self._last_click_info is not None:
+            ix0, iy0, _ = self._last_click_info  # 원본 이미지 좌표
+            k = self._rotation_k
+            if k == 0:
+                rix, riy = ix0, iy0
+            elif k == 1:   # 90° CCW
+                riy, rix = W0 - 1 - ix0, iy0
+            elif k == 2:   # 180°
+                riy, rix = H0 - 1 - iy0, W0 - 1 - ix0
+            else:          # 270° CCW
+                riy, rix = ix0, H0 - 1 - iy0
+            rix = max(0, min(rW - 1, rix))
+            riy = max(0, min(rH - 1, riy))
+            if img.ndim == 2:
+                x_prof = img[riy, :].astype(np.float32)
+                y_prof = img[:, rix].astype(np.float32)
+            else:
+                x_prof = img[riy, :].mean(axis=-1).astype(np.float32)
+                y_prof = img[:, rix].mean(axis=-1).astype(np.float32)
+        else:
+            if img.ndim == 2:
+                x_prof = img.mean(axis=0).astype(np.float32)
+                y_prof = img.mean(axis=1).astype(np.float32)
+            elif img.ndim == 3:
+                x_prof = img.mean(axis=(0, 2)).astype(np.float32)
+                y_prof = img.mean(axis=(1, 2)).astype(np.float32)
+            else:
+                return
+        self._ruler_x.set_profile(x_prof, 0)
+        self._ruler_y.set_profile(y_prof, 0)
+
+    def _update_ruler_profiles_sel(self, img: np.ndarray, rH: int, rW: int):
+        """선택 박스 기준 룰러 프로파일 계산.
+
+        X 룰러: 박스 Y범위(H)만 평균 → 전체 폭 프로파일
+        Y 룰러: 박스 X범위(W)만 평균 → 전체 높이 프로파일
+        """
+        x0, y0, x1, y1 = self._sel_box_rect
+        ix0 = max(0, min(int(x0), rW - 1))
+        iy0 = max(0, min(int(y0), rH - 1))
+        ix1 = max(ix0 + 1, min(int(x1), rW))
+        iy1 = max(iy0 + 1, min(int(y1), rH))
+        if ix1 <= ix0 or iy1 <= iy0:
+            return False
+        if img.ndim == 2:
+            x_prof = img[iy0:iy1, :].mean(axis=0).astype(np.float32)   # 전체 폭, 박스 H 평균
+            y_prof = img[:, ix0:ix1].mean(axis=1).astype(np.float32)   # 전체 높이, 박스 W 평균
+        else:
+            x_prof = img[iy0:iy1, :].mean(axis=(0, 2)).astype(np.float32)
+            y_prof = img[:, ix0:ix1].mean(axis=(1, 2)).astype(np.float32)
+        self._ruler_x.set_profile(x_prof, 0)
+        self._ruler_y.set_profile(y_prof, 0)
+        return True
 
     # ─────────────────────────────────────────
     # ROI 선택 → 패널 갱신
     # ─────────────────────────────────────────
 
     def _on_roi_selected(self, roi_id):
-        """클릭 또는 신규 드로우로 ROI가 선택됐을 때 해당 타입 패널을 갱신한다.
-
-        - Line/Box ROI → Profile 패널 (pts 저장하여 재계산에도 사용)
-        - Hist ROI     → Histogram 패널 (독립 유지)
-        드로우 모드(콤보 선택)와 완전히 분리된다.
-        """
+        """클릭 또는 신규 드로우로 ROI가 선택됐을 때 해당 타입 패널을 갱신한다."""
+        # 목록이 열려있으면 동기화
+        if self.btn_roi_list_toggle.isChecked():
+            self._refresh_roi_list()
         if roi_id is None:
             return
         roi = self._view.get_roi(roi_id)
@@ -1423,6 +2068,77 @@ class ImageViewer(QWidget):
             print(f"Histogram error: {e}")
 
     # ─────────────────────────────────────────
+    # ROI 목록 패널
+    # ─────────────────────────────────────────
+
+    def _on_roi_list_toggled(self, checked: bool):
+        self._roi_list_panel.setVisible(checked)
+        if checked:
+            self._refresh_roi_list()
+
+    def _on_roi_added(self, roi):
+        if self.btn_roi_list_toggle.isChecked():
+            self._refresh_roi_list()
+
+    def _refresh_roi_list(self):
+        self._roi_list_widget.clear()
+        _icon = {'Line': '━', 'Box': '▭', 'Hist': '▒'}
+        for roi_id, roi in self._view._rois.items():
+            icon = _icon.get(roi.roi_type, '?')
+            try:
+                (x0, y0), (x1, y1) = roi.pts[0], roi.pts[1]
+                coord = f"  ({int(x0)},{int(y0)})→({int(x1)},{int(y1)})"
+            except Exception:
+                coord = ""
+            item = QListWidgetItem(f"{icon} {roi.roi_type} #{roi_id}{coord}")
+            item.setData(Qt.ItemDataRole.UserRole, roi_id)
+            self._roi_list_widget.addItem(item)
+            if roi_id == self._view._selected_roi_id:
+                self._roi_list_widget.setCurrentItem(item)
+
+    def _delete_selected_roi(self):
+        item = self._roi_list_widget.currentItem()
+        if item is None:
+            return
+        roi_id = item.data(Qt.ItemDataRole.UserRole)
+        if roi_id is None:
+            return
+        self._view.delete_roi(roi_id)
+        if self._active_profile_roi_id == roi_id:
+            self._active_profile_roi_id = None
+            self._roi_line_pts = None
+            self._roi_box_pts  = None
+        if self._active_hist_roi_id == roi_id:
+            self._active_hist_roi_id = None
+            self._roi_hist_pts = None
+        self._refresh_roi_list()
+
+    def _delete_all_rois_ui(self):
+        self._view.delete_all_rois()
+        self._active_profile_roi_id = None
+        self._active_hist_roi_id    = None
+        self._roi_line_pts = None
+        self._roi_box_pts  = None
+        self._roi_hist_pts = None
+        self._refresh_roi_list()
+
+    # ─────────────────────────────────────────
+    # 회전
+    # ─────────────────────────────────────────
+
+    def _on_rotation_changed(self, index: int):
+        self._rotation_k = index   # 0/1/2/3 → 0°/90°/180°/270°
+        if self._current_image is not None:
+            self._refresh_pixmap(fit=False)
+            self._update_ruler_profiles()
+
+    def set_rotation(self, degrees: int):
+        """외부에서 회전 각도를 설정 (0/90/180/270)."""
+        k = (degrees // 90) % 4
+        self._rotation_k = k
+        self.rotate_combo.setCurrentIndex(k)
+
+    # ─────────────────────────────────────────
     # 크로스헤어 / 컬러맵
     # ─────────────────────────────────────────
 
@@ -1505,10 +2221,17 @@ class ImageViewer(QWidget):
         self.pixel_label.setText(f"{cur}   |   {last}")
 
 
+    def _on_sel_box_changed(self, x0: float, y0: float, x1: float, y1: float):
+        if x0 < 0:
+            self._sel_box_rect = None
+        else:
+            self._sel_box_rect = (x0, y0, x1, y1)
+        self._update_ruler_profiles()
+
     def _on_mouse_clicked(self, x: float, y: float):
         if x < 0 or y < 0:
-            # 더블클릭 마커 제거 → 라스트 클릭 정보 초기화
             self._last_click_info = None
+            self._update_ruler_profiles()   # 전체 평균으로 복귀
             return
         if self._current_image is None:
             return
@@ -1524,6 +2247,7 @@ class ImageViewer(QWidget):
             else:
                 lv = val
             self._last_click_info = (ix, iy, lv)
+            self._update_ruler_profiles()
 
     # ─────────────────────────────────────────
     # 하위 호환 (main_window 에서 사용하는 속성들)
