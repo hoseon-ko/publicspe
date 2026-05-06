@@ -10,6 +10,7 @@ from datetime import datetime
 
 import numpy as np
 import pyqtgraph as pg
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QToolButton, QFileDialog,
@@ -89,19 +90,36 @@ class PlotPanel(QWidget):
         for axis in ('bottom', 'left'):
             self.plot_widget.getAxis(axis).setPen('#0f3460')
             self.plot_widget.getAxis(axis).setTextPen('#a0a0b0')
+        # 확대/축소/패닝 시에도 Y축이 0 아래로 내려가지 않도록 ViewBox에 하한선 고정
+        self.plot_widget.getPlotItem().getViewBox().setLimits(xMin=0)
         layout.addWidget(self.plot_widget)
 
-        # ── 마우스 호버 crosshair ──
-        _dash = 2  # Qt.PenStyle.DashLine
+        # ── 마우스 호버 crosshair (수직선만) ──
         self._vline = pg.InfiniteLine(angle=90, movable=False,
-                                      pen=pg.mkPen('#ffe66d', width=1, style=_dash))
-        self._hline = pg.InfiniteLine(angle=0,  movable=False,
-                                      pen=pg.mkPen('#ffe66d', width=1, style=_dash))
+                                      pen=pg.mkPen('#ffe66d', width=1, style=Qt.PenStyle.DashLine))
+        self._hline = pg.InfiniteLine(angle=0, movable=False,
+                                      pen=pg.mkPen('#ffe66d', width=1, style=Qt.PenStyle.DashLine))
         self._vline.setVisible(False)
         self._hline.setVisible(False)
         self.plot_widget.addItem(self._vline, ignoreBounds=True)
         self.plot_widget.addItem(self._hline, ignoreBounds=True)
 
+        # ── MATLAB-style datatip ──
+        self._dot = pg.ScatterPlotItem(
+            size=9,
+            pen=pg.mkPen('#ffe66d', width=1.5),
+            brush=pg.mkBrush(255, 230, 109, 160),
+        )
+        self._dot.setVisible(False)
+        self.plot_widget.addItem(self._dot)
+
+        self._tip = pg.TextItem(text="", anchor=(0, 1))
+        self._tip.setVisible(False)
+        self._tip.fill   = pg.mkBrush(10, 20, 45, 220)
+        self._tip.border = pg.mkPen('#ffe66d', width=1)
+        self.plot_widget.addItem(self._tip)
+
+        # ── 헤더 상태 레이블 ──
         self.hover_label = QLabel("—")
         self.hover_label.setStyleSheet(
             "color: #ffe66d; font-size: 10px; padding: 0 4px;"
@@ -150,34 +168,64 @@ class PlotPanel(QWidget):
         if not self.plot_widget.sceneBoundingRect().contains(pos):
             self._vline.setVisible(False)
             self._hline.setVisible(False)
+            self._dot.setVisible(False)
+            self._tip.setVisible(False)
             self.hover_label.setText("—")
             return
-        mouse_point = vb.mapSceneToView(pos)
-        x = mouse_point.x()
-        y = mouse_point.y()
-        self._vline.setPos(x)
-        self._hline.setPos(y)
-        self._vline.setVisible(True)
-        self._hline.setVisible(True)
 
-        nearest_y = None
-        nearest_label = ""
+        mp = vb.mapSceneToView(pos)
+        x = mp.x()
+
+        # 모든 플롯에서 가장 가까운 데이터 포인트 찾기
+        best = None   # (dist, xi, yi, label, color)
         for item in self._plot_items:
             xdata, ydata = item.getData()
             if xdata is None or ydata is None or len(xdata) == 0:
                 continue
             idx = int(round(x))
-            if 0 <= idx < len(ydata):
-                val = ydata[idx]
-                if nearest_y is None:
-                    nearest_y = val
-                    nearest_label = item.name() or ""
+            idx = max(0, min(idx, len(ydata) - 1))
+            xi, yi = float(xdata[idx]), float(ydata[idx])
+            dist = abs(x - xi)
+            color = item.opts.get('pen') or '#ffe66d'
+            if best is None or dist < best[0]:
+                best = (dist, xi, yi, item.name() or "", color)
 
-        if nearest_y is not None:
-            lbl = f" [{nearest_label}]" if nearest_label else ""
-            self.hover_label.setText(f"X:{int(x)}  Y:{nearest_y:.1f}{lbl}")
-        else:
-            self.hover_label.setText(f"X:{x:.1f}  Y:{y:.1f}")
+        if best is None:
+            self._vline.setVisible(False)
+            self._hline.setVisible(False)
+            self._dot.setVisible(False)
+            self._tip.setVisible(False)
+            self.hover_label.setText("—")
+            return
+
+        _, xi, yi, label, color = best
+
+        # 수직 crosshair
+        self._vline.setPos(xi)
+        self._hline.setPos(yi)
+        self._vline.setVisible(True)
+        self._hline.setVisible(True)
+
+        # dot marker
+        self._dot.setData([xi], [yi])
+        self._dot.setVisible(True)
+
+        # MATLAB-style datatip 텍스트
+        lbl_line = f"[{label}]\n" if label else ""
+        tip_text = f"{lbl_line}X: {int(xi)}\nY: {yi:.2f}"
+        self._tip.setText(tip_text)
+
+        # 뷰박스 우측 끝에 가까우면 왼쪽에 표시
+        vr = vb.viewRange()
+        x_frac = (xi - vr[0][0]) / max(vr[0][1] - vr[0][0], 1e-9)
+        anchor = (0, 1) if x_frac < 0.75 else (1, 1)
+        self._tip.setAnchor(anchor)
+        self._tip.setPos(xi, yi)
+        self._tip.setVisible(True)
+
+        # 헤더 레이블
+        lbl_str = f" [{label}]" if label else ""
+        self.hover_label.setText(f"X:{int(xi)}  Y:{yi:.2f}{lbl_str}")
 
     def _on_freeze_toggled(self, checked: bool):
         """#22 플롯 Freeze 상태 변경."""
@@ -273,11 +321,14 @@ class PlotPanel(QWidget):
         self._color_idx = 0
         self.peak_label.setText("")
         self.hover_label.setText("—")
-        # crosshair는 clear() 후 다시 추가 (plot_widget.clear()가 제거함)
-        self.plot_widget.addItem(self._vline, ignoreBounds=True)
-        self.plot_widget.addItem(self._hline, ignoreBounds=True)
-        self._vline.setVisible(False)
-        self._hline.setVisible(False)
+        # plot_widget.clear()가 모든 아이템 제거 → 재등록
+        for item in (self._vline, self._hline):
+            self.plot_widget.addItem(item, ignoreBounds=True)
+            item.setVisible(False)
+        self.plot_widget.addItem(self._dot)
+        self._dot.setVisible(False)
+        self.plot_widget.addItem(self._tip)
+        self._tip.setVisible(False)
         # 범례 재생성
         self.plot_widget.addLegend(offset=(10, 10))
 
@@ -308,7 +359,7 @@ class PlotPanel(QWidget):
         self._update_y_range()
 
     def _update_y_range(self):
-        """모든 플롯 기준 Y축 범위 자동 설정"""
+        """모든 플롯 기준 Y축 범위 자동 설정 (Y 최솟값은 0 이하로 내려가지 않음)"""
         all_y = []
         for item in self._plot_items:
             y = item.getData()[1]

@@ -16,12 +16,31 @@ Active state (v2):
   Hist active          → 두꺼운 밝은 청록 + 반투명 청록 채우기 + ◆ HIST 배지
 """
 
+import math
+
 from PyQt6.QtWidgets import (
     QGraphicsItem, QGraphicsLineItem, QGraphicsRectItem,
     QGraphicsEllipseItem, QGraphicsSimpleTextItem,
 )
 from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QObject
 from PyQt6.QtGui import QPen, QColor, QBrush, QFont
+
+
+def _snap_45(x0, y0, x1, y1):
+    """(x1,y1)을 (x0,y0) 기준 45° 배수로 스냅."""
+    dx, dy = x1 - x0, y1 - y0
+    length = math.hypot(dx, dy)
+    if length == 0:
+        return x1, y1
+    snapped = round(math.atan2(dy, dx) / (math.pi / 4)) * (math.pi / 4)
+    return x0 + length * math.cos(snapped), y0 + length * math.sin(snapped)
+
+
+def _snap_square(dx, dy):
+    """dx, dy 중 큰 쪽 크기로 정사각형 스냅."""
+    size = max(abs(dx), abs(dy))
+    return (math.copysign(size, dx) if dx != 0 else size,
+            math.copysign(size, dy) if dy != 0 else size)
 
 HANDLE_SIZE = 8   # 핸들 크기 (화면 픽셀)
 
@@ -91,7 +110,8 @@ class HandleItem(QGraphicsEllipseItem):
     def mouseMoveEvent(self, ev):
         if self._dragging:
             delta = ev.scenePos() - self._drag_start
-            self.parent_roi.handle_drag(self.role, self._roi_start, delta)
+            shift = bool(ev.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+            self.parent_roi.handle_drag(self.role, self._roi_start, delta, shift=shift)
             ev.accept()
 
     def mouseReleaseEvent(self, ev):
@@ -208,7 +228,7 @@ class BaseROI(QObject):
     def get_points(self):
         raise NotImplementedError
 
-    def handle_drag(self, role, start_pts, delta):
+    def handle_drag(self, role, start_pts, delta, shift=False):
         raise NotImplementedError
 
     def on_modified(self):
@@ -320,13 +340,19 @@ class LineROI(BaseROI):
     def get_points(self):
         return (self._x0, self._y0, self._x1, self._y1)
 
-    def handle_drag(self, role, start_pts, delta):
+    def handle_drag(self, role, start_pts, delta, shift=False):
         x0, y0, x1, y1 = start_pts
         dx, dy = delta.x(), delta.y()
         if role == 'p0':
-            self._x0, self._y0 = x0 + dx, y0 + dy
+            nx, ny = x0 + dx, y0 + dy
+            if shift:
+                nx, ny = _snap_45(x1, y1, nx, ny)   # p1 고정, p0 스냅
+            self._x0, self._y0 = nx, ny
         elif role == 'p1':
-            self._x1, self._y1 = x1 + dx, y1 + dy
+            nx, ny = x1 + dx, y1 + dy
+            if shift:
+                nx, ny = _snap_45(x0, y0, nx, ny)   # p0 고정, p1 스냅
+            self._x1, self._y1 = nx, ny
         elif role == 'move':
             self._x0, self._y0 = x0 + dx, y0 + dy
             self._x1, self._y1 = x1 + dx, y1 + dy
@@ -429,9 +455,12 @@ class BoxROI(BaseROI):
     def get_points(self):
         return (self._x0, self._y0, self._x1, self._y1)
 
-    def handle_drag(self, role, start_pts, delta):
+    def handle_drag(self, role, start_pts, delta, shift=False):
         x0, y0, x1, y1 = start_pts
         dx, dy = delta.x(), delta.y()
+
+        if shift and role in ('tl', 'tr', 'bl', 'br'):
+            dx, dy = _snap_square(dx, dy)
 
         if role == 'tl':
             self._x0, self._y0 = x0+dx, y0+dy

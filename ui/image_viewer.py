@@ -373,6 +373,26 @@ class ImageGraphicsView(QGraphicsView):
         return best_id
 
     @staticmethod
+    def _constrain_angle(x0, y0, x1, y1):
+        """Shift 키 — 45° 배수로 스냅 (line 전용)."""
+        import math
+        dx, dy = x1 - x0, y1 - y0
+        length = math.hypot(dx, dy)
+        if length == 0:
+            return x1, y1
+        angle   = math.atan2(dy, dx)
+        snapped = round(angle / (math.pi / 4)) * (math.pi / 4)
+        return x0 + length * math.cos(snapped), y0 + length * math.sin(snapped)
+
+    @staticmethod
+    def _constrain_square(x0, y0, x1, y1):
+        """Shift 키 — box/histogram 을 정사각형으로 제한."""
+        import math
+        dx, dy = x1 - x0, y1 - y0
+        size = max(abs(dx), abs(dy))
+        return x0 + math.copysign(size, dx), y0 + math.copysign(size, dy)
+
+    @staticmethod
     def _dist_point_segment(px, py, x0, y0, x1, y1) -> float:
         """점 (px,py)과 선분 (x0,y0)-(x1,y1) 사이의 최소 거리."""
         import math
@@ -416,7 +436,14 @@ class ImageGraphicsView(QGraphicsView):
             self._cross_text.setVisible(False)
 
         if self._drawing and self._draw_start is not None:
-            self._update_roi_preview(self._draw_start[0], self._draw_start[1], x, y)
+            x1, y1 = x, y
+            if ev.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                x0, y0 = self._draw_start
+                if self._roi_mode == 'line':
+                    x1, y1 = self._constrain_angle(x0, y0, x1, y1)
+                elif self._roi_mode in ('box', 'histogram'):
+                    x1, y1 = self._constrain_square(x0, y0, x1, y1)
+            self._update_roi_preview(self._draw_start[0], self._draw_start[1], x1, y1)
             ev.accept()  # 드로잉 중엔 씬 전파 차단
             return
 
@@ -428,7 +455,14 @@ class ImageGraphicsView(QGraphicsView):
             x, y = scene_pos.x(), scene_pos.y()
             self._drawing = False
             if self._draw_start is not None:
-                self._finalize_roi(self._draw_start[0], self._draw_start[1], x, y)
+                x0, y0 = self._draw_start
+                x1, y1 = x, y
+                if ev.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                    if self._roi_mode == 'line':
+                        x1, y1 = self._constrain_angle(x0, y0, x1, y1)
+                    elif self._roi_mode in ('box', 'histogram'):
+                        x1, y1 = self._constrain_square(x0, y0, x1, y1)
+                self._finalize_roi(x0, y0, x1, y1)
             self._draw_start = None
             ev.accept()  # 씬 전파 차단
             return
