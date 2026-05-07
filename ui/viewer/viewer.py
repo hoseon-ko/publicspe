@@ -455,9 +455,7 @@ class ImageViewer(QWidget):
         # ── 히스토그램 Range 슬라이더 팝업 ──
         self._hist_range_widget = HistogramRangeWidget()
         self._hist_range_widget.range_changed.connect(self._on_range_changed)
-        self._hist_range_widget.range_changed.connect(
-            lambda vmin, vmax: self.range_changed.emit(vmin, vmax)
-        )
+        self._hist_range_widget.range_changed.connect(self._relay_range_changed)
         self._range_popup = _RangePopup(self._hist_range_widget, parent=self)
         self._range_popup.closed.connect(lambda: self.btn_range.setChecked(False))
 
@@ -1080,6 +1078,10 @@ class ImageViewer(QWidget):
         self._display_vmax = vmax
         if not self._external_render_control:
             self._range_debounce.start()  # 50ms 후 렌더 — 빠른 드래그 시 중간 프레임 스킵
+
+    def _relay_range_changed(self, vmin, vmax):
+        """HistogramRangeWidget(float) -> ImageViewer(object) 시그널 중계."""
+        self.range_changed.emit(vmin, vmax)
 
     def _on_cmap_changed(self, name: str):
         # 'Off'는 내부적으로 'off'로 처리
