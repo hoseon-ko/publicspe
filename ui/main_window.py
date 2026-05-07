@@ -1,10 +1,15 @@
 """
 ui/main_window.py
-통합 메인 윈도우 — 탭 기반 3-in-1 앱.
+통합 메인 윈도우 — LightField 스타일.
 
-Tab 1: Live Control  — 실시간 카메라 + Picomotor 제어
-Tab 2: Acquisition   — Picam 배치 획득 + SPE 저장
-Tab 3: SPE Analysis  — SpeAnalyze 전체 기능
+레이아웃:
+  ┌─ 헤더 바 (28px) ─────────────────────────────────────────────┐
+  │  SpeAnalyze  │ Live │ Acquire │ Scan │ Analysis │     status │
+  ├──────────────────────────────────────────────────────────────┤
+  │                                                              │
+  │   각 모드 콘텐츠 (QStackedWidget)                            │
+  │                                                              │
+  └──────────────────────────────────────────────────────────────┘
 """
 
 from __future__ import annotations
@@ -14,13 +19,22 @@ from PyQt6.QtWidgets import (
     QLabel, QFrame, QVBoxLayout, QHBoxLayout, QPushButton,
 )
 from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QAction, QIcon
+from PyQt6.QtGui import QFont
 
 from ui.live.live_tab import LiveTab
 from ui.acquisition.acquisition_tab import AcquisitionTab
 from ui.analysis.analysis_tab import AnalysisTab
 from ui.scan.scan_tab import ScanTab
-from theme.styles import Fonts, Sizes, C_ACCENT, C_WARN, C_TEXT_DIM, C_BG_MED, C_BORDER
+from theme.styles import Fonts, Sizes, C_ACCENT, C_TEXT_DIM, C_BG_MED, C_BORDER
+
+
+# ── 헤더 바 색상 (LightField 다크 헤더) ──────────────────────────
+_HDR_BG      = "#161b27"   # 헤더 배경
+_HDR_BORDER  = "#1e2a3e"   # 헤더 하단 구분선
+_TAB_NORMAL  = "#4a5a70"   # 비선택 탭 텍스트
+_TAB_HOVER   = "#8aa0bc"   # 호버
+_TAB_ACTIVE  = "#e0e8f0"   # 선택된 탭 텍스트
+_TAB_LINE    = C_ACCENT    # 선택 탭 하단 강조선 색
 
 
 class MainWindow(QMainWindow):
@@ -35,47 +49,65 @@ class MainWindow(QMainWindow):
     # ── UI ───────────────────────────────────────────────────────────
 
     def _build_ui(self):
-        # ── 루트 레이아웃: [모드 내비 사이드바] + [콘텐츠 스택] ─────
+        _FC = Fonts.MONO
+
+        # ── 루트: VBox → [헤더 바, 콘텐츠 스택] ─────────────────────
         root = QWidget()
         root.setObjectName("root")
         root.setStyleSheet("QWidget#root { background: #080e1e; }")
-        root_h = QHBoxLayout(root)
-        root_h.setContentsMargins(0, 0, 0, 0)
-        root_h.setSpacing(0)
+        root_v = QVBoxLayout(root)
+        root_v.setContentsMargins(0, 0, 0, 0)
+        root_v.setSpacing(0)
         self.setCentralWidget(root)
 
-        # ── 모드 내비 사이드바 (64px 고정폭, LightField 스타일) ──────
-        nav = QWidget()
-        nav.setObjectName("nav")
-        nav.setFixedWidth(64)
-        nav.setStyleSheet(
-            "QWidget#nav { background: #06080f; border-right: 1px solid #0f2040; }"
-        )
-        nav_v = QVBoxLayout(nav)
-        nav_v.setContentsMargins(4, 8, 4, 8)
-        nav_v.setSpacing(2)
+        # ── 헤더 바 (LightField 스타일) ──────────────────────────────
+        header = QWidget()
+        header.setObjectName("header")
+        header.setFixedHeight(30)
+        header.setStyleSheet(f"""
+            QWidget#header {{
+                background: {_HDR_BG};
+                border-bottom: 1px solid {_HDR_BORDER};
+            }}
+        """)
+        hdr_h = QHBoxLayout(header)
+        hdr_h.setContentsMargins(8, 0, 8, 0)
+        hdr_h.setSpacing(0)
 
-        _FC = Fonts.MONO
-        _nav_base = f"""
+        # 앱 이름 레이블
+        lbl_app = QLabel("SpeAnalyze")
+        lbl_app.setStyleSheet(
+            f"color: #5a7a9a; font-family: '{_FC}'; font-size: 11px;"
+            " font-weight: bold; letter-spacing: 2px;"
+            " padding: 0 14px 0 4px;"
+            f" border-right: 1px solid {_HDR_BORDER};"
+        )
+        hdr_h.addWidget(lbl_app)
+
+        # 구분 간격
+        hdr_h.addSpacing(8)
+
+        # ── 모드 탭 버튼 (LightField 상단 텍스트 탭 스타일) ──────────
+        _tab_qss = f"""
             QPushButton {{
                 background: transparent;
-                color: #3a5070;
+                color: {_TAB_NORMAL};
                 border: none;
-                border-radius: 6px;
+                border-bottom: 2px solid transparent;
                 font-family: '{_FC}';
-                font-size: 9px;
+                font-size: 11px;
                 font-weight: bold;
                 letter-spacing: 1px;
-                padding: 6px 2px;
+                padding: 0 16px;
+                height: 30px;
             }}
             QPushButton:hover {{
-                background: #0d1830;
-                color: #8ab0d0;
+                color: {_TAB_HOVER};
+                background: rgba(255,255,255,0.03);
             }}
             QPushButton:checked {{
-                background: #0f2040;
-                color: {C_ACCENT};
-                border-left: 2px solid {C_ACCENT};
+                color: {_TAB_ACTIVE};
+                border-bottom: 2px solid {_TAB_LINE};
             }}
         """
 
@@ -103,52 +135,76 @@ class MainWindow(QMainWindow):
         self.analysis_tab = AnalysisTab(spe_class=self._spe_class)
         self.analysis_tab.status_message.connect(self._on_status)
 
-        # ── 내비 버튼 + 스택 등록 ────────────────────────────────────
+        # 탭 버튼 + 스택 등록
         _modes = [
-            ("📷", "LIVE",   self.live_tab),
-            ("🔬", "ACQ",    self.acq_tab),
-            ("🔄", "SCAN",   self.scan_tab),
-            ("📊", "DATA",   self.analysis_tab),
+            ("Live",     self.live_tab),
+            ("Acquire",  self.acq_tab),
+            ("Scan",     self.scan_tab),
+            ("Analysis", self.analysis_tab),
         ]
-        for idx, (icon, label, widget) in enumerate(_modes):
-            btn = QPushButton(f"{icon}\n{label}")
+        for idx, (label, widget) in enumerate(_modes):
+            btn = QPushButton(label)
             btn.setCheckable(True)
-            btn.setFixedSize(56, 52)
-            btn.setStyleSheet(_nav_base)
+            btn.setFlat(True)
+            btn.setFixedHeight(30)
+            btn.setStyleSheet(_tab_qss)
             btn.clicked.connect(lambda checked, i=idx: self._switch_mode(i))
-            nav_v.addWidget(btn)
+            hdr_h.addWidget(btn)
             self._nav_btns.append(btn)
             self.stack.addWidget(widget)
 
-        nav_v.addStretch(1)
-        self._nav_btns[0].setChecked(True)   # LIVE 기본 선택
+        self._nav_btns[0].setChecked(True)   # Live 기본 선택
+
+        # 헤더 오른쪽: 상태 위젯들
+        hdr_h.addStretch(1)
+
+        def _vsep():
+            f = QFrame()
+            f.setFrameShape(QFrame.Shape.VLine)
+            f.setFixedHeight(16)
+            f.setStyleSheet(f"color: {_HDR_BORDER}; margin: 0 4px;")
+            return f
+
+        _hdr_lbl_style = (
+            f"color: {_TAB_NORMAL}; font-family: '{_FC}';"
+            " font-size: 10px; padding: 0 6px;"
+        )
+        self._hdr_cam  = QLabel("—")
+        self._hdr_exp  = QLabel("—")
+        self._hdr_fps  = QLabel("—")
+        for lbl in (self._hdr_cam, self._hdr_exp, self._hdr_fps):
+            lbl.setStyleSheet(_hdr_lbl_style)
+
+        hdr_h.addWidget(_vsep())
+        hdr_h.addWidget(self._hdr_cam)
+        hdr_h.addWidget(_vsep())
+        hdr_h.addWidget(self._hdr_exp)
+        hdr_h.addWidget(_vsep())
+        hdr_h.addWidget(self._hdr_fps)
+        hdr_h.addSpacing(4)
+
+        root_v.addWidget(header)
+        root_v.addWidget(self.stack, 1)
 
         # ── 인터탭 연결 ──────────────────────────────────────────────
-        # 카메라 공유: Live ↔ Acquisition
         self.live_tab.camera_connected.connect(self.acq_tab.set_shared_camera)
         self.live_tab.camera_disconnected.connect(self.acq_tab.clear_shared_camera)
         self.acq_tab.acquisition_starting.connect(self.live_tab.stop_live)
         self.acq_tab.acquisition_done.connect(self.live_tab.resume_live)
 
-        # 카메라 공유: Live ↔ Scan
         self.live_tab.camera_connected.connect(self.scan_tab.set_shared_camera)
         self.live_tab.camera_disconnected.connect(self.scan_tab.clear_shared_camera)
         self.scan_tab.scan_starting.connect(self.live_tab.stop_live)
         self.scan_tab.scan_done.connect(self.live_tab.resume_live)
 
-        # 모터 패널 공유: Live → Scan
         self.scan_tab.set_motor_panel(self.live_tab.motor_panel)
 
-        # 노출 동기화 (Live ↔ Scan / Acquisition 양방향)
         self.live_tab.cam_panel.exposure_applied.connect(self.scan_tab.set_exposure_ui)
         self.scan_tab.exposure_changed.connect(self.live_tab.sync_exposure_ui)
         self.live_tab.cam_panel.exposure_applied.connect(self.acq_tab.set_exposure_ui)
         self.acq_tab.exposure_changed.connect(self.live_tab.sync_exposure_ui)
 
-        root_h.addWidget(nav)
-        root_h.addWidget(self.stack, 1)
-
-        # ── 상태바 ────────────────────────────────────────────────────
+        # ── 상태바 (하단) ─────────────────────────────────────────────
         self._status_bar = QStatusBar()
         self._status_bar.setSizeGripEnabled(False)
         self._status_bar.setStyleSheet(f"""
@@ -159,55 +215,37 @@ class MainWindow(QMainWindow):
                 font-family: '{Fonts.MONO}';
                 font-size: {Sizes.SMALL};
             }}
-            QStatusBar::item {{
-                border: none;
-            }}
+            QStatusBar::item {{ border: none; }}
         """)
         self.setStatusBar(self._status_bar)
 
-        # 왼쪽: 일반 메시지
         self._status_label = QLabel("Ready")
         self._status_label.setStyleSheet(
-            f"color: {C_TEXT_DIM}; font-family: '{Fonts.MONO}'; font-size: {Sizes.SMALL}; padding: 0 6px;"
+            f"color: {C_TEXT_DIM}; font-family: '{Fonts.MONO}';"
+            f" font-size: {Sizes.SMALL}; padding: 0 6px;"
         )
         self._status_bar.addWidget(self._status_label, 1)
 
-        # 구분선 헬퍼
         def _sep():
             f = QFrame()
             f.setFrameShape(QFrame.Shape.VLine)
             f.setStyleSheet(f"color: {C_BORDER}; margin: 3px 2px;")
             return f
 
-        # 오른쪽 영구 위젯들 (카메라 | 노출 | 해상도 | FPS)
-        _perm_style = (
-            f"color: {C_TEXT_DIM}; font-family: '{Fonts.MONO}';"
-            f" font-size: {Sizes.SMALL}; padding: 0 8px;"
-        )
-        _active_style = (
-            f"color: {C_ACCENT}; font-family: '{Fonts.MONO}';"
-            f" font-size: {Sizes.SMALL}; padding: 0 8px;"
-        )
-
+        _perm = f"color: {C_TEXT_DIM}; font-family: '{Fonts.MONO}'; font-size: {Sizes.SMALL}; padding: 0 8px;"
         self._sb_cam  = QLabel("📷 —")
         self._sb_exp  = QLabel("⏱ —")
         self._sb_size = QLabel("📐 —")
         self._sb_fps  = QLabel("fps: —")
-
         for lbl in (self._sb_cam, self._sb_exp, self._sb_size, self._sb_fps):
-            lbl.setStyleSheet(_perm_style)
+            lbl.setStyleSheet(_perm)
+        self._sb_cam.setStyleSheet(
+            f"color: {C_ACCENT}; font-family: '{Fonts.MONO}'; font-size: {Sizes.SMALL}; padding: 0 8px;"
+        )
 
-        self._sb_cam.setStyleSheet(_active_style)   # 카메라명은 강조색
-
-        self._status_bar.addPermanentWidget(_sep())
-        self._status_bar.addPermanentWidget(self._sb_cam)
-        self._status_bar.addPermanentWidget(_sep())
-        self._status_bar.addPermanentWidget(self._sb_exp)
-        self._status_bar.addPermanentWidget(_sep())
-        self._status_bar.addPermanentWidget(self._sb_size)
-        self._status_bar.addPermanentWidget(_sep())
-        self._status_bar.addPermanentWidget(self._sb_fps)
-        self._status_bar.addPermanentWidget(_sep())
+        for w in (_sep(), self._sb_cam, _sep(), self._sb_exp,
+                  _sep(), self._sb_size, _sep(), self._sb_fps, _sep()):
+            self._status_bar.addPermanentWidget(w)
 
     # ── 모드 전환 ────────────────────────────────────────────────────
 
@@ -218,43 +256,50 @@ class MainWindow(QMainWindow):
 
     # ── 슬롯 ─────────────────────────────────────────────────────────
 
-    # ── 상태바 슬롯 ──────────────────────────────────────────────────
-
     def _on_cam_connected(self, cam):
         name = type(cam).__name__.replace("Camera", "")
+        _s = (f"color: #4ecdc4; font-family: '{Fonts.MONO}';"
+              f" font-size: {Sizes.SMALL}; padding: 0 8px;")
         self._sb_cam.setText(f"📷 {name}")
-        self._sb_cam.setStyleSheet(
-            f"color: #4ecdc4; font-family: '{Fonts.MONO}';"
-            f" font-size: {Sizes.SMALL}; padding: 0 8px;"
+        self._sb_cam.setStyleSheet(_s)
+        self._hdr_cam.setText(name)
+        self._hdr_cam.setStyleSheet(
+            f"color: #4ecdc4; font-family: '{Fonts.MONO}'; font-size: 10px; padding: 0 6px;"
         )
 
     def _on_cam_disconnected(self):
-        self._sb_cam.setText("📷 —")
-        self._sb_cam.setStyleSheet(
-            f"color: {C_TEXT_DIM}; font-family: '{Fonts.MONO}';"
-            f" font-size: {Sizes.SMALL}; padding: 0 8px;"
+        _s = (f"color: {C_TEXT_DIM}; font-family: '{Fonts.MONO}';"
+              f" font-size: {Sizes.SMALL}; padding: 0 8px;")
+        self._sb_cam.setText("📷 —"); self._sb_cam.setStyleSheet(
+            f"color: {C_ACCENT}; font-family: '{Fonts.MONO}'; font-size: {Sizes.SMALL}; padding: 0 8px;"
         )
         self._sb_size.setText("📐 —")
         self._sb_fps.setText("fps: —")
         self._sb_exp.setText("⏱ —")
+        _ds = (f"color: {_TAB_NORMAL}; font-family: '{Fonts.MONO}'; font-size: 10px; padding: 0 6px;")
+        self._hdr_cam.setText("—"); self._hdr_cam.setStyleSheet(_ds)
+        self._hdr_exp.setText("—"); self._hdr_fps.setText("—")
 
     def _on_exposure_changed(self, ms: float):
         if ms < 1.0:
-            self._sb_exp.setText(f"⏱ {ms*1000:.0f}µs")
+            t = f"{ms*1000:.0f}µs"
         elif ms >= 1000.0:
-            self._sb_exp.setText(f"⏱ {ms/1000:.2f}s")
+            t = f"{ms/1000:.2f}s"
         else:
-            self._sb_exp.setText(f"⏱ {ms:.1f}ms")
+            t = f"{ms:.1f}ms"
+        self._sb_exp.setText(f"⏱ {t}")
+        self._hdr_exp.setText(t)
 
     def _on_frame_stats(self, fps: float, w: int, h: int):
         self._sb_size.setText(f"📐 {w}×{h}")
         if fps > 0:
+            fps_t = f"{fps:.1f}fps"
             self._sb_fps.setText(f"fps: {fps:.1f}")
+            self._hdr_fps.setText(fps_t)
 
     def _on_spe_saved(self, path: str):
-        """Acquisition 탭에서 SPE 저장 완료 → Analysis 탭으로 자동 전달."""
         self.analysis_tab.open_spe(path)
-        self._switch_mode(3)   # DATA 탭으로 이동
+        self._switch_mode(3)
         self._on_status(f"SPE 열림: {path}")
 
     def _on_status(self, msg: str):
