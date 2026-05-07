@@ -15,7 +15,8 @@ import numpy as np
 from PyQt6.QtWidgets import (
     QMainWindow, QDockWidget, QFileDialog,
     QStatusBar, QProgressBar, QLabel,
-    QToolBar, QMessageBox, QWidget
+    QToolBar, QMessageBox, QWidget,
+    QVBoxLayout, QHBoxLayout,
 )
 from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction
@@ -47,18 +48,7 @@ class AnalysisTab(QMainWindow):
         self.setWindowFlags(Qt.WindowType.Widget)   # 탭 임베드용
         self.menuBar().setVisible(False)
 
-        # 도크 타이틀 스타일
         self.setStyleSheet(f"""
-            QDockWidget::title {{
-                background: {C_BG_MED};
-                border-bottom: 1px solid {C_BORDER};
-                padding: 3px 8px;
-                color: {C_TEXT_DIM};
-                font-family: '{Fonts.MONO}';
-                font-size: {Sizes.SMALL};
-                font-weight: bold;
-                letter-spacing: 1px;
-            }}
             QToolBar {{
                 background: #0a0f1e;
                 border-bottom: 1px solid {C_BORDER};
@@ -89,6 +79,41 @@ class AnalysisTab(QMainWindow):
         self._connect_signals()
         self._setup_shortcuts()
 
+    # ── 독 헬퍼 ──────────────────────────────────────────────────────
+
+    def _make_dock_header(self, title: str) -> QWidget:
+        hdr = QWidget()
+        hdr.setFixedHeight(22)
+        hdr.setStyleSheet(
+            f"background: {C_BG_MED}; border-bottom: 1px solid {C_BORDER};"
+        )
+        row = QHBoxLayout(hdr)
+        row.setContentsMargins(8, 0, 8, 0)
+        lbl = QLabel(title)
+        lbl.setStyleSheet(
+            f"color: {C_TEXT_DIM}; font-family: '{Fonts.MONO}';"
+            f" font-size: {Sizes.SMALL}; font-weight: bold;"
+            " letter-spacing: 2px; background: transparent; border: none;"
+        )
+        row.addWidget(lbl)
+        return hdr
+
+    def _wrap_dock(self, obj_name: str, title: str, content: QWidget,
+                   area: Qt.DockWidgetArea) -> QDockWidget:
+        wrap = QWidget()
+        vbox = QVBoxLayout(wrap)
+        vbox.setContentsMargins(0, 0, 0, 0)
+        vbox.setSpacing(0)
+        vbox.addWidget(self._make_dock_header(title))
+        vbox.addWidget(content, 1)
+        dock = QDockWidget(self)
+        dock.setObjectName(obj_name)
+        dock.setWidget(wrap)
+        dock.setTitleBarWidget(QWidget())
+        dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
+        self.addDockWidget(area, dock)
+        return dock
+
     # ─────────────────────────────────────────
     # UI 구성 (기존 MainWindow._setup_ui 복사)
     # ─────────────────────────────────────────
@@ -98,48 +123,36 @@ class AnalysisTab(QMainWindow):
         self.setCentralWidget(self.image_viewer)
 
         self.file_list_panel = FileListPanel()
-        self.dock_files = QDockWidget("📁  Files", self)
-        self.dock_files.setWidget(self.file_list_panel)
-        self.dock_files.setAllowedAreas(
-            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
+        self.dock_files = self._wrap_dock(
+            "dock_files", "📁  FILES",
+            self.file_list_panel, Qt.DockWidgetArea.LeftDockWidgetArea,
         )
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_files)
 
         self.frame_grid_panel = FrameGridPanel()
-        self.dock_frames = QDockWidget("🎞  Frames", self)
-        self.dock_frames.setWidget(self.frame_grid_panel)
-        self.dock_frames.setAllowedAreas(
-            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
+        self.dock_frames = self._wrap_dock(
+            "dock_frames", "🎞  FRAMES",
+            self.frame_grid_panel, Qt.DockWidgetArea.LeftDockWidgetArea,
         )
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_frames)
         self.splitDockWidget(self.dock_files, self.dock_frames, Qt.Orientation.Vertical)
 
         self.plot_panel = PlotPanel("Profile")
-        self.dock_plot = QDockWidget("📈  Profile Plot", self)
-        self.dock_plot.setWidget(self.plot_panel)
-        self.dock_plot.setAllowedAreas(
-            Qt.DockWidgetArea.BottomDockWidgetArea | Qt.DockWidgetArea.TopDockWidgetArea |
-            Qt.DockWidgetArea.LeftDockWidgetArea   | Qt.DockWidgetArea.RightDockWidgetArea
+        self.dock_plot = self._wrap_dock(
+            "dock_plot", "📈  PROFILE PLOT",
+            self.plot_panel, Qt.DockWidgetArea.BottomDockWidgetArea,
         )
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_plot)
 
         self.histogram_panel = HistogramPanel()
-        self.dock_histogram = QDockWidget("📊  Histogram", self)
-        self.dock_histogram.setWidget(self.histogram_panel)
-        self.dock_histogram.setAllowedAreas(
-            Qt.DockWidgetArea.BottomDockWidgetArea | Qt.DockWidgetArea.TopDockWidgetArea |
-            Qt.DockWidgetArea.LeftDockWidgetArea   | Qt.DockWidgetArea.RightDockWidgetArea
+        self.dock_histogram = self._wrap_dock(
+            "dock_histogram", "📊  HISTOGRAM",
+            self.histogram_panel, Qt.DockWidgetArea.BottomDockWidgetArea,
         )
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_histogram)
         self.splitDockWidget(self.dock_plot, self.dock_histogram, Qt.Orientation.Horizontal)
 
         self.roi_panel = RoiPanel()
-        self.dock_roi = QDockWidget("📐  ROI List", self)
-        self.dock_roi.setWidget(self.roi_panel)
-        self.dock_roi.setAllowedAreas(
-            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
+        self.dock_roi = self._wrap_dock(
+            "dock_roi", "📐  ROI LIST",
+            self.roi_panel, Qt.DockWidgetArea.RightDockWidgetArea,
         )
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_roi)
 
         self.resizeDocks([self.dock_files, self.dock_frames], [200, 500], Qt.Orientation.Vertical)
         self.resizeDocks([self.dock_plot], [220], Qt.Orientation.Vertical)
