@@ -272,6 +272,15 @@ class MainWindow(QMainWindow):
                     viewer.hide_range_popup()
 
         self.stack.setCurrentIndex(idx)
+
+        # 활성화된 탭에 알림 (특수 동작 수행용)
+        active_tab = self.stack.widget(idx)
+        if hasattr(active_tab, "on_tab_activated"):
+            try:
+                active_tab.on_tab_activated()
+            except Exception as e:
+                print(f"Error in on_tab_activated for {type(active_tab).__name__}: {e}")
+
         for i, btn in enumerate(self._nav_btns):
             btn.setChecked(i == idx)
 

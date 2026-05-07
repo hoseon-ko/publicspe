@@ -6,15 +6,15 @@ KIMM Fine Stage Z축 연결 + 위치 조회 패널 — SpeAnalyze 다크 테마.
   - IP / Port 입력 후 Connect / Disconnect
   - 100 ms 폴링으로 Z 위치 표시
   - Servo 상태 표시
-  - 이동 기능은 위치 확인 후 별도 추가 예정
+  - 수동 제어 (Jog / Absolute Move)
 """
 
 from __future__ import annotations
-
+import threading
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QLineEdit, QFrame, QGroupBox,
-    QDoubleSpinBox, QCheckBox,
+    QDoubleSpinBox, QCheckBox, QGridLayout,
 )
 from PyQt6.QtCore import Qt, QTimer, QSettings, pyqtSignal
 
@@ -22,6 +22,7 @@ from core.motor.kimm_z import KIMMZController
 
 # ── 스타일 토큰 ────────────────────────────────────────────────────────────────
 _FC = "Courier New"
+C_ACCENT = "#4ecdc4"
 
 _CARD_STYLE = """
     QFrame#kimmCard {
@@ -62,6 +63,7 @@ class KIMMZPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._ctrl: KIMMZController | None = None
+        self._move_btns: list[QPushButton] = []   # 이동 버튼들 (연결 시 활성화)
         self._settings = QSettings("SpeAnalyze", "MainWindow")
 
         self._poll_timer = QTimer(self)
@@ -160,8 +162,65 @@ class KIMMZPanel(QWidget):
         row_servo.addStretch()
         row_servo.addWidget(self.lbl_servo)
         pos_layout.addLayout(row_servo)
-
         root.addWidget(grp_pos)
+
+        # ── 수동 제어 그룹 (JOG / MOVE) ──────────────────────────────────
+        grp_manual = QGroupBox("MANUAL CONTROL")
+        grp_manual.setStyleSheet(_GRP_STYLE.format(color="#e0e0e0"))
+        man_layout = QVBoxLayout(grp_manual)
+        man_layout.setContentsMargins(10, 15, 10, 10)
+        man_layout.setSpacing(10)
+
+        # (1) 조그 버튼 (3열 2행 그리드)
+        jog_grid = QGridLayout()
+        jog_grid.setSpacing(6)
+        jog_grid.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        def add_jog(text: str, val: float, r: int, c: int, color: str):
+            btn = QPushButton(text)
+            btn.setStyleSheet(self._btn_style(color))
+            btn.setFixedWidth(56)   # 너비 통일
+            btn.setEnabled(False)
+            btn.clicked.connect(lambda _, v=val: self._on_jog(v))
+            jog_grid.addWidget(btn, r, c)
+            self._move_btns.append(btn)
+
+        # 상단: + 방향 (10, 1, 0.1)
+        add_jog("+10",  10.0, 0, 0, "#4ecdc4")
+        add_jog("+1",    1.0, 0, 1, "#4ecdc4")
+        add_jog("+0.1",  0.1, 0, 2, "#4ecdc4")
+        # 하단: - 방향 (10, 1, 0.1)
+        add_jog("-10", -10.0, 1, 0, "#e94560")
+        add_jog("-1",   -1.0, 1, 1, "#e94560")
+        add_jog("-0.1", -0.1, 1, 2, "#e94560")
+
+        man_layout.addLayout(jog_grid)
+
+        # (2) 절대 이동 (Target + GO)
+        row_abs = QHBoxLayout()
+        row_abs.setSpacing(4)
+        lbl_target = QLabel("ABS")
+        lbl_target.setStyleSheet(f"color:#8090b0; font-family:'{_FC}'; font-size:10px;")
+        
+        self.spin_abs = QDoubleSpinBox()
+        self.spin_abs.setRange(-10000.0, 10000.0)
+        self.spin_abs.setDecimals(2)
+        self.spin_abs.setSuffix(" um")
+        self.spin_abs.setStyleSheet(self._spin_style())
+        
+        self.btn_go = QPushButton("GO")
+        self.btn_go.setFixedWidth(40)
+        self.btn_go.setStyleSheet(self._btn_style(C_ACCENT))
+        self.btn_go.setEnabled(False)
+        self.btn_go.clicked.connect(self._on_abs_move)
+        self._move_btns.append(self.btn_go)
+
+        row_abs.addWidget(lbl_target)
+        row_abs.addWidget(self.spin_abs, 1)
+        row_abs.addWidget(self.btn_go)
+        man_layout.addLayout(row_abs)
+
+        root.addWidget(grp_manual)
 
         # ── 설정 그룹 (리밋/속도) ──────────────────────────────────────
         grp_set = QGroupBox("SETTINGS")
@@ -267,6 +326,7 @@ class KIMMZPanel(QWidget):
             self.btn_disconnect.setEnabled(True)
             self.edit_ip.setEnabled(False)
             self.edit_port.setEnabled(False)
+            for b in self._move_btns: b.setEnabled(True)
             self._poll_timer.start()
         else:
             self._log("KIMM: 연결 실패 — IP/Port 확인")
@@ -290,6 +350,7 @@ class KIMMZPanel(QWidget):
         self.btn_disconnect.setEnabled(False)
         self.edit_ip.setEnabled(True)
         self.edit_port.setEnabled(True)
+        for b in self._move_btns: b.setEnabled(False)
         self._log("KIMM: 연결 해제")
 
     # ── 폴링 ──────────────────────────────────────────────────────────
@@ -315,6 +376,18 @@ class KIMMZPanel(QWidget):
             self.lbl_servo.setStyleSheet(
                 f"color:#4a5a7a; font-family:'Courier New'; font-size:11px; font-weight:bold;"
             )
+
+    def _on_jog(self, delta: float):
+        if not self._ctrl or not self._ctrl.is_connected: return
+        self._log(f"KIMM Jog: {delta:+.2f} um")
+        # 비동기 실행 (UI 프리징 방지 위해 간단히)
+        threading.Thread(target=self._ctrl.move_by_z, args=(delta,), daemon=True).start()
+
+    def _on_abs_move(self):
+        if not self._ctrl or not self._ctrl.is_connected: return
+        target = self.spin_abs.value()
+        self._log(f"KIMM Move To: {target:.2f} um")
+        threading.Thread(target=self._ctrl.move_to_z, args=(target,), daemon=True).start()
 
     def _on_limit_changed(self, val: float):
         if self._ctrl:

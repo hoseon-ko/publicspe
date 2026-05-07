@@ -220,6 +220,7 @@ class LiveTab(QMainWindow):
     frame_stats_updated = pyqtSignal(float, int, int)  # fps, width, height
 
     def on_range_changed(self, vmin, vmax):
+        # None = auto range (ROI Range 해제 시 등)
         self._proc_worker._vmin = vmin
         self._proc_worker._vmax = vmax
         self.image_viewer._display_vmin = vmin

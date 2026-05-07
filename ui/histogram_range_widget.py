@@ -393,6 +393,22 @@ class HistogramRangeWidget(QWidget):
     def get_vrange(self) -> tuple[float, float]:
         return self._vmin, self._vmax
 
+    def set_range(self, vmin: float, vmax: float):
+        """외부에서 vmin/vmax 직접 지정 — 슬라이더 핸들 동기화.
+        ROI Range 기능 등 프로그래밍 방식의 범위 설정에 사용."""
+        if vmax <= vmin:
+            vmax = vmin + 1.0
+        # 슬라이더 구간이 지정 범위를 포함하도록 확장
+        if vmin < self._slider_min or vmax > self._slider_max:
+            self._slider_min = min(self._slider_min, vmin)
+            self._slider_max = max(self._slider_max, vmax)
+            self._recompute_histogram()
+        self._vmin = vmin
+        self._vmax = vmax
+        self._sync_fracs()
+        self._update_labels()
+        # range_changed 는 emit 하지 않음 — 외부에서 이미 처리 중
+
     # ── 내부 ─────────────────────────────────────────────────────────
 
     def _sync_fracs(self):

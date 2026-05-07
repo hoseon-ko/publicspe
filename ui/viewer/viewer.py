@@ -40,7 +40,7 @@ class ImageViewer(QWidget):
     box_profile_updated  = pyqtSignal(object, object, str)
     histogram_updated    = pyqtSignal(object, object)
     pixel_info_updated   = pyqtSignal(int, int, float)
-    range_changed        = pyqtSignal(float, float)
+    range_changed        = pyqtSignal(object, object)   # (vmin|None, vmax|None)
     colormap_changed     = pyqtSignal(str)
 
     def __init__(self, parent=None):
@@ -63,6 +63,8 @@ class ImageViewer(QWidget):
         self._display_vmin: float | None = None
         self._display_vmax: float | None = None
         self._external_render_control = False  # True면 외부(예: LiveTab) 렌더 파이프라인 사용
+        self._roi_range_mode  = False            # ROI 영역 기준 컬러맵 범위 자동 설정
+        self._pre_roi_range   = (None, None)     # ROI Range 진입 전 저장값
         self._rotation_k: int = 0              # np.rot90 k 값 (0/1/2/3 → 0°/90°/180°/270°)
         self._range_debounce = QTimer()
         self._range_debounce.setSingleShot(True)
@@ -170,6 +172,28 @@ class ImageViewer(QWidget):
         """)
         self.btn_range.toggled.connect(self._on_range_panel_toggled)
         toolbar.addWidget(self.btn_range)
+
+        # ROI Range 토글 — 선택 사각형 내 min/max → 컬러맵 범위
+        self.btn_roi_range = QToolButton()
+        self.btn_roi_range.setText("🎯 ROI Range")
+        self.btn_roi_range.setCheckable(True)
+        self.btn_roi_range.setToolTip(
+            "선택 영역(드래그) 내 픽셀 min/max를 컬러맵 범위로 자동 설정\n"
+            "해제 시 이전 범위로 복원"
+        )
+        self.btn_roi_range.setStyleSheet("""
+            QToolButton {
+                background: transparent; color: #a0a0b0;
+                border: 1px solid #0f3460; border-radius: 3px;
+                padding: 2px 6px; font-size: 11px;
+            }
+            QToolButton:checked {
+                background: #1a2a10; color: #ffe66d; border-color: #ffe66d;
+            }
+            QToolButton:hover { border-color: #ffe66d; }
+        """)
+        self.btn_roi_range.toggled.connect(self._on_roi_range_toggled)
+        toolbar.addWidget(self.btn_roi_range)
 
         # ROI 목록 토글
         self.btn_roi_list_toggle = QToolButton()
@@ -431,7 +455,9 @@ class ImageViewer(QWidget):
         # ── 히스토그램 Range 슬라이더 팝업 ──
         self._hist_range_widget = HistogramRangeWidget()
         self._hist_range_widget.range_changed.connect(self._on_range_changed)
-        self._hist_range_widget.range_changed.connect(self.range_changed)
+        self._hist_range_widget.range_changed.connect(
+            lambda vmin, vmax: self.range_changed.emit(vmin, vmax)
+        )
         self._range_popup = _RangePopup(self._hist_range_widget, parent=self)
         self._range_popup.closed.connect(lambda: self.btn_range.setChecked(False))
 
@@ -1049,8 +1075,8 @@ class ImageViewer(QWidget):
         else:
             self._range_popup.hide()
 
-    def _on_range_changed(self, vmin: float, vmax: float):
-        self._display_vmin = vmin
+    def _on_range_changed(self, vmin, vmax):
+        self._display_vmin = vmin   # None = auto
         self._display_vmax = vmax
         if not self._external_render_control:
             self._range_debounce.start()  # 50ms 후 렌더 — 빠른 드래그 시 중간 프레임 스킵
@@ -1122,12 +1148,63 @@ class ImageViewer(QWidget):
         if x0 < 0:
             self._sel_box_rect = None
             self._lbl_sel.setText("—")
+            if self._roi_range_mode:
+                self._restore_pre_roi_range()
         else:
             self._sel_box_rect = (x0, y0, x1, y1)
             w = abs(x1 - x0)
             h = abs(y1 - y0)
             self._lbl_sel.setText(f"{w:.0f}×{h:.0f}  @({min(x0,x1):.0f},{min(y0,y1):.0f})")
+            if self._roi_range_mode:
+                self._apply_roi_range(self._sel_box_rect)
         self._update_ruler_profiles()
+
+    # ─────────────────────────────────────────
+    # ROI Range
+    # ─────────────────────────────────────────
+
+    def _on_roi_range_toggled(self, checked: bool):
+        """ROI Range 모드 ON/OFF."""
+        self._roi_range_mode = checked
+        if checked:
+            # 현재 범위 저장
+            self._pre_roi_range = (self._display_vmin, self._display_vmax)
+            # 이미 선택 박스가 있으면 즉시 적용
+            if self._sel_box_rect is not None:
+                self._apply_roi_range(self._sel_box_rect)
+        else:
+            self._restore_pre_roi_range()
+
+    def _apply_roi_range(self, rect: tuple):
+        """선택 영역 내 픽셀 min/max → 컬러맵 범위로 설정."""
+        if self._current_image is None:
+            return
+        x0, y0, x1, y1 = rect
+        img = self._current_image
+        h, w = img.shape[:2]
+        ix0 = max(0, min(int(min(x0, x1)), w - 1))
+        iy0 = max(0, min(int(min(y0, y1)), h - 1))
+        ix1 = max(ix0 + 1, min(int(max(x0, x1)), w))
+        iy1 = max(iy0 + 1, min(int(max(y0, y1)), h))
+        region = img[iy0:iy1, ix0:ix1].astype(np.float64)
+        vmin = float(region.min())
+        vmax = float(region.max())
+        if vmax <= vmin:
+            vmax = vmin + 1.0
+        self._on_range_changed(vmin, vmax)
+        self.range_changed.emit(vmin, vmax)
+        # 히스토그램 Range 팝업 핸들도 동기화
+        if self._hist_range_widget.isVisible():
+            self._hist_range_widget.set_range(vmin, vmax)
+
+    def _restore_pre_roi_range(self):
+        """ROI Range 진입 전 범위로 복원."""
+        vmin, vmax = self._pre_roi_range
+        self._on_range_changed(vmin, vmax)
+        self.range_changed.emit(vmin, vmax)
+        if self._hist_range_widget.isVisible():
+            if vmin is not None and vmax is not None:
+                self._hist_range_widget.set_range(vmin, vmax)
 
     def _on_mouse_clicked(self, x: float, y: float):
         if x < 0 or y < 0:

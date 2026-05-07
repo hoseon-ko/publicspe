@@ -150,6 +150,15 @@ class AutoFocusTab(QWidget):
         self._kimm = ctrl
         self._update_kimm_status()
 
+    def on_tab_activated(self):
+        """탭이 활성화될 때 호출 (MainWindow에서 호출)."""
+        if self._kimm and self._kimm.is_connected:
+            # 현재 위치를 명시적으로 요청하고 spin_center에 반영
+            self._kimm.request_position()
+            z = self._kimm.current_z
+            self.spin_center.setValue(z)
+            self._log(f"현재 Z축 위치 동기화: {z:+.2f} µm")
+
     def cleanup(self):
         self._save_settings()
         if self._worker and self._worker.isRunning():
