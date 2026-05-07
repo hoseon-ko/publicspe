@@ -41,6 +41,7 @@ from ui.live.camera_panel import CameraControlPanel
 from ui.live.motor_panel import MotorPanel
 from ui.live.kimm_z_panel import KIMMZPanel
 from theme.styles import Fonts, Sizes, C_ACCENT, C_TEXT_DEAD, BTN_PRIMARY, TEXTEDIT_LOG
+from ui.widgets.collapsible_section import CollapsibleSection
 
 try:
     import cv2
@@ -315,56 +316,55 @@ class LiveTab(QMainWindow):
         self.image_viewer.set_external_render_control(True)
         self.setCentralWidget(self.image_viewer)
         self.image_viewer.range_changed.connect(self.on_range_changed)
-        # ── Dock: Camera Control (좌측 상단) ──────────────────────────
+        # ── 좌측 사이드바: CollapsibleSections 1개 독 (타이틀바 숨김) ──────
+        # LightField 스타일: 고정폭 패널 안에 접기/펼치기 가능한 섹션 스택
+        sidebar = QWidget()
+        sidebar.setObjectName("sidebar")
+        sidebar.setStyleSheet("QWidget#sidebar { background: #080e1e; }")
+        sidebar_v = QVBoxLayout(sidebar)
+        sidebar_v.setContentsMargins(6, 6, 6, 6)
+        sidebar_v.setSpacing(2)
+
+        # Camera 섹션
+        self._sec_cam = CollapsibleSection("📷  CAMERA CONTROL", accent=C_ACCENT)
         self.cam_panel = CameraControlPanel(self._proc)
-        cam_scroll = QScrollArea()
-        cam_scroll.setWidget(self.cam_panel)
-        cam_scroll.setWidgetResizable(True)
-        cam_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        cam_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        self._sec_cam.add_widget(self.cam_panel)
+        sidebar_v.addWidget(self._sec_cam)
 
-        self.dock_cam = QDockWidget("📷  Camera Control", self)
-        self.dock_cam.setWidget(cam_scroll)
-        self.dock_cam.setAllowedAreas(
-            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
-        )
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_cam)
-        self.dock_cam.setObjectName("dock_cam")
-
-        # ── Dock: Motors (좌측 하단) ──────────────────────────────────
+        # Motors 섹션
+        self._sec_motor = CollapsibleSection("⚙  MOTORS", accent="#4a9a7a")
         self.motor_panel = MotorPanel()
-        motor_scroll = QScrollArea()
-        motor_scroll.setWidget(self.motor_panel)
-        motor_scroll.setWidgetResizable(True)
-        motor_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        motor_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        self._sec_motor.add_widget(self.motor_panel)
+        sidebar_v.addWidget(self._sec_motor)
 
-        self.dock_motor = QDockWidget("⚙️  Motors", self)
-        self.dock_motor.setWidget(motor_scroll)
-        self.dock_motor.setAllowedAreas(
-            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
-        )
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_motor)
-        self.splitDockWidget(self.dock_cam, self.dock_motor, Qt.Orientation.Vertical)
-        self.dock_motor.setObjectName("dock_motor")
-
-        # ── Dock: KIMM Z (좌측, Motors 아래) ─────────────────────────
+        # KIMM Z 섹션 (기본 접힘)
+        self._sec_kimm = CollapsibleSection("🎯  KIMM Z", accent="#9a6a4a", collapsed=True)
         self.kimm_z_panel = KIMMZPanel()
         self.kimm_z_panel.log_message.connect(self._log)
-        kimm_scroll = QScrollArea()
-        kimm_scroll.setWidget(self.kimm_z_panel)
-        kimm_scroll.setWidgetResizable(True)
-        kimm_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        kimm_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        self._sec_kimm.add_widget(self.kimm_z_panel)
+        sidebar_v.addWidget(self._sec_kimm)
 
-        self.dock_kimm = QDockWidget("🎯  KIMM Z", self)
-        self.dock_kimm.setWidget(kimm_scroll)
-        self.dock_kimm.setAllowedAreas(
+        sidebar_v.addStretch(1)
+
+        left_scroll = QScrollArea()
+        left_scroll.setWidget(sidebar)
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        left_scroll.setStyleSheet(
+            "QScrollArea { border: none; background: #080e1e; }"
+            "QScrollBar:vertical { width: 6px; background: #0a1020; }"
+            "QScrollBar::handle:vertical { background: #1a3060; border-radius: 3px; }"
+        )
+
+        self.dock_left = QDockWidget(self)
+        self.dock_left.setObjectName("dock_left")
+        self.dock_left.setWidget(left_scroll)
+        self.dock_left.setTitleBarWidget(QWidget())   # ← 타이틀바 완전 숨김
+        self.dock_left.setAllowedAreas(
             Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
         )
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_kimm)
-        self.splitDockWidget(self.dock_motor, self.dock_kimm, Qt.Orientation.Vertical)
-        self.dock_kimm.setObjectName("dock_kimm")
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_left)
+        self.resizeDocks([self.dock_left], [300], Qt.Orientation.Horizontal)
 
         # ── Dock: Profile Plot (하단 좌) ──────────────────────────────
         self.plot_panel = PlotPanel("Profile")
@@ -479,22 +479,9 @@ class LiveTab(QMainWindow):
         self.tabifyDockWidget(self.dock_log, self.dock_roi)
         self.dock_roi.setObjectName("dock_roi")
 
-        # 기본 크기 힌트 — 좌측 패널 300px 고정폭 (LightField 스타일)
-        self.resizeDocks(
-            [self.dock_cam, self.dock_motor, self.dock_kimm],
-            [400, 250, 180],
-            Qt.Orientation.Vertical,
-        )
-        # 최소/최대폭 제한으로 좌측 패널 고정
-        for dock in (self.dock_cam, self.dock_motor, self.dock_kimm):
-            dock.setMinimumWidth(260)
-            dock.setMaximumWidth(420)
-
-        self.resizeDocks(
-            [self.dock_cam, self.dock_motor, self.dock_kimm],
-            [300, 300, 300],
-            Qt.Orientation.Horizontal,
-        )
+        # 좌측 패널 고정폭
+        self.dock_left.setMinimumWidth(260)
+        self.dock_left.setMaximumWidth(360)
 
         self.resizeDocks([self.dock_plot], [200], Qt.Orientation.Vertical)
         self.resizeDocks([self.dock_log], [280], Qt.Orientation.Horizontal)
@@ -516,8 +503,7 @@ class LiveTab(QMainWindow):
 
         # Dock 토글 버튼들
         for label, dock_attr in [
-            ("📷 Camera",    "dock_cam"),
-            ("⚙️ Motors",    "dock_motor"),
+            ("⬤ Controls",   "dock_left"),
             ("📈 Profile",   "dock_plot"),
             ("📊 Histogram", "dock_hist"),
             ("🖥 Log",       "dock_log"),
@@ -701,7 +687,7 @@ class LiveTab(QMainWindow):
 
         # 로딩 상태 표시
         self._log(f"🔄 {cam_type} 연결 중...")
-        self.dock_cam.setWindowTitle("📷  Camera Control  [연결 중…]")
+        self._sec_cam._title_lbl.setText("📷  CAMERA  [ 연결 중… ]")
         self.cam_panel.setEnabled(False)
 
         # 백그라운드 연결
@@ -721,7 +707,7 @@ class LiveTab(QMainWindow):
         self.cam_panel.setEnabled(True)
         self.cam_panel.attach_camera(cam)
         cam_type = type(cam).__name__.replace("Camera", "")
-        self.dock_cam.setWindowTitle(f"📷  {cam_type}  ● CONNECTED")
+        self._sec_cam._title_lbl.setText(f"📷  {cam_type.upper()}  ● LIVE")
         self._log(f"✅ {cam_type} 연결 완료")
         self.status_message.emit(f"{cam_type} 연결됨")
         self.camera_connected.emit(cam)
@@ -729,7 +715,7 @@ class LiveTab(QMainWindow):
     def _on_connect_error(self, msg: str):
         """연결 실패 — 메인 스레드에서 실행됨."""
         self.cam_panel.setEnabled(True)
-        self.dock_cam.setWindowTitle("📷  Camera Control")
+        self._sec_cam._title_lbl.setText("📷  CAMERA CONTROL")
         self._log(f"❌ 연결 실패: {msg}")
 
     def _disconnect_camera(self):
@@ -755,7 +741,7 @@ class LiveTab(QMainWindow):
         self.cam_panel.setEnabled(True)
         self.cam_panel.detach_camera()
         self._proc.reset_buffer()
-        self.dock_cam.setWindowTitle("📷  Camera Control")
+        self._sec_cam._title_lbl.setText("📷  CAMERA CONTROL")
         self._log("카메라 연결 해제")
         self.status_message.emit("카메라 해제")
         self.camera_disconnected.emit()
