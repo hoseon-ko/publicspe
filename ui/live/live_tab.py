@@ -242,6 +242,30 @@ class LiveTab(QMainWindow):
         self.setWindowFlags(Qt.WindowType.Widget)
         self.menuBar().setVisible(False)
 
+        # ── Dock 타이틀 바 스타일 (LightField 스타일 — 컴팩트) ──────
+        self.setStyleSheet(f"""
+            QDockWidget {{
+                titlebar-close-icon: url(none);
+                titlebar-normal-icon: url(none);
+            }}
+            QDockWidget::title {{
+                background: #0c1428;
+                border-bottom: 1px solid #0f3460;
+                padding: 3px 8px;
+                color: #4a6a9a;
+                font-family: '{_FC}';
+                font-size: {_FS_HDR};
+                font-weight: bold;
+                letter-spacing: 1px;
+                text-align: left;
+            }}
+            QDockWidget::float-button, QDockWidget::close-button {{
+                background: transparent;
+                border: none;
+                padding: 0 2px;
+            }}
+        """)
+
         self._cam: Optional[BaseCamera] = None
         self._proc = ImageProcessor()
         self._last_raw: Optional[np.ndarray] = None
@@ -455,15 +479,25 @@ class LiveTab(QMainWindow):
         self.tabifyDockWidget(self.dock_log, self.dock_roi)
         self.dock_roi.setObjectName("dock_roi")
 
-        # 기본 크기 힌트
+        # 기본 크기 힌트 — 좌측 패널 300px 고정폭 (LightField 스타일)
         self.resizeDocks(
-            [self.dock_cam, self.dock_motor], [350, 350], Qt.Orientation.Vertical
+            [self.dock_cam, self.dock_motor, self.dock_kimm],
+            [400, 250, 180],
+            Qt.Orientation.Vertical,
         )
-        self.dock_cam.setMinimumWidth(500)
-        self.dock_motor.setMinimumWidth(500)
+        # 최소/최대폭 제한으로 좌측 패널 고정
+        for dock in (self.dock_cam, self.dock_motor, self.dock_kimm):
+            dock.setMinimumWidth(260)
+            dock.setMaximumWidth(420)
 
-        self.resizeDocks([self.dock_plot], [220], Qt.Orientation.Vertical)
-        self.resizeDocks([self.dock_log], [240], Qt.Orientation.Horizontal)
+        self.resizeDocks(
+            [self.dock_cam, self.dock_motor, self.dock_kimm],
+            [300, 300, 300],
+            Qt.Orientation.Horizontal,
+        )
+
+        self.resizeDocks([self.dock_plot], [200], Qt.Orientation.Vertical)
+        self.resizeDocks([self.dock_log], [280], Qt.Orientation.Horizontal)
 
     def _setup_toolbar(self):
         tb = QToolBar("Live Toolbar")
