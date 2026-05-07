@@ -153,16 +153,19 @@ class AutoFocusTab(QWidget):
             self._lbl_kimm.setStyleSheet(
                 f"color: #4ecdc4; font-family: '{_FC}'; font-size: {_FSS};"
             )
+            self._z_timer.start()
         else:
             self.clear_kimm_ctrl()
 
     def clear_kimm_ctrl(self):
         """KIMM 연결 해제 알림."""
+        self._z_timer.stop()
         self._kimm = None
         self._lbl_kimm.setText("● 스테이지 미연결")
         self._lbl_kimm.setStyleSheet(
             f"color: {C_DANGER}; font-family: '{_FC}'; font-size: {_FSS};"
         )
+        self._lbl_z_cur.setText("Z: —  µm")
 
     def on_tab_activated(self):
         """탭이 활성화될 때 호출 (MainWindow에서 호출)."""
@@ -172,6 +175,16 @@ class AutoFocusTab(QWidget):
             z = self._kimm.current_z
             self.spin_center.setValue(z)
             self._log(f"현재 Z축 위치 동기화: {z:+.2f} µm")
+            if not self._z_timer.isActive():
+                self._z_timer.start()
+
+    def _poll_z(self):
+        """150ms마다 현재 Z 위치 갱신 (UI 표시용)."""
+        if not self._kimm or not self._kimm.is_connected:
+            self._z_timer.stop()
+            return
+        z = self._kimm.current_z
+        self._lbl_z_cur.setText(f"Z: {z:+.2f} µm")
 
     def cleanup(self):
         self._save_settings()
