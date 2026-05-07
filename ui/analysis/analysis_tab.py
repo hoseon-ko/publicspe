@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
     QToolBar, QMessageBox, QWidget,
     QVBoxLayout, QHBoxLayout,
 )
-from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSignal, QSettings
 from PyQt6.QtGui import QAction
 
 from ui.image_viewer import ImageViewer
