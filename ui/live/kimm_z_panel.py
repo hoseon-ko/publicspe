@@ -14,6 +14,7 @@ from __future__ import annotations
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QLineEdit, QFrame, QGroupBox,
+    QDoubleSpinBox, QCheckBox,
 )
 from PyQt6.QtCore import Qt, QTimer, QSettings, pyqtSignal
 
@@ -46,8 +47,11 @@ _GRP_STYLE = """
     QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 4px; }}
 """
 
-_SETTINGS_KEY_IP   = "kimm/ip"
-_SETTINGS_KEY_PORT = "kimm/port"
+_SETTINGS_KEY_IP     = "kimm/ip"
+_SETTINGS_KEY_PORT   = "kimm/port"
+_SETTINGS_KEY_LIMIT  = "kimm/safety_limit"
+_SETTINGS_KEY_VEL    = "kimm/velocity"
+_SETTINGS_KEY_DRY    = "kimm/dry_run"
 
 
 class KIMMZPanel(QWidget):
@@ -158,9 +162,66 @@ class KIMMZPanel(QWidget):
         pos_layout.addLayout(row_servo)
 
         root.addWidget(grp_pos)
+
+        # ── 설정 그룹 (리밋/속도) ──────────────────────────────────────
+        grp_set = QGroupBox("SETTINGS")
+        grp_set.setStyleSheet(_GRP_STYLE.format(color="#9a6a4a"))
+        set_layout = QVBoxLayout(grp_set)
+        set_layout.setSpacing(4)
+
+        # Safety Limit
+        row_lim = QHBoxLayout()
+        lbl_lim = QLabel("Limit(um)")
+        lbl_lim.setStyleSheet(f"color:#8090b0; font-family:'{_FC}'; font-size:11px;")
+        lbl_lim.setFixedWidth(65)
+        self.spin_limit = QDoubleSpinBox()
+        self.spin_limit.setRange(-1000.0, 1000.0)
+        self.spin_limit.setValue(0.0)
+        self.spin_limit.setDecimals(1)
+        self.spin_limit.setStyleSheet(self._spin_style())
+        self.spin_limit.valueChanged.connect(self._on_limit_changed)
+        row_lim.addWidget(lbl_lim)
+        row_lim.addWidget(self.spin_limit, 1)
+        set_layout.addLayout(row_lim)
+
+        # Velocity
+        row_vel = QHBoxLayout()
+        lbl_vel = QLabel("Vel(um/s)")
+        lbl_vel.setStyleSheet(f"color:#8090b0; font-family:'{_FC}'; font-size:11px;")
+        lbl_vel.setFixedWidth(65)
+        self.spin_vel = QDoubleSpinBox()
+        self.spin_vel.setRange(0.1, 100.0)
+        self.spin_vel.setValue(10.0)
+        self.spin_vel.setDecimals(1)
+        self.spin_vel.setStyleSheet(self._spin_style())
+        self.spin_vel.valueChanged.connect(self._on_vel_changed)
+        row_vel.addWidget(lbl_vel)
+        row_vel.addWidget(self.spin_vel, 1)
+        set_layout.addLayout(row_vel)
+
+        # Dry Run
+        self.check_dry = QCheckBox("DRY RUN (Simulate Move)")
+        self.check_dry.setStyleSheet("""
+            QCheckBox { color: #ffe66d; font-family: 'Courier New'; font-size: 11px; font-weight: bold; }
+        """)
+        self.check_dry.toggled.connect(self._on_dry_run_changed)
+        set_layout.addWidget(self.check_dry)
+
+        root.addWidget(grp_set)
         root.addStretch()
 
     # ── 버튼 스타일 헬퍼 ──────────────────────────────────────────────
+
+    @staticmethod
+    def _spin_style() -> str:
+        return """
+            QDoubleSpinBox {
+                background: #080e1e; border: 1px solid #0f3460;
+                color: #c0d0ff; border-radius: 3px;
+                font-family: 'Courier New'; font-size: 11px; padding: 1px 4px;
+            }
+            QDoubleSpinBox::up-button, QDoubleSpinBox::down-button { width: 0px; }
+        """
 
     @staticmethod
     def _btn_style(color: str) -> str:
@@ -191,10 +252,13 @@ class KIMMZPanel(QWidget):
 
         self._save_settings()
         self._ctrl = KIMMZController(ip, port)
+        self._ctrl.z_safety_limit = self.spin_limit.value()
+        self._ctrl.default_velocity = self.spin_vel.value()
+        self._ctrl.dry_run = self.check_dry.isChecked()
         self._log(f"KIMM: 연결 시도 → {ip}:{port}")
 
         if self._ctrl.connect():
-            self._log(f"KIMM: 연결 성공")
+            self._log(f"KIMM: 연결 성공 (Limit={self._ctrl.z_safety_limit}um, Vel={self._ctrl.default_velocity}um/s)")
             self.lbl_conn_status.setText("● CONNECTED")
             self.lbl_conn_status.setStyleSheet(
                 f"color:#4ecdc4; font-family:'Courier New'; font-size:11px; font-weight:bold;"
@@ -252,15 +316,40 @@ class KIMMZPanel(QWidget):
                 f"color:#4a5a7a; font-family:'Courier New'; font-size:11px; font-weight:bold;"
             )
 
+    def _on_limit_changed(self, val: float):
+        if self._ctrl:
+            self._ctrl.z_safety_limit = val
+        self._save_settings()
+
+    def _on_vel_changed(self, val: float):
+        if self._ctrl:
+            self._ctrl.default_velocity = val
+        self._save_settings()
+
+    def _on_dry_run_changed(self, checked: bool):
+        if self._ctrl:
+            self._ctrl.dry_run = checked
+        if checked:
+            self._log("⚠️ KIMM: DRY RUN 모드 활성 — 실제 모터가 움직이지 않습니다.")
+        else:
+            self._log("▶ KIMM: DRY RUN 모드 해제 — 실제 하드웨어 명령이 전송됩니다.")
+        self._save_settings()
+
     # ── 설정 저장/복원 ─────────────────────────────────────────────────
 
     def _save_settings(self):
-        self._settings.setValue(_SETTINGS_KEY_IP,   self.edit_ip.text().strip())
+        self._settings.setValue(_SETTINGS_KEY_IP,    self.edit_ip.text().strip())
         self._settings.setValue(_SETTINGS_KEY_PORT,  self.edit_port.text().strip())
+        self._settings.setValue(_SETTINGS_KEY_LIMIT, self.spin_limit.value())
+        self._settings.setValue(_SETTINGS_KEY_VEL,   self.spin_vel.value())
+        self._settings.setValue(_SETTINGS_KEY_DRY,   self.check_dry.isChecked())
 
     def _load_settings(self):
         self.edit_ip.setText(self._settings.value(_SETTINGS_KEY_IP,   "192.168.1.100"))
         self.edit_port.setText(self._settings.value(_SETTINGS_KEY_PORT, "5000"))
+        self.spin_limit.setValue(float(self._settings.value(_SETTINGS_KEY_LIMIT, 0.0)))
+        self.spin_vel.setValue(float(self._settings.value(_SETTINGS_KEY_VEL, 10.0)))
+        self.check_dry.setChecked(self._settings.value(_SETTINGS_KEY_DRY, False, type=bool))
 
     # ── 로그 헬퍼 ─────────────────────────────────────────────────────
 

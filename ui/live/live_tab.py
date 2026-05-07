@@ -1206,7 +1206,10 @@ class LiveTab(QMainWindow):
         if z is None:
             return
         self._log(f"[AF] Best Z로 이동 요청: {z:+.2f} µm")
-        # TODO: self.kimm_z_panel._ctrl.move_to_z(z)
+        if self.kimm_z_panel._ctrl:
+            self.kimm_z_panel._ctrl.move_to_z(z)
+        else:
+            self._log("❌ KIMM 컨트롤러 미연결")
 
     # ── 정리 ─────────────────────────────────────────────────────────
 

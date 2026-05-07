@@ -48,6 +48,15 @@ class KIMMZController:
         self._recv_buf = ""
         self._recv_thread: Optional[threading.Thread] = None
 
+        # 이동 관련 이벤트
+        self._ack_received = threading.Event()
+        self._done_received = threading.Event()
+
+        # 설정값 (UI에서 업데이트 예정)
+        self.z_safety_limit = 0.0  # um
+        self.default_velocity = 10.0  # um/s
+        self.dry_run = False
+
     # ── 속성 ────────────────────────────────────────────────────────
 
     @property
@@ -106,6 +115,64 @@ class KIMMZController:
         """Get(6) 명령 전송 — 응답은 수신 루프에서 _positions 갱신."""
         self._send("Get(6)\r\n")
 
+    # ── 이동 명령 ────────────────────────────────────────────────────
+
+    def move_to_z(self, target_um: float, velocity: Optional[float] = None) -> bool:
+        """Z축 절대 이동."""
+        if not self._connected and not self.dry_run: return False
+        vel = velocity if velocity is not None else self.default_velocity
+
+        # 안전 리밋 체크
+        if self.current_z >= self.z_safety_limit and target_um > self.current_z:
+            log.error(f"[KIMM] Safety Block: Current Z({self.current_z:.1f}) >= Limit({self.z_safety_limit:.1f})")
+            return False
+
+        cmd = f"Move({AXIS_Z},Abs,{target_um:.3f},{vel:.1f})\r\n"
+
+        if self.dry_run:
+            log.info(f"[KIMM DRY-RUN] {cmd.strip()} (Limit={self.z_safety_limit})")
+            # 시뮬레이션: 즉시 성공
+            return True
+
+        self._ack_received.clear()
+        self._done_received.clear()
+
+        if self._send(cmd):
+            # Ack 대기 (5초)
+            if not self._ack_received.wait(timeout=5.0):
+                log.error("[KIMM] Move Ack timeout")
+                return False
+            # Done 대기 (30초)
+            if not self._done_received.wait(timeout=30.0):
+                log.error("[KIMM] Move Done timeout")
+                return False
+            return True
+        return False
+
+    def move_by_z(self, delta_um: float, velocity: Optional[float] = None) -> bool:
+        """Z축 상대 이동."""
+        if not self._connected and not self.dry_run: return False
+        vel = velocity if velocity is not None else self.default_velocity
+
+        if self.current_z >= self.z_safety_limit and delta_um > 0:
+            log.error(f"[KIMM] Safety Block (Rel): Current Z({self.current_z:.1f}) >= Limit({self.z_safety_limit:.1f})")
+            return False
+
+        cmd = f"Move({AXIS_Z},Rel,{delta_um:.3f},{vel:.1f})\r\n"
+
+        if self.dry_run:
+            log.info(f"[KIMM DRY-RUN] {cmd.strip()} (Limit={self.z_safety_limit})")
+            return True
+
+        self._ack_received.clear()
+        self._done_received.clear()
+
+        if self._send(cmd):
+            if not self._ack_received.wait(timeout=5.0): return False
+            if not self._done_received.wait(timeout=30.0): return False
+            return True
+        return False
+
     # ── 내부: 전송 ────────────────────────────────────────────────────
 
     def _send(self, command: str) -> bool:
@@ -156,6 +223,10 @@ class KIMMZController:
         # 위치 응답은 디버그 레벨 (빈번해서 로그 노이즈 방지)
         if msg.startswith("Get"):
             self._parse_get(msg)
+        elif msg == "Move(ack)":
+            self._ack_received.set()
+        elif msg == "Move(Done)":
+            self._done_received.set()
         elif msg.startswith("Error"):
             log.error(f"[KIMM] {msg}")
         elif msg.startswith("Notification"):

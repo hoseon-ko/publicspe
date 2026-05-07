@@ -16,7 +16,7 @@ import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("KIMM_Z")
 
-AXIS_Z = 2  # ENUM_FINE_STAGE_AXIS_NUM.AXIS_Z
+AXIS_Z = 3  # ENUM_FINE_STAGE_AXIS_NUM.AXIS_Z
 
 
 class KIMMZController:

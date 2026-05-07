@@ -580,7 +580,7 @@ class AutoFocusTab(QWidget):
         """)
         self._frame_list.currentRowChanged.connect(self._on_frame_list_select)
         fv.addWidget(self._frame_list)
-        side_splitter.addWidget(frames_widget)
+        self._side_splitter.addWidget(frames_widget)
 
         # (B) Sharpness vs Z Plot
         plot_wrap = QWidget()
@@ -601,7 +601,7 @@ class AutoFocusTab(QWidget):
         ph_h.addWidget(lbl_p)
         pv.addWidget(phdr)
         pv.addWidget(self._build_plot(), 1)
-        side_splitter.addWidget(plot_wrap)
+        self._side_splitter.addWidget(plot_wrap)
 
         # (C) Result Table
         table_wrap = QWidget()
@@ -631,7 +631,7 @@ class AutoFocusTab(QWidget):
             QHeaderView::section {{ background: {C_BG_MED}; color: #4a6a8a; border: 1px solid #1a3a60; padding: 2px; }}
         """)
         tv.addWidget(self._table)
-        side_splitter.addWidget(table_wrap)
+        self._side_splitter.addWidget(table_wrap)
 
         self._side_splitter.setSizes([100, 300, 200])
         self._main_splitter.addWidget(self._side_splitter)
@@ -1000,7 +1000,15 @@ class AutoFocusTab(QWidget):
             self._log("KIMM 미연결 — 이동 불가")
             return
         self._log(f"Best Z로 이동: {self._best_z:+.2f} µm")
-        # TODO: self._kimm.move_to_z(self._best_z)
+        try:
+            # KIMMZController에 구현된 move_to_z 호출 (속도는 설정된 기본값 사용)
+            ok = self._kimm.move_to_z(self._best_z)
+            if ok:
+                self._log("✅ Best Z 이동 완료")
+            else:
+                self._log("❌ Best Z 이동 실패 (안전 리밋 또는 통신 오류)")
+        except Exception as e:
+            self._log(f"❌ 이동 중 예외 발생: {e}")
 
     # ── Worker 콜백 (Worker 구현 후 연결) ────────────────────────────
 
