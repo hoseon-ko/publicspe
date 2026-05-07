@@ -209,6 +209,10 @@ class MainWindow(QMainWindow):
         self.live_tab.camera_connected.connect(self.af_tab.set_shared_camera)
         self.live_tab.camera_disconnected.connect(self.af_tab.clear_shared_camera)
 
+        # KIMM 공유: Live ↔ AutoFocus
+        self.live_tab.kimm_z_panel.kimm_connected.connect(self.af_tab.set_kimm_ctrl)
+        self.live_tab.kimm_z_panel.kimm_disconnected.connect(self.af_tab.clear_kimm_ctrl)
+
         self.scan_tab.set_motor_panel(self.live_tab.motor_panel)
 
         self.live_tab.cam_panel.exposure_applied.connect(self.scan_tab.set_exposure_ui)

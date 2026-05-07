@@ -127,7 +127,7 @@ class KIMMZController:
             log.error(f"[KIMM] Safety Block: Current Z({self.current_z:.1f}) >= Limit({self.z_safety_limit:.1f})")
             return False
 
-        cmd = f"Move({AXIS_Z},Abs,{target_um:.3f},{vel:.1f})\r\n"
+        cmd = f"Move({AXIS_Z},Abs,{target_um:.3f},{vel:.0f})\r\n"
 
         if self.dry_run:
             log.info(f"[KIMM DRY-RUN] {cmd.strip()} (Limit={self.z_safety_limit})")
@@ -158,7 +158,7 @@ class KIMMZController:
             log.error(f"[KIMM] Safety Block (Rel): Current Z({self.current_z:.1f}) >= Limit({self.z_safety_limit:.1f})")
             return False
 
-        cmd = f"Move({AXIS_Z},Rel,{delta_um:.3f},{vel:.1f})\r\n"
+        cmd = f"Move({AXIS_Z},Rel,{delta_um:.3f},{vel:.0f})\r\n"
 
         if self.dry_run:
             log.info(f"[KIMM DRY-RUN] {cmd.strip()} (Limit={self.z_safety_limit})")

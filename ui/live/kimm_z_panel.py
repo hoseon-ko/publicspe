@@ -59,6 +59,8 @@ class KIMMZPanel(QWidget):
     """KIMM Z축 위치 표시 + 연결 관리 패널."""
 
     log_message = pyqtSignal(str)   # 상위 시스템 로그로 전달
+    kimm_connected = pyqtSignal(object)
+    kimm_disconnected = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -327,6 +329,7 @@ class KIMMZPanel(QWidget):
             self.edit_ip.setEnabled(False)
             self.edit_port.setEnabled(False)
             for b in self._move_btns: b.setEnabled(True)
+            self.kimm_connected.emit(self._ctrl)
             self._poll_timer.start()
         else:
             self._log("KIMM: 연결 실패 — IP/Port 확인")
@@ -351,6 +354,7 @@ class KIMMZPanel(QWidget):
         self.edit_ip.setEnabled(True)
         self.edit_port.setEnabled(True)
         for b in self._move_btns: b.setEnabled(False)
+        self.kimm_disconnected.emit()
         self._log("KIMM: 연결 해제")
 
     # ── 폴링 ──────────────────────────────────────────────────────────

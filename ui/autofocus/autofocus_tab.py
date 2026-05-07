@@ -148,7 +148,21 @@ class AutoFocusTab(QWidget):
     def set_kimm_ctrl(self, ctrl):
         """Live 탭의 KIMMZController 공유."""
         self._kimm = ctrl
-        self._update_kimm_status()
+        if ctrl and ctrl.is_connected:
+            self._lbl_kimm.setText("● KIMM STAGE  CONNECTED")
+            self._lbl_kimm.setStyleSheet(
+                f"color: #4ecdc4; font-family: '{_FC}'; font-size: {_FSS};"
+            )
+        else:
+            self.clear_kimm_ctrl()
+
+    def clear_kimm_ctrl(self):
+        """KIMM 연결 해제 알림."""
+        self._kimm = None
+        self._lbl_kimm.setText("● 스테이지 미연결")
+        self._lbl_kimm.setStyleSheet(
+            f"color: {C_DANGER}; font-family: '{_FC}'; font-size: {_FSS};"
+        )
 
     def on_tab_activated(self):
         """탭이 활성화될 때 호출 (MainWindow에서 호출)."""
