@@ -20,7 +20,7 @@ from typing import Optional
 
 import numpy as np
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
+    QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QDoubleSpinBox, QSpinBox,
     QComboBox, QCheckBox, QLineEdit, QProgressBar,
     QTextEdit, QFileDialog, QSizePolicy, QFrame
@@ -32,44 +32,29 @@ from core.camera.base import BaseCamera
 from core.camera.picamp import PicamCamera
 from core.spe_writer import save_spe
 from ui.image_viewer import ImageViewer   # #15 프리뷰
+from theme.styles import (
+    Fonts, Sizes,
+    C_ACCENT, C_DANGER, C_WARN, C_TEXT, C_TEXT_DIM, C_TEXT_DEAD, C_INFO,
+    C_BG_DEEP, C_BORDER,
+    BTN_PRIMARY, BTN_SMALL,
+    SPIN_STYLE, COMBO_STYLE, EDIT_STYLE, TEXTEDIT_LOG,
+    PROGRESS_STYLE, CHECKBOX_STYLE,
+    grp_style, lbl, log_html,
+)
+from ui.widgets.collapsible_section import CollapsibleSection
 
-_FC      = "Courier New"
-_FS_TITLE = "16px"   # 페이지 제목
-_FS_BTN   = "13px"   # 주요 액션 버튼
-_FS_CTRL  = "11px"   # 레이블·스핀박스·콤보·에디트
-_FS_LOG   = "11px"   # 로그 텍스트
-_FS_SMALL = "10px"   # 소형 보조 레이블
-
-_GRP_STYLE = f"""
-QGroupBox {{
-    border: 1px solid #0f3460; border-radius: 6px;
-    margin-top: 10px; font-family: '{_FC}';
-    font-size: {_FS_CTRL}; color: #e94560;
-    letter-spacing: 2px; font-weight: bold;
-}}
-QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 4px; }}
-"""
-_LBL = f"color: #606880; font-family: '{_FC}'; font-size: {_FS_CTRL};"
-_SPIN = f"""
-QDoubleSpinBox, QSpinBox {{
-    background: #080e1e; border: 1px solid #0f3460; color: #c0d0ff;
-    border-radius: 3px; font-family: '{_FC}'; font-size: {_FS_CTRL}; padding: 2px 4px;
-}}
-"""
-_BTN = f"""
-QPushButton {{
-    background: #0d1e38; color: #4ecdc4; border: 1px solid #1a4060;
-    border-radius: 4px; font-family: '{_FC}'; font-weight: bold; padding: 5px 10px;
-}}
-QPushButton:hover {{ background: #1a3a60; }}
-QPushButton:disabled {{ color: #1a2840; background: #080e1e; }}
-"""
+# 하위 호환용 로컬 별칭 (기존 코드에서 쓰던 이름 그대로)
+_FC       = Fonts.MONO
+_FS_TITLE = Sizes.TITLE
+_FS_BTN   = Sizes.BTN
+_FS_CTRL  = Sizes.CTRL
+_FS_LOG   = Sizes.LOG
+_FS_SMALL = Sizes.SMALL
+_LBL      = lbl()
+_SPIN     = SPIN_STYLE
+_BTN      = BTN_SMALL
 
 
-def _grp(title: str) -> QGroupBox:
-    g = QGroupBox(title)
-    g.setStyleSheet(_GRP_STYLE)
-    return g
 
 
 class _AcqWorker(QObject):
@@ -178,6 +163,7 @@ class AcquisitionTab(QWidget):
         self._progress_timer.setInterval(100)
         self._progress_timer.timeout.connect(self._on_progress_tick)
         self._temp_thread: Optional[TempPollerThread] = None  # 온도 폴링 (백그라운드)
+        self._bg_frames: Optional[np.ndarray] = None  # (N, H, W) float32
         self._build_ui()
 
     def _estimate_frame_timing(self, exposure_ms: float, timeout_s: float) -> tuple[float, float, float, float]:
@@ -284,8 +270,8 @@ class AcquisitionTab(QWidget):
         left.addWidget(self.lbl_picam_warn)
 
         # 노출 / 프레임 수
-        grp_acq = _grp("ACQUISITION")
-        ga = QVBoxLayout(grp_acq)
+        grp_acq = CollapsibleSection("ACQUISITION", accent=C_ACCENT)
+        ga = grp_acq.content_layout()
         for label, attr, default, rng in [
             ("Exposure (ms):", "spin_exposure", 100.0, (0.001, 3_600_000.0)),
             ("Frames:",        "spin_frames",   10,    (1,     10000)),
@@ -312,8 +298,8 @@ class AcquisitionTab(QWidget):
         left.addWidget(grp_acq)
 
         # 온도 설정 (Picam + has_temperature 시 표시)
-        self.grp_temp = _grp("TEMPERATURE (선택)")
-        gt = QVBoxLayout(self.grp_temp)
+        self.grp_temp = CollapsibleSection("TEMPERATURE (선택)", accent=C_WARN, collapsed=True)
+        gt = self.grp_temp.content_layout()
         self.check_temp = QCheckBox("온도 설정 활성화")
         self.check_temp.setStyleSheet(
             f"QCheckBox {{ color: #8090a8; font-family: '{_FC}'; font-size: {_FS_CTRL}; }}"
@@ -345,8 +331,8 @@ class AcquisitionTab(QWidget):
         left.addWidget(self.grp_temp)
 
         # ADC 설정 (Picam + has_adc 시 표시)
-        self.grp_adc = _grp("ADC (선택)")
-        gadc = QVBoxLayout(self.grp_adc)
+        self.grp_adc = CollapsibleSection("ADC (선택)", accent=C_WARN, collapsed=True)
+        gadc = self.grp_adc.content_layout()
         self._adc_combos: dict = {}
         for key, label in [
             ("adc_quality",     "Quality"),
@@ -373,8 +359,8 @@ class AcquisitionTab(QWidget):
         left.addWidget(self.grp_adc)
 
         # 저장 경로
-        grp_save = _grp("SAVE")
-        gs = QVBoxLayout(grp_save)
+        grp_save = CollapsibleSection("SAVE", accent=C_ACCENT)
+        gs = grp_save.content_layout()
         path_row = QHBoxLayout()
         lbl_dir = QLabel("Dir:")
         lbl_dir.setStyleSheet(_LBL)
@@ -399,6 +385,35 @@ class AcquisitionTab(QWidget):
         )
         gs.addWidget(self.check_auto_open)
         left.addWidget(grp_save)
+
+        # ── 배경 그룹 ──────────────────────────────────────────────────
+        grp_bg = CollapsibleSection("BACKGROUND", accent=C_WARN)
+        gbg = grp_bg.content_layout()
+        bg_btn_row = QHBoxLayout()
+        self.btn_bg_capture = QPushButton("📸  BG 획득")
+        self.btn_bg_capture.setStyleSheet(_BTN)
+        self.btn_bg_capture.setEnabled(False)
+        self.btn_bg_capture.clicked.connect(self._capture_bg)
+        self.btn_bg_load = QPushButton("📂  파일 선택")
+        self.btn_bg_load.setStyleSheet(_BTN)
+        self.btn_bg_load.clicked.connect(self._load_bg_file)
+        bg_btn_row.addWidget(self.btn_bg_capture)
+        bg_btn_row.addWidget(self.btn_bg_load)
+        gbg.addLayout(bg_btn_row)
+        bg_sub_row = QHBoxLayout()
+        self.check_bg_sub = QCheckBox("BG 차감")
+        self.check_bg_sub.setEnabled(False)
+        self.check_bg_sub.setStyleSheet(
+            f"QCheckBox {{ color: #8090a8; font-family: '{_FC}'; font-size: {_FS_CTRL}; }}"
+        )
+        self._lbl_bg_status = QLabel("없음")
+        self._lbl_bg_status.setStyleSheet(
+            f"color: #4a5a7a; font-family: '{_FC}'; font-size: {_FS_SMALL};"
+        )
+        bg_sub_row.addWidget(self.check_bg_sub)
+        bg_sub_row.addWidget(self._lbl_bg_status, 1)
+        gbg.addLayout(bg_sub_row)
+        left.addWidget(grp_bg)
 
         # 획득 시작 버튼
         self.btn_acquire = QPushButton("▶  START ACQUISITION")
@@ -507,6 +522,7 @@ class AcquisitionTab(QWidget):
         )
         self.lbl_picam_warn.setVisible(not is_picam)
         self.btn_acquire.setEnabled(is_picam)
+        self.btn_bg_capture.setEnabled(True)
 
         if not is_picam:
             self._log(f"📷 {name} 연결됨 — Acquisition은 Picam 전용")
@@ -569,6 +585,7 @@ class AcquisitionTab(QWidget):
         )
         self.lbl_picam_warn.setVisible(False)
         self.btn_acquire.setEnabled(False)
+        self.btn_bg_capture.setEnabled(False)
         self.grp_temp.setVisible(False)
         self.grp_adc.setVisible(False)
         for cb in self._adc_combos.values():
@@ -680,7 +697,8 @@ class AcquisitionTab(QWidget):
 
         self._log(f"✅ {len(frames)} 프레임 획득 완료 (총 {elapsed:.1f}초) → 저장 중...")
         try:
-            path = self._save_spe(frames)
+            save_frames = self._subtract_bg_from_list(frames)
+            path = self._save_spe(save_frames)
             self._log(f"💾 저장: {path}")
             if self.check_auto_open.isChecked():
                 self.spe_saved.emit(str(path))
@@ -702,7 +720,7 @@ class AcquisitionTab(QWidget):
 
     def _on_preview_frame(self, frame: np.ndarray):
         """워커 스레드에서 각 프레임 수신 → 프리뷰 갱신."""
-        self.preview_viewer.set_image(frame)
+        self.preview_viewer.set_image(self._apply_bg(frame))
 
     # ── #16 온도 폴링 ─────────────────────────────────────────────────
 
@@ -718,6 +736,102 @@ class AcquisitionTab(QWidget):
             parts.append(str(status))
         self.lbl_temp_live.setText(f"🌡 {float(reading):.1f}°C" if reading is not None else "🌡 —")
         self.lbl_temp_reading.setText("  |  ".join(parts))
+
+    # ── 배경 관련 ─────────────────────────────────────────────────────
+
+    def _capture_bg(self):
+        if self._cam is None:
+            self._log("❌ 카메라 미연결")
+            return
+        try:
+            frame = np.asarray(self._cam.snap()).astype(np.float32)
+            save_dir = Path(self.edit_save_dir.text().strip() or "acquisitions")
+            save_dir.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            bg_path = save_dir / f"background_{ts}.spe"
+            save_spe(bg_path, [frame], exposure_ms=self.spin_exposure.value())
+            self._bg_frames = frame[np.newaxis]   # (1, H, W)
+            h, w = frame.shape
+            self._lbl_bg_status.setText(f"{w}×{h}  [{bg_path.name}]")
+            self._lbl_bg_status.setStyleSheet(
+                f"color: #4ecdc4; font-family: '{_FC}'; font-size: {_FS_SMALL};"
+            )
+            self.check_bg_sub.setEnabled(True)
+            self.check_bg_sub.setChecked(True)
+            self._log(f"📸 BG 획득 저장: {bg_path}")
+        except Exception as e:
+            self._log(f"❌ BG 획득 실패: {e}")
+
+    def _load_bg_file(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "BG SPE 파일 선택", "", "SPE Files (*.spe);;All Files (*)"
+        )
+        if not path:
+            return
+        try:
+            frames = self._read_spe_frames(path)   # (N, H, W) float32
+            self._bg_frames = frames
+            n, h, w = frames.shape
+            name = os.path.basename(path)
+            self._lbl_bg_status.setText(f"{w}×{h}  {n}f  [{name}]")
+            self._lbl_bg_status.setStyleSheet(
+                f"color: #4ecdc4; font-family: '{_FC}'; font-size: {_FS_SMALL};"
+            )
+            self.check_bg_sub.setEnabled(True)
+            self.check_bg_sub.setChecked(True)
+            self._log(f"📂 BG 로드: {name}  ({n} 프레임, {w}×{h})")
+        except Exception as e:
+            self._log(f"❌ BG 파일 로드 실패: {e}")
+
+    def _read_spe_frames(self, path: str) -> np.ndarray:
+        """SpeAnalyze 호환 SPE 3.0 reader → (N, H, W) float32."""
+        import struct as _s
+        with open(path, "rb") as f:
+            header = f.read(4100)
+        width      = _s.unpack_from("<H", header, 42)[0]
+        height     = _s.unpack_from("<H", header, 656)[0]
+        dtype_code = _s.unpack_from("<h", header, 108)[0]
+        nframes    = _s.unpack_from("<i", header, 1446)[0]
+        _dmap = {0: np.float32, 1: np.int32, 2: np.int16, 3: np.uint16, 8: np.uint32}
+        dtype = _dmap.get(dtype_code, np.uint16)
+        frame_bytes = width * height * np.dtype(dtype).itemsize
+        frames = []
+        with open(path, "rb") as f:
+            f.seek(4100)
+            for _ in range(max(nframes, 1)):
+                raw = f.read(frame_bytes)
+                if len(raw) < frame_bytes:
+                    break
+                frames.append(
+                    np.frombuffer(raw, dtype=dtype).reshape(height, width).astype(np.float32)
+                )
+        if not frames:
+            raise ValueError("SPE 파일에서 프레임을 읽을 수 없습니다")
+        return np.stack(frames, axis=0)
+
+    def _apply_bg(self, frame: np.ndarray) -> np.ndarray:
+        """BG 차감 적용 (체크박스 활성 & BG 있을 때만)."""
+        if not self.check_bg_sub.isChecked() or self._bg_frames is None:
+            return frame
+        bg = self._bg_frames.mean(axis=0)
+        if bg.shape != frame.shape:
+            return frame
+        result = np.clip(frame.astype(np.float32) - bg, 0.0, None)
+        return result.astype(np.float32)
+
+    def _subtract_bg_from_list(self, frames: list) -> list:
+        """프레임 리스트에 BG 차감 적용 (비활성 시 그대로 반환)."""
+        if not self.check_bg_sub.isChecked() or self._bg_frames is None:
+            return frames
+        bg = self._bg_frames.mean(axis=0)
+        result = []
+        for f in frames:
+            arr = np.asarray(f)
+            if arr.shape == bg.shape:
+                result.append(np.clip(arr.astype(np.float32) - bg, 0.0, None))
+            else:
+                result.append(arr)
+        return result
 
     def _save_spe(self, frames: list) -> Path:
         save_dir = Path(self.edit_save_dir.text().strip() or "acquisitions")
@@ -752,22 +866,7 @@ class AcquisitionTab(QWidget):
 
     def _log(self, msg: str):
         ts = datetime.now().strftime("%H:%M:%S")
-        if any(k in msg for k in ("✅", "💾", "▶", "📸")):
-            color = "#4ecdc4"
-        elif "⚠️" in msg:
-            color = "#ffe66d"
-        elif any(k in msg for k in ("❌", "FAIL", "실패", "오류")):
-            color = "#e94560"
-        elif "⏱" in msg:
-            color = "#ffe66d"
-        elif any(k in msg for k in ("■", "해제")):
-            color = "#4a5a7a"
-        else:
-            color = "#00cc88"
-        ts_html = f"<span style='color:#2a4060;font-size:{_FS_SMALL}'>[{ts}]</span>"
-        self.log_display.append(
-            f"{ts_html} <span style='color:{color}'>{msg}</span>"
-        )
+        self.log_display.append(log_html(msg, ts))
         self.log_message.emit(msg)
 
     def cleanup(self):

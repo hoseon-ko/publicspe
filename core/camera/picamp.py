@@ -457,7 +457,32 @@ class PicamCameraWrapper:
             pass
         if timeout is None:
             timeout = self._auto_timeout()
-        return cam.snap(timeout=float(timeout))
+        
+        # UI 프리징(GIL 블로킹) 방지를 위해 짧은 주기로 폴링
+        try:
+            cam.setup_acquisition(mode="sequence", num_frames=1)
+        except Exception:
+            pass
+        cam.start_acquisition()
+        try:
+            t0 = time.time()
+            got = False
+            while time.time() - t0 <= float(timeout):
+                try:
+                    got = cam.wait_for_frame(timeout=0.05)
+                    if got:
+                        break
+                except Exception:
+                    pass
+                time.sleep(0.01)  # GIL 양보
+            if not got:
+                raise TimeoutError(f"snap timeout ({float(timeout):.1f}s)")
+            return cam.read_oldest_image()
+        finally:
+            try:
+                cam.stop_acquisition()
+            except Exception:
+                pass
 
     def acquire_images(
         self,
@@ -477,18 +502,29 @@ class PicamCameraWrapper:
         if timeout_s is None:
             timeout_s = self._auto_timeout()
         if n == 1:
-            frame = cam.snap(timeout=float(timeout_s))
+            frame = self.snap(timeout=float(timeout_s))
             if progress_cb is not None:
                 progress_cb(1, 1)
             return [frame]
         frames = []
+        try:
+            cam.setup_acquisition(mode="sequence", num_frames=n)
+        except Exception:
+            pass
         cam.start_acquisition()
         try:
             for idx in range(n):
-                try:
-                    got = cam.wait_for_frame(timeout=float(timeout_s))
-                except Exception:
-                    got = False
+                t0 = time.time()
+                got = False
+                while time.time() - t0 <= float(timeout_s):
+                    try:
+                        got = cam.wait_for_frame(timeout=0.05)
+                        if got:
+                            break
+                    except Exception:
+                        pass
+                    time.sleep(0.01)  # GIL 양보
+                
                 if got:
                     frames.append(cam.read_oldest_image())
                     if progress_cb is not None:
@@ -523,23 +559,31 @@ class PicamCameraWrapper:
         # (프레임 총 시간보다 짧으면 pylablib이 TimeoutError를 발생시킴)
         poll_s = max(self._get_frame_total_s() + 1.0, 2.0)
 
+        try:
+            cam.setup_acquisition(mode="continuous")
+        except Exception:
+            pass
         cam.start_acquisition()
         try:
             while True:
                 if stop_condition and stop_condition():
                     break
                 try:
-                    got_frame = cam.wait_for_frame(timeout=poll_s)
+                    # GIL 블로킹을 막기 위해 짧은 timeout 사용
+                    got_frame = cam.wait_for_frame(timeout=0.05)
                 except Exception:
-                    # pylablib은 타임아웃 시 False 대신 예외를 던지기도 함 — 무시하고 계속
-                    if stop_condition and stop_condition():
-                        break
-                    continue
+                    got_frame = False
+                
                 if got_frame:
                     if stop_condition and stop_condition():
                         break
                     frame = cam.read_oldest_image()
                     frame_cb(frame)
+                else:
+                    # 프레임이 안 왔으면 GIL 양보 후 재시도
+                    if stop_condition and stop_condition():
+                        break
+                    time.sleep(0.01)
         finally:
             try:
                 cam.stop_acquisition()

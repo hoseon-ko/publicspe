@@ -13,7 +13,7 @@ import numpy as np
 from PyQt6.QtCore import Qt, pyqtSignal, QSettings, QSize, QTimer
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
-    QGroupBox, QLabel, QPushButton, QSpinBox, QDoubleSpinBox,
+    QLabel, QPushButton, QSpinBox, QDoubleSpinBox,
     QComboBox, QLineEdit, QFileDialog,
     QProgressBar, QTextEdit, QTableWidget,
     QTableWidgetItem, QHeaderView, QScrollArea,
@@ -25,76 +25,38 @@ from core.image_processor import ImageProcessor, TemporalMode
 from ui.image_viewer import ImageViewer
 from ui.plot_panel import PlotPanel
 from ui.scan.scan_workers import _CalibWorker, _ScanWorker, _draw_centroid_cross
+from ui.widgets.collapsible_section import CollapsibleSection
 from ui.scan.mask_editor import MaskEditorDialog
 from datetime import datetime
+from theme.styles import (
+    Fonts, Sizes,
+    C_ACCENT, C_DANGER, C_WARN, C_TEXT, C_TEXT_DIM, C_TEXT_DEAD,
+    C_BG_DEEP, C_BG_DARK, C_BORDER,
+    BTN_PRIMARY, BTN_DANGER, BTN_FLAT, BTN_SIM,
+    SPIN_STYLE, COMBO_STYLE, EDIT_STYLE, TEXTEDIT_LOG, TABLE_STYLE,
+    CHECKBOX_STYLE, SLIDER_STYLE, SPLITTER_V_STYLE,
+    PROGRESS_STYLE, LIST_STYLE,
+    grp_style, lbl, log_html,
+)
 
-# ── 공통 폰트/색상 토큰 ──────────────────────────────────────────────
-_F  = "Segoe UI"        # 기본 UI 폰트
-_FC = "Courier New"     # 모노스페이스 (숫자, 로그)
-_FS_LBL  = "15px"       # 일반 레이블
-_FS_CTRL = "15px"       # 스핀박스·콤보·에디트
-_FS_BTN  = "15px"       # 버튼
-_FS_GRP  = "14px"       # 그룹박스 타이틀
-_FS_LOG  = "13px"       # 로그·테이블 (모노)
-_FS_TBL_HDR = "14px"   # 테이블 헤더 (약간 크게)
-_C_VAL   = "#d8e8ff"    # 입력값 색 (밝게)
-_C_LBL   = "#8090b0"    # 레이블 색
-_C_DIM   = "#4a6a8a"    # 흐린 보조 텍스트
+# 하위 호환용 로컬 별칭
+_F           = Fonts.UI
+_FC          = Fonts.MONO
+_FS_LBL      = Sizes.BTN     # scan은 레이블도 조금 크게
+_FS_CTRL     = Sizes.BTN
+_FS_BTN      = Sizes.BTN
+_FS_GRP      = Sizes.CTRL
+_FS_LOG      = Sizes.CTRL
+_FS_TBL_HDR  = Sizes.BTN
+_C_VAL       = C_TEXT
+_C_LBL       = C_TEXT_DIM
+_C_DIM       = C_TEXT_DEAD
+_BTN_PRIMARY = BTN_PRIMARY
+_BTN_DANGER  = BTN_DANGER
+_SPIN_STYLE  = SPIN_STYLE
+_COMBO_STYLE = COMBO_STYLE
+_EDIT_STYLE  = EDIT_STYLE
 
-# 스타일 공통
-_BTN_PRIMARY = f"""
-    QPushButton {{
-        background: #0d2820; color: #4ecdc4;
-        border: 1px solid #4ecdc4; border-radius: 4px;
-        font-family: '{_F}'; font-weight: bold;
-        font-size: {_FS_BTN}; padding: 7px 14px;
-    }}
-    QPushButton:hover {{ background: #1a4838; }}
-    QPushButton:disabled {{ color: #1a2840; background: #080e1e; border-color: #0a1828; }}
-"""
-_BTN_DANGER = f"""
-    QPushButton {{
-        background: #200808; color: #e94560;
-        border: 1px solid #e94560; border-radius: 4px;
-        font-family: '{_F}'; font-weight: bold;
-        font-size: {_FS_BTN}; padding: 7px 14px;
-    }}
-    QPushButton:hover {{ background: #3a1020; }}
-    QPushButton:disabled {{ color: #2a1010; background: #100404; border-color: #200808; }}
-"""
-_SPIN_STYLE = f"""
-    QSpinBox, QDoubleSpinBox {{
-        background: #080e1e; border: 1px solid #1a3a60;
-        color: {_C_VAL}; border-radius: 3px;
-        font-family: '{_FC}'; font-size: {_FS_CTRL}; padding: 3px 5px; min-height: 22px;
-    }}
-"""
-_COMBO_STYLE = f"""
-    QComboBox {{
-        background: #080e1e; border: 1px solid #1a3a60; color: {_C_VAL};
-        border-radius: 3px; font-family: '{_FC}'; font-size: {_FS_CTRL};
-        padding: 3px 5px; min-height: 22px;
-    }}
-    QComboBox::drop-down {{ border: none; }}
-    QComboBox QAbstractItemView {{
-        background: #0a1428; color: {_C_VAL}; selection-background-color: #1a3a60;
-    }}
-"""
-_EDIT_STYLE = f"""
-    QLineEdit {{
-        background: #080e1e; border: 1px solid #1a3a60; color: {_C_VAL};
-        border-radius: 3px; font-family: '{_FC}'; font-size: {_FS_CTRL};
-        padding: 3px 5px; min-height: 22px;
-    }}
-"""
-_GRP = f"""
-    QGroupBox {{{{
-        border: 1px solid {{c}}; border-radius: 6px;
-        margin-top: 12px; font-family: '{_F}';
-        font-size: {_FS_GRP}; color: {{c}}; letter-spacing: 1px; font-weight: bold;
-    }}}}
-    QGroupBox::title {{{{ subcontrol-origin: margin; left: 10px; padding: 0 4px; }}}}
-"""
 
 
 def _sep_v() -> QWidget:
@@ -222,9 +184,8 @@ class ScanTab(QWidget):
         splitter.setStyleSheet("QSplitter::handle { background-color: #4ecdc4; width: 4px; }")
 
         # 카메라 상태
-        grp_cam = QGroupBox("CAMERA")
-        grp_cam.setStyleSheet(_GRP.format(c="#4ecdc4"))
-        gc = QVBoxLayout(grp_cam)
+        grp_cam = CollapsibleSection("CAMERA", accent=C_ACCENT)
+        gc = grp_cam.content_layout()
         gc.setSpacing(5)
         self._lbl_cam = QLabel("📷 카메라 없음")
         self._lbl_cam.setStyleSheet(f"color: #e94560; font-family: '{_F}'; font-size: {_FS_LBL};")
@@ -232,19 +193,7 @@ class ScanTab(QWidget):
 
         self.btn_sim = QPushButton("▷  SIM MODE")
         self.btn_sim.setToolTip("실 하드웨어 없이 가상 카메라+모터로 동작 검증")
-        self.btn_sim.setStyleSheet(f"""
-            QPushButton {{
-                background: #1a1a0a; color: #ffe66d;
-                border: 1px solid #ffe66d; border-radius: 4px;
-                font-family: '{_F}'; font-weight: bold;
-                font-size: {_FS_BTN}; padding: 6px 10px;
-            }}
-            QPushButton:hover  {{ background: #2a2a10; }}
-            QPushButton:checked {{
-                background: #2a2800; color: #ffcc00;
-                border-color: #ffcc00;
-            }}
-        """)
+        self.btn_sim.setStyleSheet(BTN_SIM)
         self.btn_sim.setCheckable(True)
         self.btn_sim.clicked.connect(self._toggle_sim_mode)
         gc.addWidget(self.btn_sim)
@@ -284,9 +233,8 @@ class ScanTab(QWidget):
         ctrl_layout.addWidget(grp_cam)
 
         # 스캔 파라미터
-        grp_scan = QGroupBox("SCAN PARAMETERS")
-        grp_scan.setStyleSheet(_GRP.format(c="#ffe66d"))
-        gs = QVBoxLayout(grp_scan)
+        grp_scan = CollapsibleSection("SCAN PARAMETERS", accent=C_WARN)
+        gs = grp_scan.content_layout()
         gs.setSpacing(6)
 
         def _row(label, widget):
@@ -341,9 +289,8 @@ class ScanTab(QWidget):
         ctrl_layout.addWidget(grp_scan)
 
         # 저장 경로
-        grp_save = QGroupBox("SAVE")
-        grp_save.setStyleSheet(_GRP.format(c="#a080ff"))
-        gsv = QVBoxLayout(grp_save)
+        grp_save = CollapsibleSection("SAVE", accent="#a080ff")
+        gsv = grp_save.content_layout()
 
         self.edit_scan_name = QLineEdit("Scan")
         self.edit_scan_name.setPlaceholderText("스캔 이름")
@@ -412,9 +359,8 @@ class ScanTab(QWidget):
         ctrl_layout.addWidget(self._lbl_progress)
 
         # ── 프레임 분석 ────────────────────────────────────────────────
-        grp_frame = QGroupBox("FRAME ANALYSIS")
-        grp_frame.setStyleSheet(_GRP.format(c="#ff9f43"))
-        gf = QVBoxLayout(grp_frame)
+        grp_frame = CollapsibleSection("FRAME ANALYSIS", accent="#ff9f43")
+        gf = grp_frame.content_layout()
         gf.setSpacing(5)
 
         # 최대 보관 프레임 수
@@ -487,9 +433,8 @@ class ScanTab(QWidget):
         ctrl_layout.addWidget(grp_frame)
 
         # ── 무시 마스크 ────────────────────────────────────────────────
-        grp_mask = QGroupBox("IGNORE MASK")
-        grp_mask.setStyleSheet(_GRP.format(c="#ff7675"))
-        gm = QVBoxLayout(grp_mask)
+        grp_mask = CollapsibleSection("IGNORE MASK", accent=C_DANGER)
+        gm = grp_mask.content_layout()
         gm.setSpacing(5)
 
         self._lbl_mask_count = QLabel("비활성")
@@ -512,9 +457,8 @@ class ScanTab(QWidget):
         ctrl_layout.addWidget(grp_mask)
 
         # ── 캘리브레이션 ───────────────────────────────────────────────
-        grp_calib = QGroupBox("CALIBRATION")
-        grp_calib.setStyleSheet(_GRP.format(c="#fd79a8"))
-        gcal = QVBoxLayout(grp_calib)
+        grp_calib = CollapsibleSection("CALIBRATION", accent="#fd79a8")
+        gcal = grp_calib.content_layout()
         gcal.setSpacing(5)
 
         # 캘리브레이션 스텝 수
@@ -1287,20 +1231,7 @@ class ScanTab(QWidget):
 
     def _log(self, msg: str):
         ts = datetime.now().strftime("%H:%M:%S")
-        if any(k in msg for k in ("✅", "▶")):
-            color = "#4ecdc4"
-        elif "⚠️" in msg:
-            color = "#ffe66d"
-        elif "❌" in msg:
-            color = "#e94560"
-        elif "■" in msg:
-            color = "#4a5a7a"
-        else:
-            color = "#00cc88"
-        self.log_display.append(
-            f"<span style='color:#2a4060;font-size:{_FS_LOG}'>[{ts}]</span> "
-            f"<span style='color:{color}'>{msg}</span>"
-        )
+        self.log_display.append(log_html(msg, ts))
 
     def _restore_settings(self):
         s = QSettings("SpeAnalyze", "ScanTab")

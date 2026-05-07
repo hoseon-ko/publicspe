@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
     QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
     QGraphicsLineItem, QGraphicsRectItem,
     QSizePolicy, QToolButton, QPushButton,
-    QListWidget, QListWidgetItem,
+    QListWidget, QListWidgetItem, QApplication, QMenu,
 )
 from PyQt6.QtCore import pyqtSignal, Qt, QRectF, QTimer
 from PyQt6.QtGui import (
@@ -1601,6 +1601,18 @@ class ImageViewer(QWidget):
         self._range_popup = _RangePopup(self._hist_range_widget, parent=self)
         self._range_popup.closed.connect(lambda: self.btn_range.setChecked(False))
 
+        # ── 우클릭 컨텍스트 메뉴 ──
+        self._view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._view.customContextMenuRequested.connect(self._show_context_menu)
+
+        # ── 키보드 단축키 ──────────────────────────────────────────
+        from PyQt6.QtGui import QShortcut, QKeySequence
+        _ctx = Qt.ShortcutContext.WidgetWithChildrenShortcut
+        QShortcut(QKeySequence("F"),      self, activated=self.autoRange,          context=_ctx)
+        QShortcut(QKeySequence("1"),      self, activated=self._zoom_actual,        context=_ctx)
+        QShortcut(QKeySequence("Ctrl+C"), self, activated=self._copy_to_clipboard,  context=_ctx)
+        QShortcut(QKeySequence("Ctrl+S"), self, activated=self._export_image,       context=_ctx)
+
     # ─────────────────────────────────────────
     # Public API
     # ─────────────────────────────────────────
@@ -2277,6 +2289,135 @@ class ImageViewer(QWidget):
                 lv = val
             self._last_click_info = (ix, iy, lv)
             self._update_ruler_profiles()
+
+    # ─────────────────────────────────────────
+    # 우클릭 컨텍스트 메뉴
+    # ─────────────────────────────────────────
+
+    def _show_context_menu(self, pos):
+        from PyQt6.QtWidgets import QMenu
+        from PyQt6.QtCore import QPoint
+
+        _QSS = """
+            QMenu {
+                background: #0d1829;
+                border: 1px solid #1a3a60;
+                color: #c0d0e0;
+                font-family: 'Courier New';
+                font-size: 11px;
+                padding: 4px 0;
+            }
+            QMenu::item {
+                padding: 5px 28px 5px 16px;
+                min-width: 180px;
+            }
+            QMenu::item:selected {
+                background: #1a3a60;
+                color: #4ecdc4;
+            }
+            QMenu::item:disabled {
+                color: #3a5070;
+            }
+            QMenu::separator {
+                height: 1px;
+                background: #1a3a60;
+                margin: 3px 8px;
+            }
+            QMenu::indicator {
+                width: 12px;
+                height: 12px;
+                margin-left: 4px;
+            }
+        """
+
+        menu = QMenu(self)
+        menu.setStyleSheet(_QSS)
+
+        # ── View ──────────────────────────────────────────────────
+        act_fit = menu.addAction("⊡  Fit to View\tF")
+        act_fit.triggered.connect(self.autoRange)
+
+        act_1x = menu.addAction("1:1  Actual Size\t1")
+        act_1x.triggered.connect(self._zoom_actual)
+
+        menu.addSeparator()
+
+        # ── Rotate ────────────────────────────────────────────────
+        rot_menu = menu.addMenu("↻  Rotate")
+        rot_menu.setStyleSheet(_QSS)
+        for label, k in [("0°  (no rotation)", 0), ("90°  CCW", 1),
+                         ("180°", 2), ("270°  CCW", 3)]:
+            act = rot_menu.addAction(label)
+            act.setCheckable(True)
+            act.setChecked(self._rotation_k == k)
+            act.triggered.connect(lambda _, _k=k: self.set_rotation(_k * 90))
+
+        menu.addSeparator()
+
+        # ── Colormap ──────────────────────────────────────────────
+        cmap_menu = menu.addMenu("🎨  Colormap")
+        cmap_menu.setStyleSheet(_QSS)
+        _cmaps = ["Off", "jet", "viridis", "plasma", "hot", "grey",
+                  "inferno", "magma", "coolwarm", "RdBu"]
+        for name in _cmaps:
+            act = cmap_menu.addAction(name)
+            act.setCheckable(True)
+            act.setChecked(self._current_cmap.lower() == name.lower())
+            act.triggered.connect(lambda _, n=name: self._set_cmap_by_name(n))
+
+        menu.addSeparator()
+
+        # ── Clipboard / Save ──────────────────────────────────────
+        has_img = self._current_image is not None
+
+        act_copy = menu.addAction("📋  Copy to Clipboard\tCtrl+C")
+        act_copy.setEnabled(has_img)
+        act_copy.triggered.connect(self._copy_to_clipboard)
+
+        act_save = menu.addAction("💾  Save As...\tCtrl+S")
+        act_save.setEnabled(has_img)
+        act_save.triggered.connect(self._export_image)
+
+        menu.exec(self._view.mapToGlobal(pos))
+
+    def _zoom_actual(self):
+        """1:1 스케일 (픽셀 = 픽셀)."""
+        self._view._scale = 1.0
+        self._view._apply_scale()
+        self._view._emit_scale()
+
+    def _set_cmap_by_name(self, name: str):
+        """컨텍스트 메뉴에서 컬러맵 선택 — combo와 동기화."""
+        idx = self.cmap_combo.findText(name, Qt.MatchFlag.MatchFixedString)
+        if idx >= 0:
+            self.cmap_combo.setCurrentIndex(idx)
+        else:
+            # combo에 없는 colormap (inferno 등) — 직접 적용
+            self._current_cmap = name.lower()
+            self.colormap_changed.emit(self._current_cmap)
+            if not self._external_render_control:
+                self._refresh_pixmap(fit=False)
+
+    def _copy_to_clipboard(self):
+        """현재 화면 이미지를 클립보드에 복사."""
+        if self._current_image is None:
+            return
+        try:
+            img = self._current_image
+            if self._rotation_k:
+                img = np.rot90(img, k=self._rotation_k)
+            cmap = self._current_cmap
+            if cmap and cmap != 'off':
+                rgba = apply_colormap(img, cmap,
+                                      vmin=self._display_vmin,
+                                      vmax=self._display_vmax)
+            else:
+                from core.async_worker import ColorMapWorker
+                rgba = ColorMapWorker._to_grayscale_rgba(img)
+            pixmap = ndarray_to_qpixmap(rgba)
+            QApplication.clipboard().setPixmap(pixmap)
+        except Exception as e:
+            print(f"[ImageViewer] 클립보드 복사 오류: {e}")
 
     # ─────────────────────────────────────────
     # 하위 호환 (main_window 에서 사용하는 속성들)

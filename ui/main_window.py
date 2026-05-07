@@ -9,7 +9,7 @@ Tab 3: SPE Analysis  — SpeAnalyze 전체 기능
 
 from __future__ import annotations
 
-from PyQt6.QtWidgets import QMainWindow, QTabWidget, QStatusBar, QLabel
+from PyQt6.QtWidgets import QMainWindow, QTabWidget, QStatusBar, QLabel, QFrame
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QAction, QIcon
 
@@ -17,6 +17,7 @@ from ui.live.live_tab import LiveTab
 from ui.acquisition.acquisition_tab import AcquisitionTab
 from ui.analysis.analysis_tab import AnalysisTab
 from ui.scan.scan_tab import ScanTab
+from theme.styles import Fonts, Sizes, C_ACCENT, C_WARN, C_TEXT_DIM, C_BG_MED, C_BORDER
 
 
 class MainWindow(QMainWindow):
@@ -63,6 +64,10 @@ class MainWindow(QMainWindow):
         # ── Tab 1: Live Control ───────────────────────────────────────
         self.live_tab = LiveTab()
         self.live_tab.status_message.connect(self._on_status)
+        self.live_tab.camera_connected.connect(self._on_cam_connected)
+        self.live_tab.camera_disconnected.connect(self._on_cam_disconnected)
+        self.live_tab.cam_panel.exposure_applied.connect(self._on_exposure_changed)
+        self.live_tab.frame_stats_updated.connect(self._on_frame_stats)
         self.tabs.addTab(self.live_tab, "📷  LIVE CONTROL")
 
         # ── Tab 2: Acquisition ────────────────────────────────────────
@@ -108,12 +113,99 @@ class MainWindow(QMainWindow):
 
         # ── 상태바 ────────────────────────────────────────────────────
         self._status_bar = QStatusBar()
+        self._status_bar.setSizeGripEnabled(False)
+        self._status_bar.setStyleSheet(f"""
+            QStatusBar {{
+                background: {C_BG_MED};
+                border-top: 1px solid {C_BORDER};
+                color: {C_TEXT_DIM};
+                font-family: '{Fonts.MONO}';
+                font-size: {Sizes.SMALL};
+            }}
+            QStatusBar::item {{
+                border: none;
+            }}
+        """)
         self.setStatusBar(self._status_bar)
+
+        # 왼쪽: 일반 메시지
         self._status_label = QLabel("Ready")
-        self._status_label.setStyleSheet("color: #a0a0b0; font-family: 'Courier New'; font-size: 11px;")
-        self._status_bar.addWidget(self._status_label)
+        self._status_label.setStyleSheet(
+            f"color: {C_TEXT_DIM}; font-family: '{Fonts.MONO}'; font-size: {Sizes.SMALL}; padding: 0 6px;"
+        )
+        self._status_bar.addWidget(self._status_label, 1)
+
+        # 구분선 헬퍼
+        def _sep():
+            f = QFrame()
+            f.setFrameShape(QFrame.Shape.VLine)
+            f.setStyleSheet(f"color: {C_BORDER}; margin: 3px 2px;")
+            return f
+
+        # 오른쪽 영구 위젯들 (카메라 | 노출 | 해상도 | FPS)
+        _perm_style = (
+            f"color: {C_TEXT_DIM}; font-family: '{Fonts.MONO}';"
+            f" font-size: {Sizes.SMALL}; padding: 0 8px;"
+        )
+        _active_style = (
+            f"color: {C_ACCENT}; font-family: '{Fonts.MONO}';"
+            f" font-size: {Sizes.SMALL}; padding: 0 8px;"
+        )
+
+        self._sb_cam  = QLabel("📷 —")
+        self._sb_exp  = QLabel("⏱ —")
+        self._sb_size = QLabel("📐 —")
+        self._sb_fps  = QLabel("fps: —")
+
+        for lbl in (self._sb_cam, self._sb_exp, self._sb_size, self._sb_fps):
+            lbl.setStyleSheet(_perm_style)
+
+        self._sb_cam.setStyleSheet(_active_style)   # 카메라명은 강조색
+
+        self._status_bar.addPermanentWidget(_sep())
+        self._status_bar.addPermanentWidget(self._sb_cam)
+        self._status_bar.addPermanentWidget(_sep())
+        self._status_bar.addPermanentWidget(self._sb_exp)
+        self._status_bar.addPermanentWidget(_sep())
+        self._status_bar.addPermanentWidget(self._sb_size)
+        self._status_bar.addPermanentWidget(_sep())
+        self._status_bar.addPermanentWidget(self._sb_fps)
+        self._status_bar.addPermanentWidget(_sep())
 
     # ── 슬롯 ─────────────────────────────────────────────────────────
+
+    # ── 상태바 슬롯 ──────────────────────────────────────────────────
+
+    def _on_cam_connected(self, cam):
+        name = type(cam).__name__.replace("Camera", "")
+        self._sb_cam.setText(f"📷 {name}")
+        self._sb_cam.setStyleSheet(
+            f"color: #4ecdc4; font-family: '{Fonts.MONO}';"
+            f" font-size: {Sizes.SMALL}; padding: 0 8px;"
+        )
+
+    def _on_cam_disconnected(self):
+        self._sb_cam.setText("📷 —")
+        self._sb_cam.setStyleSheet(
+            f"color: {C_TEXT_DIM}; font-family: '{Fonts.MONO}';"
+            f" font-size: {Sizes.SMALL}; padding: 0 8px;"
+        )
+        self._sb_size.setText("📐 —")
+        self._sb_fps.setText("fps: —")
+        self._sb_exp.setText("⏱ —")
+
+    def _on_exposure_changed(self, ms: float):
+        if ms < 1.0:
+            self._sb_exp.setText(f"⏱ {ms*1000:.0f}µs")
+        elif ms >= 1000.0:
+            self._sb_exp.setText(f"⏱ {ms/1000:.2f}s")
+        else:
+            self._sb_exp.setText(f"⏱ {ms:.1f}ms")
+
+    def _on_frame_stats(self, fps: float, w: int, h: int):
+        self._sb_size.setText(f"📐 {w}×{h}")
+        if fps > 0:
+            self._sb_fps.setText(f"fps: {fps:.1f}")
 
     def _on_spe_saved(self, path: str):
         """Acquisition 탭에서 SPE 저장 완료 → Analysis 탭으로 자동 전달."""

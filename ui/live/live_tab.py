@@ -40,6 +40,7 @@ from ui.plot_panel import PlotPanel, HistogramPanel
 from ui.live.camera_panel import CameraControlPanel
 from ui.live.motor_panel import MotorPanel
 from ui.live.kimm_z_panel import KIMMZPanel
+from theme.styles import Fonts, Sizes, C_ACCENT, C_TEXT_DEAD, BTN_PRIMARY, TEXTEDIT_LOG
 
 try:
     import cv2
@@ -47,11 +48,11 @@ try:
 except ImportError:
     _CV2_OK = False
 
-_FC         = "Courier New"
-_FS_TOOLBAR = "11px"   # 툴바 버튼·저장 버튼
-_FS_LOG     = "11px"   # 로그·ROI 목록 텍스트
-_FS_HDR     = "10px"   # 도크 헤더 레이블·버튼
-_FS_SMALL   = "10px"   # 줌·이미지 크기 등 보조 레이블
+_FC         = Fonts.MONO
+_FS_TOOLBAR = Sizes.LOG
+_FS_LOG     = Sizes.LOG
+_FS_HDR     = Sizes.SMALL
+_FS_SMALL   = Sizes.SMALL
 
 
 # ── 카메라 연결 백그라운드 워커 ──────────────────────────────────────────────
@@ -214,6 +215,7 @@ class LiveTab(QMainWindow):
     camera_connected    = pyqtSignal(object)   # BaseCamera — Acquisition 탭 공유
     camera_disconnected = pyqtSignal()
     exposure_applied    = pyqtSignal(float)
+    frame_stats_updated = pyqtSignal(float, int, int)  # fps, width, height
 
     def on_range_changed(self, vmin, vmax):
         self._proc_worker._vmin = vmin
@@ -854,6 +856,8 @@ class LiveTab(QMainWindow):
             return
         h, w = rgb.shape[:2]
         self._lbl_imgsize.setText(f"{w}×{h}px")
+        _, _, _, fps, _, _, sat, sat_r = self._last_centroid
+        self.frame_stats_updated.emit(fps if fps else 0.0, w, h)
         _, _, _, _, _, _, sat, sat_r = self._last_centroid
         self.image_viewer.set_saturated(sat, sat_r)
         # 프로파일/룰러 계산 기준을 raw로 맞추기 위해 먼저 source를 갱신한다.

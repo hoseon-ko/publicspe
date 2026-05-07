@@ -43,6 +43,7 @@ class SimulatedCamera(BaseCamera):
         self._connected   = False
         self._exposure_ms = 100.0
         self._fps         = 10.0
+        self.simulate_gil_block = False  # 테스트용 GIL 독점 모드
 
         # 온도: 실온에서 setpoint 로 서서히 냉각
         self._setpoint    = -70.0
@@ -167,6 +168,22 @@ class SimulatedCamera(BaseCamera):
     # ── 촬영 ─────────────────────────────────────────────────────────
 
     def snap(self) -> np.ndarray:
+        import time
+        wait_time = 5.0
+        if getattr(self, 'simulate_gil_block', False):
+            print(f"\n[SimCam] 🚨 BAD 모드: GIL 독점 시뮬레이션 ({wait_time}초)...")
+            print("이 시간 동안 창을 드래그하거나 UI를 클릭해도 반응하지 않습니다.")
+            t0 = time.time()
+            while time.time() - t0 < wait_time:
+                pass  # CPU 100% 사용 & GIL 선점
+        else:
+            print(f"\n[SimCam] ✅ GOOD 모드: 짧은 폴링 + Sleep ({wait_time}초)...")
+            print("기다리는 동안에도 UI가 부드럽게 반응합니다.")
+            t0 = time.time()
+            while time.time() - t0 < wait_time:
+                time.sleep(0.01)  # GIL 강제 양보
+                
+        print("[SimCam] 📸 프레임 반환 완료\n")
         return self._make_frame()
 
     def start_live(self, frame_cb: Callable[[np.ndarray], None]) -> None:

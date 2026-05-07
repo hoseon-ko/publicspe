@@ -13,7 +13,7 @@ from typing import List, Optional
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QComboBox, QDoubleSpinBox, QSpinBox,
-    QCheckBox, QSlider, QGroupBox, QRadioButton,
+    QCheckBox, QSlider, QRadioButton,
     QButtonGroup, QListWidget, QSizePolicy
 )
 from PyQt6.QtCore import Qt, QObject, QThread, pyqtSignal, QSettings
@@ -42,39 +42,19 @@ class _CamCommandWorker(QObject):
             self.error.emit(str(e))
 
 
-_GRP_STYLE = """
-QGroupBox {
-    border: 1px solid #0f3460; border-radius: 6px;
-    margin-top: 10px; font-family: 'Courier New';
-    font-size: 11px; color: #e94560;
-    letter-spacing: 2px; font-weight: bold;
-}
-QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }
-"""
+from ui.widgets.collapsible_section import CollapsibleSection
+from theme.styles import (
+    Fonts, Sizes,
+    C_ACCENT, C_DANGER, C_TEXT, C_TEXT_DIM,
+    BTN_PRIMARY, BTN_SMALL,
+    SPIN_STYLE, COMBO_STYLE, CHECKBOX_STYLE,
+    grp_style, lbl,
+)
 
-_LBL_STYLE   = "color: #606880; font-family: 'Courier New'; font-size: 11px;"
-_SPIN_STYLE  = """
-QDoubleSpinBox, QSpinBox {
-    background: #080e1e; border: 1px solid #0f3460;
-    color: #c0d0ff; border-radius: 3px;
-    font-family: 'Courier New'; font-size: 11px; padding: 2px 4px;
-}
-"""
-_BTN_STYLE   = """
-QPushButton {
-    background: #0d1e38; color: #4ecdc4; border: 1px solid #1a4060;
-    border-radius: 4px; font-family: 'Courier New'; font-weight: bold; padding: 4px 10px;
-}
-QPushButton:hover { background: #1a3a60; }
-QPushButton:disabled { color: #1a2840; background: #080e1e; }
-"""
-_CHECK_STYLE = "QCheckBox { color: #8090a8; font-family: 'Courier New'; font-size: 11px; }"
-
-
-def _grp(title: str) -> QGroupBox:
-    g = QGroupBox(title)
-    g.setStyleSheet(_GRP_STYLE)
-    return g
+_LBL_STYLE   = lbl()
+_SPIN_STYLE  = SPIN_STYLE
+_BTN_STYLE   = BTN_SMALL
+_CHECK_STYLE = CHECKBOX_STYLE
 
 
 class CameraControlPanel(QWidget):
@@ -116,8 +96,8 @@ class CameraControlPanel(QWidget):
         layout.setSpacing(6)
 
         # ── 카메라 선택 그룹 ──────────────────────────────────────────
-        grp_dev = _grp("CAMERA DEVICE")
-        gd = QVBoxLayout(grp_dev)
+        grp_dev = CollapsibleSection("CAMERA DEVICE")
+        gd = grp_dev.content_layout()
 
         # 카메라 종류 선택
         type_row = QHBoxLayout()
@@ -169,12 +149,20 @@ class CameraControlPanel(QWidget):
         self.btn_snap.setStyleSheet(_BTN_STYLE.replace("#4ecdc4", "#ffe66d"))
         self.btn_snap.setToolTip("단일 프레임 촬영 (라이브 정지 상태에서 사용)")
         row3.addWidget(self.btn_snap)
+
+        self.check_gil_block = QCheckBox("Simulate GIL Block")
+        self.check_gil_block.setStyleSheet(_CHECK_STYLE)
+        self.check_gil_block.setToolTip("체크 시 UI 멈춤(GIL 독점) 현상 재현")
+        self.check_gil_block.setVisible(False)
+        row3.addWidget(self.check_gil_block)
+
         gd.addLayout(row3)
         layout.addWidget(grp_dev) 
 
         # ── 노출 그룹 ─────────────────────────────────────────────────
-        grp_exp = _grp("EXPOSURE")
-        ge = QHBoxLayout(grp_exp)
+        grp_exp = CollapsibleSection("EXPOSURE")
+        ge = QHBoxLayout()
+        grp_exp.add_layout(ge)
         lbl_exp = QLabel("ms:")
         lbl_exp.setStyleSheet(_LBL_STYLE)
         self.spin_exposure = QDoubleSpinBox()
@@ -190,8 +178,9 @@ class CameraControlPanel(QWidget):
         layout.addWidget(grp_exp)
 
         # ── FPS 그룹 (HIKVISION 전용) ─────────────────────────────────
-        self.grp_fps = _grp("FRAMERATE")
-        gf = QHBoxLayout(self.grp_fps)
+        self.grp_fps = CollapsibleSection("FRAMERATE")
+        gf = QHBoxLayout()
+        self.grp_fps.add_layout(gf)
         self.check_fps_lock = QCheckBox("Lock")
         self.check_fps_lock.setStyleSheet(_CHECK_STYLE)
         self.spin_fps = QDoubleSpinBox()
@@ -207,8 +196,8 @@ class CameraControlPanel(QWidget):
         layout.addWidget(self.grp_fps)
 
         # ── 평균화 그룹 ───────────────────────────────────────────────
-        grp_avg = _grp("AVERAGING")
-        ga = QVBoxLayout(grp_avg)
+        grp_avg = CollapsibleSection("AVERAGING")
+        ga = grp_avg.content_layout()
         avg_row = QHBoxLayout()
         lbl_avg = QLabel("N frames:")
         lbl_avg.setStyleSheet(_LBL_STYLE)
@@ -245,8 +234,8 @@ class CameraControlPanel(QWidget):
         layout.addWidget(grp_avg)
 
         # ── 이진화 / Centroid 그룹 (HIKVISION 전용) ──────────────────
-        self.grp_proc = _grp("PROCESSING")
-        gp = QVBoxLayout(self.grp_proc)
+        self.grp_proc = CollapsibleSection("PROCESSING")
+        gp = self.grp_proc.content_layout()
 
         self.check_bin = QCheckBox("Binarize (centroid용)")
         self.check_bin.setChecked(True)
@@ -273,9 +262,8 @@ class CameraControlPanel(QWidget):
         gp.addWidget(self.check_show_bin)
 
         # 이진화 모드 라디오
-        thresh_grp = QGroupBox("Threshold Mode")
-        thresh_grp.setStyleSheet(_GRP_STYLE.replace("#e94560", "#4ecdc4"))
-        tg = QVBoxLayout(thresh_grp)
+        thresh_grp = CollapsibleSection("Threshold Mode", accent=C_ACCENT)
+        tg = thresh_grp.content_layout()
         self._thresh_btn_grp = QButtonGroup()
         thresh_items = [
             ("Greater  (밝은 영역)", BIN_BINARY),
@@ -295,9 +283,8 @@ class CameraControlPanel(QWidget):
         gp.addWidget(thresh_grp)
 
         # Centroid 계산 모드
-        centroid_mode_grp = QGroupBox("Centroid Mode")
-        centroid_mode_grp.setStyleSheet(_GRP_STYLE.replace("#e94560", "#4ecdc4"))
-        cmg = QHBoxLayout(centroid_mode_grp)
+        centroid_mode_grp = CollapsibleSection("Centroid Mode", accent=C_ACCENT)
+        cmg = centroid_mode_grp.content_layout()
         self._centroid_mode_grp = QButtonGroup()
         self.rb_centroid_binary   = QRadioButton("Binary")
         self.rb_centroid_weighted = QRadioButton("Weighted")
@@ -311,8 +298,8 @@ class CameraControlPanel(QWidget):
         layout.addWidget(self.grp_proc)
 
         # ── 로그 스케일 그룹 (HIKVISION 전용) ────────────────────────
-        self.grp_log = _grp("LOG SCALE")
-        gl = QVBoxLayout(self.grp_log)
+        self.grp_log = CollapsibleSection("LOG SCALE")
+        gl = self.grp_log.content_layout()
         self.check_log = QCheckBox("Log Scale 활성화")
         self.check_log.setStyleSheet(_CHECK_STYLE)
         log_row = QHBoxLayout()
@@ -331,8 +318,8 @@ class CameraControlPanel(QWidget):
         layout.addWidget(self.grp_log)
 
         # ── 배경 차분 그룹 (HIKVISION 전용) ──────────────────────────
-        self.grp_bg = _grp("BACKGROUND")
-        gb = QVBoxLayout(self.grp_bg)
+        self.grp_bg = CollapsibleSection("BACKGROUND")
+        gb = self.grp_bg.content_layout()
         bg_row = QHBoxLayout()
         self.btn_cap_bg = QPushButton("CAPTURE BG")
         self.btn_cap_bg.setStyleSheet(_BTN_STYLE)
@@ -349,8 +336,8 @@ class CameraControlPanel(QWidget):
         layout.addWidget(self.grp_bg)
 
         # ── Dark / Flat 그룹 (소프트웨어, 모든 카메라) ───────────────
-        self.grp_dark = _grp("DARK / FLAT")
-        gdf = QVBoxLayout(self.grp_dark)
+        self.grp_dark = CollapsibleSection("DARK / FLAT")
+        gdf = self.grp_dark.content_layout()
         dark_row = QHBoxLayout()
         self.btn_cap_dark   = QPushButton("CAP DARK")
         self.btn_cap_dark.setStyleSheet(_BTN_STYLE)
@@ -372,8 +359,8 @@ class CameraControlPanel(QWidget):
         layout.addWidget(self.grp_dark)
 
         # ── Centroid + 통계 상태 표시 ────────────────────────────────
-        self.grp_centroid = _grp("CENTROID / STATS")
-        gc2 = QVBoxLayout(self.grp_centroid)
+        self.grp_centroid = CollapsibleSection("CENTROID / STATS")
+        gc2 = self.grp_centroid.content_layout()
         self.lbl_cx     = QLabel("cX: —")
         self.lbl_cy     = QLabel("cY: —")
         self.lbl_bright = QLabel("Brightness: —")
@@ -397,8 +384,8 @@ class CameraControlPanel(QWidget):
         layout.addWidget(self.grp_centroid)
 
         # ── 온도 그룹 (Picam 전용) ────────────────────────────────────
-        self.grp_temp = _grp("TEMPERATURE")
-        gt = QVBoxLayout(self.grp_temp)
+        self.grp_temp = CollapsibleSection("TEMPERATURE")
+        gt = self.grp_temp.content_layout()
         temp_row = QHBoxLayout()
         lbl_sp = QLabel("Setpoint (°C):")
         lbl_sp.setStyleSheet(_LBL_STYLE)
@@ -419,8 +406,8 @@ class CameraControlPanel(QWidget):
         layout.addWidget(self.grp_temp)
 
         # ── ADC 그룹 (Picam 전용) ─────────────────────────────────────
-        self.grp_adc = _grp("ADC SETTINGS")
-        gadc = QVBoxLayout(self.grp_adc)
+        self.grp_adc = CollapsibleSection("ADC SETTINGS")
+        gadc = self.grp_adc.content_layout()
         self._adc_combos = {}
         for key, label in [
             ("adc_quality",    "Quality"),
@@ -449,8 +436,8 @@ class CameraControlPanel(QWidget):
         layout.addWidget(self.grp_adc)
 
         # ── 공간 필터 그룹 (소프트웨어, 모든 카메라) ─────────────────
-        self.grp_spatial = _grp("SPATIAL FILTER")
-        gsf = QVBoxLayout(self.grp_spatial)
+        self.grp_spatial = CollapsibleSection("SPATIAL FILTER")
+        gsf = self.grp_spatial.content_layout()
 
         # 핫픽셀 제거
         hp_row = QHBoxLayout()
@@ -494,8 +481,8 @@ class CameraControlPanel(QWidget):
         layout.addWidget(self.grp_spatial)
 
         # ── Display 스트레칭 그룹 ─────────────────────────────────────
-        self.grp_stretch = _grp("DISPLAY STRETCH")
-        gst = QVBoxLayout(self.grp_stretch)
+        self.grp_stretch = CollapsibleSection("DISPLAY STRETCH")
+        gst = self.grp_stretch.content_layout()
         self.combo_stretch = QComboBox()
         self.combo_stretch.addItems(["Normalize", "Percentile", "Manual"])
         self.combo_stretch.setStyleSheet("""
@@ -508,7 +495,8 @@ class CameraControlPanel(QWidget):
         gst.addWidget(self.combo_stretch)
         # Percentile row
         self.grp_stretch_pct = QWidget()
-        pct_row = QHBoxLayout(self.grp_stretch_pct)
+        pct_row = QHBoxLayout()
+        self.grp_stretch_pct.setLayout(pct_row)
         pct_row.setContentsMargins(0, 0, 0, 0)
         lbl_lo = QLabel("Lo%:"); lbl_lo.setStyleSheet(_LBL_STYLE)
         self.spin_pct_lo = QDoubleSpinBox()
@@ -530,7 +518,8 @@ class CameraControlPanel(QWidget):
         gst.addWidget(self.grp_stretch_pct)
         # Manual row
         self.grp_stretch_man = QWidget()
-        man_row = QHBoxLayout(self.grp_stretch_man)
+        man_row = QHBoxLayout()
+        self.grp_stretch_man.setLayout(man_row)
         man_row.setContentsMargins(0, 0, 0, 0)
         lbl_mn = QLabel("Min:"); lbl_mn.setStyleSheet(_LBL_STYLE)
         self.spin_man_min = QDoubleSpinBox()
@@ -559,6 +548,9 @@ class CameraControlPanel(QWidget):
         self.btn_start.clicked.connect(self.camera_start_requested)
         self.btn_stop.clicked.connect(self.camera_stop_requested)
         self.btn_snap.clicked.connect(self.snap_requested)
+        self.check_gil_block.toggled.connect(
+            lambda checked: setattr(self._cam, 'simulate_gil_block', checked) if self._cam else None
+        )
         self.btn_apply_exp.clicked.connect(self._apply_exposure)
         self.btn_apply_fps.clicked.connect(self._apply_fps)
         self.spin_avg.valueChanged.connect(self._apply_avg)
@@ -606,6 +598,13 @@ class CameraControlPanel(QWidget):
         self._caps = cam.capabilities
         self._apply_capabilities(self._caps)
         self._set_connected(True)
+        
+        from core.camera.simulated import SimulatedCamera
+        if isinstance(cam, SimulatedCamera):
+            self.check_gil_block.setVisible(True)
+            self.check_gil_block.setChecked(getattr(cam, 'simulate_gil_block', False))
+        else:
+            self.check_gil_block.setVisible(False)
 
         # 현재 카메라 값 읽어 UI 반영
         try:
