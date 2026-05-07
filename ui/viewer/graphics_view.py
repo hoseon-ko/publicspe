@@ -137,6 +137,9 @@ class ImageGraphicsView(QGraphicsView):
         self._sel_hdl_gfx: list = []
         self._sel_create_visual()
 
+        # 단일 ROI 모드 (새 ROI 생성 시 기존 것 모두 삭제)
+        self._single_roi_mode = False
+
     # ─────────────────────────────────────────
     # 이미지 설정
     # ─────────────────────────────────────────
@@ -741,6 +744,9 @@ class ImageGraphicsView(QGraphicsView):
             self._scene.addItem(item)
             self._roi_item = item
 
+    def set_single_roi_mode(self, enabled: bool):
+        self._single_roi_mode = enabled
+
     def _finalize_roi(self, x0, y0, x1, y1):
         self._clear_roi_item()
 
@@ -755,6 +761,9 @@ class ImageGraphicsView(QGraphicsView):
         elif self._roi_mode in ('box', 'histogram'):
             if abs(x1 - x0) < MIN_BOX or abs(y1 - y0) < MIN_BOX:
                 return
+
+        if self._single_roi_mode:
+            self.delete_all_rois()
 
         roi_id = self._next_roi_id
         self._next_roi_id += 1

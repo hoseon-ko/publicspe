@@ -26,7 +26,7 @@ from PyQt6.QtWidgets import (
     QLabel, QPushButton, QTextEdit, QSizePolicy,
     QApplication, QListWidget, QListWidgetItem,
 )
-from PyQt6.QtCore import Qt, QTimer, QSize, QSettings, QThread, QObject, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, QSize, QSettings, QThread, QObject, pyqtSignal, QEvent
 from PyQt6.QtGui import QAction
 
 from core.camera.base import BaseCamera
@@ -293,6 +293,22 @@ class LiveTab(QMainWindow):
         self._centroid_timer.timeout.connect(self._refresh_centroid_labels)
         self._centroid_timer.start()
 
+    # ── 이벤트 필터 (사이드바 더블클릭 → auto-fit) ───────────────────
+
+    def eventFilter(self, obj, event) -> bool:
+        if (obj is getattr(self, '_left_scroll_ref', None)
+                and event.type() == QEvent.Type.MouseButtonDblClick):
+            sidebar = getattr(self, '_sidebar_ref', None)
+            if sidebar is not None:
+                hint_w = sidebar.sizeHint().width() + 24   # 여유 padding
+                hint_w = max(hint_w, self.dock_left.minimumWidth())
+                hint_w = min(hint_w, self.dock_left.maximumWidth())
+                self.resizeDocks(
+                    [self.dock_left], [hint_w], Qt.Orientation.Horizontal
+                )
+            return True
+        return super().eventFilter(obj, event)
+
     # ── 독 헬퍼 ──────────────────────────────────────────────────────
 
     def _make_dock_header(self, title: str) -> QWidget:
@@ -386,12 +402,17 @@ class LiveTab(QMainWindow):
         left_scroll = QScrollArea()
         left_scroll.setWidget(sidebar)
         left_scroll.setWidgetResizable(True)
-        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         left_scroll.setStyleSheet(
             "QScrollArea { border: none; background: #080e1e; }"
             "QScrollBar:vertical { width: 6px; background: #0a1020; }"
             "QScrollBar::handle:vertical { background: #1a3060; border-radius: 3px; }"
         )
+
+        # 더블클릭 → dock 너비를 sidebar sizeHint에 맞게 자동 스냅
+        self._left_scroll_ref = left_scroll
+        self._sidebar_ref     = sidebar
+        left_scroll.installEventFilter(self)
 
         self.dock_left = QDockWidget(self)
         self.dock_left.setObjectName("dock_left")
@@ -517,8 +538,8 @@ class LiveTab(QMainWindow):
         self.dock_roi.setObjectName("dock_roi")
 
         # 좌측 패널 고정폭
-        self.dock_left.setMinimumWidth(260)
-        self.dock_left.setMaximumWidth(360)
+        self.dock_left.setMinimumWidth(320)
+        self.dock_left.setMaximumWidth(500)
 
         self.resizeDocks([self.dock_plot], [200], Qt.Orientation.Vertical)
         self.resizeDocks([self.dock_log], [280], Qt.Orientation.Horizontal)
@@ -1189,9 +1210,21 @@ class LiveTab(QMainWindow):
 
     # ── 정리 ─────────────────────────────────────────────────────────
 
+    def _save_settings(self):
+        s = QSettings("SpeAnalyze", "LiveTab")
+        s.setValue("dockState", self.saveState())
+        s.sync()
+
+    def _restore_settings(self):
+        s = QSettings("SpeAnalyze", "LiveTab")
+        state = s.value("dockState")
+        if state:
+            self.restoreState(state)
+
+    # ── 정리 ─────────────────────────────────────────────────────────
+
     def cleanup(self):
         self._centroid_timer.stop()
-        QSettings("SpeAnalyze", "LiveTab").setValue("dockState", self.saveState())
         # 앱 종료 시 — 비동기 워커를 기다리지 않고 직접 동기 정리
         if self._cam:
             try: self._cam.stop_live()

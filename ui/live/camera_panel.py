@@ -13,7 +13,7 @@ from typing import List, Optional
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QComboBox, QDoubleSpinBox, QSpinBox,
-    QCheckBox, QSlider, QRadioButton,
+    QCheckBox, QRadioButton,
     QButtonGroup, QListWidget, QSizePolicy
 )
 from PyQt6.QtCore import Qt, QObject, QThread, pyqtSignal, QSettings
@@ -242,20 +242,27 @@ class CameraControlPanel(QWidget):
         self.check_bin.setStyleSheet(_CHECK_STYLE)
         gp.addWidget(self.check_bin)
 
-        self.lbl_threshold = QLabel("Threshold: 127")
-        self.lbl_threshold.setStyleSheet(_LBL_STYLE)
-        gp.addWidget(self.lbl_threshold)
-
-        self.slider_bin = QSlider(Qt.Orientation.Horizontal)
-        self.slider_bin.setRange(0, 255)
-        self.slider_bin.setValue(127)
-        self.slider_bin.setStyleSheet("""
-            QSlider::groove:horizontal { height: 4px; background: #0f3460; border-radius: 2px; }
-            QSlider::handle:horizontal { width: 14px; height: 14px; margin: -5px 0;
-                background: #e94560; border-radius: 7px; }
-            QSlider::sub-page:horizontal { background: #e94560; border-radius: 2px; }
+        lbl_thresh_row = QHBoxLayout()
+        lbl_thresh_row.setContentsMargins(0, 0, 0, 0)
+        lbl_thresh_row.setSpacing(6)
+        lbl_thresh_row.addWidget(QLabel("Threshold:"))
+        lbl_thresh_row.itemAt(0).widget().setStyleSheet(_LBL_STYLE)
+        self.spin_bin_thresh = QSpinBox()
+        self.spin_bin_thresh.setRange(0, 65535)
+        self.spin_bin_thresh.setValue(1000)
+        self.spin_bin_thresh.setSingleStep(100)
+        self.spin_bin_thresh.setFixedWidth(80)
+        self.spin_bin_thresh.setStyleSheet("""
+            QSpinBox { background: #0f1e38; color: #c0d0ff; border: 1px solid #1a3460;
+                border-radius: 3px; padding: 1px 4px;
+                font-family: 'Consolas'; font-size: 11px; }
+            QSpinBox::up-button, QSpinBox::down-button { width: 14px; background: #1a3060; }
         """)
-        gp.addWidget(self.slider_bin)
+        lbl_thresh_row.addWidget(self.spin_bin_thresh)
+        lbl_thresh_row.addStretch()
+        thresh_row_w = QWidget()
+        thresh_row_w.setLayout(lbl_thresh_row)
+        gp.addWidget(thresh_row_w)
 
         self.check_show_bin = QCheckBox("Show binary on screen")
         self.check_show_bin.setStyleSheet(_CHECK_STYLE)
@@ -554,7 +561,7 @@ class CameraControlPanel(QWidget):
         self.btn_apply_exp.clicked.connect(self._apply_exposure)
         self.btn_apply_fps.clicked.connect(self._apply_fps)
         self.spin_avg.valueChanged.connect(self._apply_avg)
-        self.slider_bin.valueChanged.connect(self._apply_bin_params)
+        self.spin_bin_thresh.valueChanged.connect(self._apply_bin_params)
         self.check_bin.toggled.connect(self._apply_bin_params)
         self._thresh_btn_grp.buttonClicked.connect(lambda _: self._apply_bin_params())
         self.check_show_bin.toggled.connect(self._apply_show_bin)
@@ -788,10 +795,9 @@ class CameraControlPanel(QWidget):
         self._proc.avg_n = val
 
     def _apply_bin_params(self, *_):
-        val = self.slider_bin.value()
-        self.lbl_threshold.setText(f"Threshold: {val}")
+        val = self.spin_bin_thresh.value()
         self._proc.bin_enabled = self.check_bin.isChecked()
-        self._proc.bin_threshold = val
+        self._proc.bin_threshold = float(val)
         checked_id = self._thresh_btn_grp.checkedId()
         if checked_id >= 0:
             self._proc.bin_mode = checked_id

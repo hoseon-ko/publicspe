@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QStackedWidget, QStatusBar,
     QLabel, QFrame, QVBoxLayout, QHBoxLayout, QPushButton,
 )
-from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtCore import Qt, QSize, QSettings
 from PyQt6.QtGui import QFont
 
 from ui.live.live_tab import LiveTab
@@ -46,6 +46,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1300, 850)
         self.resize(1700, 1000)
         self._build_ui()
+        self._restore_settings()
 
     # ── UI ───────────────────────────────────────────────────────────
 
@@ -261,6 +262,15 @@ class MainWindow(QMainWindow):
     # ── 모드 전환 ────────────────────────────────────────────────────
 
     def _switch_mode(self, idx: int):
+        # Hide range popups from all viewers when switching tabs
+        for i in range(self.stack.count()):
+            tab = self.stack.widget(i)
+            # Check common viewer attribute names across different tabs
+            for attr in ('image_viewer', 'viewer', 'preview_viewer'):
+                viewer = getattr(tab, attr, None)
+                if viewer and hasattr(viewer, 'hide_range_popup'):
+                    viewer.hide_range_popup()
+
         self.stack.setCurrentIndex(idx)
         for i, btn in enumerate(self._nav_btns):
             btn.setChecked(i == idx)
@@ -318,9 +328,56 @@ class MainWindow(QMainWindow):
 
     # ── 종료 처리 ────────────────────────────────────────────────────
 
-    def closeEvent(self, event):
+    # ── 종료 처리 ────────────────────────────────────────────────────
+
+    def save_all_settings(self):
+        """aboutToQuit / SIGINT 등 모든 종료 경로에서 설정 저장 및 UI 상태 저장."""
+        # 1. 서브 탭 하드웨어/워커 정리 (먼저 수행)
         self.live_tab.cleanup()
         self.acq_tab.cleanup()
         self.scan_tab.cleanup()
         self.af_tab.cleanup()
+
+        # 2. MainWindow 상태 저장
+        s = QSettings("SpeAnalyze", "MainWindow")
+        s.setValue("geometry", self.saveGeometry())
+        s.setValue("windowState", self.saveState())
+        s.setValue("active_tab", self.stack.currentIndex())
+
+        # 3. 모든 서브 탭 설정 저장
+        for tab in (self.live_tab, self.acq_tab, self.scan_tab, self.af_tab, self.analysis_tab):
+            if hasattr(tab, "_save_settings"):
+                try:
+                    tab._save_settings()
+                except Exception as e:
+                    print(f"Error saving settings for {type(tab).__name__}: {e}")
+
+    def _restore_settings(self):
+        """Load saved MainWindow UI state and forward to sub‑tabs."""
+        s = QSettings("SpeAnalyze", "MainWindow")
+        try:
+            geom = s.value("geometry")
+            if geom:
+                self.restoreGeometry(geom)
+            state = s.value("windowState")
+            if state:
+                self.restoreState(state)
+            idx = s.value("active_tab")
+            if idx is not None:
+                idx = int(idx)
+                if 0 <= idx < self.stack.count():
+                    self._switch_mode(idx)
+        except Exception as e:
+            print(f"MainWindow settings restore error: {e}")
+
+        # Restore sub‑tab settings
+        for tab in (self.live_tab, self.acq_tab, self.scan_tab, self.af_tab, self.analysis_tab):
+            if hasattr(tab, "_restore_settings"):
+                try:
+                    tab._restore_settings()
+                except Exception as e:
+                    print(f"Error restoring settings for {type(tab).__name__}: {e}")
+
+    def closeEvent(self, event):
+        self.save_all_settings()
         super().closeEvent(event)

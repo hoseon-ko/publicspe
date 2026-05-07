@@ -269,10 +269,10 @@ class FrameGridPanel(QWidget):
         self.btn_clear_checks.setStyleSheet("""
             QPushButton {
                 background-color: transparent;
-                color: #606080;
+                color: #a0a0b0;
                 border: 1px solid #0f3460;
                 border-radius: 4px;
-                font-size: 10px;
+                font-size: 11px;
             }
             QPushButton:hover { color: #e94560; border-color: #e94560; }
         """)

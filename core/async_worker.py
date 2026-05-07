@@ -59,7 +59,8 @@ class ColorMapWorker(QThread):
             return np.stack([ch, ch, ch, np.full_like(ch, 255)], axis=-1)
         elif img.ndim == 3 and img.shape[2] == 3:
             h, w = img.shape[:2]
-            rgb8 = img if img.dtype == np.uint8 else (img / img.max() * 255).astype(np.uint8)
+            mx = img.max()
+            rgb8 = img if img.dtype == np.uint8 else (img / (mx if mx > 0 else 1) * 255).astype(np.uint8)
             return np.concatenate([rgb8, np.full((h, w, 1), 255, np.uint8)], axis=2)
         return img
 

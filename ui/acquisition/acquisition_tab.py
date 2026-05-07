@@ -489,10 +489,6 @@ class AcquisitionTab(QWidget):
         right_widget.setLayout(right_layout)
         root.addWidget(right_widget, 1)
 
-        # #19 저장 경로 복원
-        _s = QSettings("SpeAnalyze", "AcquisitionTab")
-        self.edit_save_dir.setText(_s.value("save_dir", "acquisitions"))
-
         # ── 시그널 연결 ───────────────────────────────────────────────
         self.btn_acquire.clicked.connect(self._start_acquisition)
         self.spin_exposure.valueChanged.connect(self._on_exposure_spin_changed)
@@ -864,12 +860,25 @@ class AcquisitionTab(QWidget):
         self.log_display.append(log_html(msg, ts))
         self.log_message.emit(msg)
 
+    def _save_settings(self):
+        s = QSettings("SpeAnalyze", "AcquisitionTab")
+        s.setValue("save_dir", self.edit_save_dir.text())
+        s.setValue("exposure", self.spin_exposure.value())
+        s.setValue("frames", self.spin_frames.value())
+        s.setValue("timeout", self.spin_timeout.value())
+        s.setValue("auto_open", self.check_auto_open.isChecked())
+        s.sync()
+
+    def _restore_settings(self):
+        s = QSettings("SpeAnalyze", "AcquisitionTab")
+        self.edit_save_dir.setText(s.value("save_dir", "acquisitions"))
+        self.spin_exposure.setValue(float(s.value("exposure", 100.0)))
+        self.spin_frames.setValue(int(s.value("frames", 10)))
+        self.spin_timeout.setValue(float(s.value("timeout", 30.0)))
+        self.check_auto_open.setChecked(s.value("auto_open", True, type=bool))
+
     def cleanup(self):
         """카메라는 LiveTab 소유이므로 여기서 해제하지 않는다."""
-        # #19 저장 경로 영속화
-        QSettings("SpeAnalyze", "AcquisitionTab").setValue(
-            "save_dir", self.edit_save_dir.text()
-        )
         if self._temp_thread is not None:
             self._temp_thread.stop()
             self._temp_thread = None

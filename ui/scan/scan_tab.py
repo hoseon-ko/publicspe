@@ -17,8 +17,9 @@ from PyQt6.QtWidgets import (
     QComboBox, QLineEdit, QFileDialog,
     QProgressBar, QTextEdit, QTableWidget,
     QTableWidgetItem, QHeaderView, QScrollArea,
-    QCheckBox, QListWidget, QListWidgetItem, QSlider,
+    QCheckBox, QListWidget, QListWidgetItem,
 )
+from ui.widgets.auto_splitter import AutoSplitter
 from PyQt6.QtGui import QIcon, QPixmap, QImage
 
 from core.background_manager import BackgroundManager
@@ -168,13 +169,13 @@ class ScanTab(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter = AutoSplitter(Qt.Orientation.Horizontal)
         root.addWidget(splitter)
 
         # ── 좌측: 컨트롤 패널 ─────────────────────────────────────────
         ctrl_scroll = QScrollArea()
         ctrl_scroll.setWidgetResizable(True)
-        ctrl_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        ctrl_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         ctrl_scroll.setStyleSheet("QScrollArea { border: none; background: #0a0f1e; }")
         ctrl_widget = QWidget()
         ctrl_widget.setStyleSheet("background: #0a0f1e;")
@@ -182,7 +183,7 @@ class ScanTab(QWidget):
         ctrl_layout.setContentsMargins(8, 8, 8, 8)
         ctrl_layout.setSpacing(8)
         ctrl_scroll.setWidget(ctrl_widget)
-        # ctrl_scroll.setFixedWidth(290)
+        ctrl_scroll.setMinimumWidth(320)
 
         splitter.setStyleSheet("QSplitter::handle { background-color: #4ecdc4; width: 4px; }")
 
@@ -541,30 +542,23 @@ class ScanTab(QWidget):
 
         opt_layout.addWidget(_sep_v())
 
-        # 임계값 슬라이더
+        # 임계값 스핀박스 (raw 픽셀값 기준 0~65535)
         lbl_t = QLabel("임계값:")
         lbl_t.setStyleSheet(f"color:{_C_LBL}; font-family:'{_F}'; font-size:13px;")
-        self.slider_thresh = QSlider(Qt.Orientation.Horizontal)
-        self.slider_thresh.setRange(0, 255)
-        self.slider_thresh.setValue(127)
-        self.slider_thresh.setFixedWidth(120)
-        self.slider_thresh.setStyleSheet("""
-            QSlider::groove:horizontal { height:4px; background:#1a3a60; border-radius:2px; }
-            QSlider::handle:horizontal {
-                background:#4ecdc4; border:1px solid #4ecdc4;
-                width:12px; height:12px; margin:-4px 0; border-radius:6px;
-            }
-            QSlider::sub-page:horizontal { background:#4ecdc4; border-radius:2px; }
+        self.slider_thresh = QSpinBox()
+        self.slider_thresh.setRange(0, 65535)
+        self.slider_thresh.setValue(1000)
+        self.slider_thresh.setSingleStep(100)
+        self.slider_thresh.setFixedWidth(90)
+        self.slider_thresh.setStyleSheet(f"""
+            QSpinBox {{ background:#0f1e38; color:{_C_VAL}; border:1px solid #1a3460;
+                border-radius:3px; padding:1px 4px;
+                font-family:'{_FC}'; font-size:12px; }}
+            QSpinBox::up-button, QSpinBox::down-button {{ width:14px; background:#1a3060; }}
         """)
-        self.lbl_thresh_val = QLabel("127")
-        self.lbl_thresh_val.setFixedWidth(30)
-        self.lbl_thresh_val.setStyleSheet(
-            f"color:{_C_VAL}; font-family:'{_FC}'; font-size:13px;"
-        )
         self.slider_thresh.valueChanged.connect(self._on_thresh_changed)
         opt_layout.addWidget(lbl_t)
         opt_layout.addWidget(self.slider_thresh)
-        opt_layout.addWidget(self.lbl_thresh_val)
 
         opt_layout.addWidget(_sep_v())
 
@@ -775,8 +769,7 @@ class ScanTab(QWidget):
         self._refresh_current_view()
 
     def _on_thresh_changed(self, val: int):
-        self._proc.bin_threshold = val
-        self.lbl_thresh_val.setText(str(val))
+        self._proc.bin_threshold = float(val)
         self._refresh_current_view()
 
     def _refresh_current_view(self):
@@ -1266,13 +1259,13 @@ class ScanTab(QWidget):
                 self._right_splitter.setSizes([int(x) for x in raw])
             except Exception:
                 pass
-        thresh = int(s.value("bin_threshold", 127))
+        thresh = int(s.value("bin_threshold", 1000))
         self.slider_thresh.setValue(thresh)
         # _proc 동기화
-        self._proc.bin_threshold = thresh
+        self._proc.bin_threshold = float(thresh)
         self.slider_thresh.setEnabled(False)  # 원본 모드 기본
 
-    def cleanup(self):
+    def _save_settings(self):
         s = QSettings("SpeAnalyze", "ScanTab")
         s.setValue("motor",      self.combo_motor.currentText())
         s.setValue("steps_move", self.spin_steps_move.value())
@@ -1282,6 +1275,9 @@ class ScanTab(QWidget):
         s.setValue("scan_name",  self.edit_scan_name.text())
         s.setValue("right_splitter_sizes", self._right_splitter.sizes())
         s.setValue("bin_threshold", self.slider_thresh.value())
+        s.sync()
+
+    def cleanup(self):
         if self._worker and self._worker.isRunning():
             self._worker.request_stop()
             self._worker.wait(2000)

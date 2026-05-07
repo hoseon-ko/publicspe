@@ -626,6 +626,12 @@ class ImageViewer(QWidget):
         worker.colormap_applied.connect(on_colormap_ready)
         worker.start()
 
+    def hide_range_popup(self):
+        """프로그램적으로 Range 팝업을 닫는다 (탭 전환 시 등)."""
+        if hasattr(self, '_range_popup'):
+            self._range_popup.hide()
+            self.btn_range.setChecked(False)
+
     # ─────────────────────────────────────────
     # 눈금자 업데이트
     # ─────────────────────────────────────────

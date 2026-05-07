@@ -143,3 +143,128 @@ class SimMotorPanel:
 
     def get_positions(self) -> List[Optional[int]]:
         return list(self._pos)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AutoFocus 시뮬레이션 카메라
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SimAFCamera:
+    """
+    오토포커스 시뮬레이션용 가상 카메라.
+
+    두 가지 모드:
+      "math"   — Gaussian 빔 + Z 거리에 비례하는 defocus blur
+      "images" — 미리 로드된 이미지 배열을 Z 순서대로 반환
+
+    사용법:
+        # 수학 모델
+        cam = SimAFCamera(mode="math", best_z=0.0, z_sigma=5.0)
+        cam.set_z(z_value)
+        frame = cam.snap()
+
+        # 이미지 시퀀스
+        cam = SimAFCamera(mode="images", images=[img0, img1, ...])
+        cam.set_z_sequence([z0, z1, ...])
+        cam.set_z(z_value)
+        frame = cam.snap()
+    """
+
+    WIDTH  = 512
+    HEIGHT = 512
+
+    def __init__(
+        self,
+        mode:     str   = "math",    # "math" | "images"
+        images:   Optional[List[np.ndarray]] = None,
+        best_z:   float = 0.0,       # math 모드: 포커스가 맞는 Z (µm)
+        z_sigma:  float = 8.0,       # math 모드: 디포커스 스케일 (µm당 blur px)
+        peak:     int   = 40000,     # math 모드: 최대 강도
+        bg:       int   = 300,
+        noise:    float = 200.0,
+        seed:     int   = 7,
+    ):
+        self._mode    = mode
+        self._images  = images or []
+        self._best_z  = best_z
+        self._z_sigma = z_sigma
+        self._peak    = peak
+        self._bg      = bg
+        self._noise   = noise
+        self._rng     = np.random.default_rng(seed)
+        self._current_z = best_z
+        self._z_seq:  List[float] = []   # image 모드: Z → 인덱스 매핑
+
+    def set_z(self, z: float):
+        """현재 Z 위치 지정 — snap() 호출 전에 반드시 호출."""
+        self._current_z = z
+
+    def set_z_sequence(self, z_values: List[float]):
+        """이미지 시퀀스 모드에서 Z 목록과 이미지 배열을 매핑."""
+        self._z_seq = list(z_values)
+
+    def snap(self) -> np.ndarray:
+        """현재 Z에서 이미지 캡처 시뮬레이션."""
+        if self._mode == "images":
+            return self._snap_image()
+        return self._snap_math()
+
+    def get_exposure_ms(self) -> float:
+        return 50.0
+
+    # ── 내부 ────────────────────────────────────────────────────────────
+
+    def _snap_math(self) -> np.ndarray:
+        """Gaussian 빔 + defocus blur."""
+        try:
+            import cv2
+            _CV2 = True
+        except ImportError:
+            _CV2 = False
+
+        xs = np.arange(self.WIDTH,  dtype=np.float32)
+        ys = np.arange(self.HEIGHT, dtype=np.float32)
+        XX, YY = np.meshgrid(xs, ys)
+        cx, cy  = self.WIDTH / 2.0, self.HEIGHT / 2.0
+
+        sigma_beam = 20.0   # 빔 반경 (px)
+        img = self._peak * np.exp(
+            -((XX - cx) ** 2 + (YY - cy) ** 2) / (2.0 * sigma_beam ** 2)
+        )
+        img += self._bg + self._rng.normal(0.0, self._noise, img.shape)
+
+        # Z 거리에 비례하는 defocus blur
+        dz = abs(self._current_z - self._best_z)
+        blur_sigma = dz / max(self._z_sigma, 0.001)   # µm → px
+        if blur_sigma > 0.5 and _CV2:
+            ks = max(3, int(blur_sigma * 4) | 1)   # 홀수 커널
+            img = cv2.GaussianBlur(img.astype(np.float32), (ks, ks), blur_sigma)
+
+        # 노이즈 추가 (블러 후에도)
+        img += self._rng.normal(0.0, self._noise * 0.3, img.shape)
+
+        return np.clip(img, 0, 65535).astype(np.uint16)
+
+    def _snap_image(self) -> np.ndarray:
+        """Z에 가장 가까운 이미지 인덱스를 찾아 반환."""
+        if not self._images:
+            return np.zeros((self.HEIGHT, self.WIDTH), dtype=np.uint16)
+
+        if self._z_seq:
+            # Z 시퀀스가 있으면 가장 가까운 인덱스
+            diffs = [abs(z - self._current_z) for z in self._z_seq]
+            idx = int(np.argmin(diffs))
+        else:
+            # 없으면 center부터 순서대로
+            idx = 0
+
+        idx = max(0, min(idx, len(self._images) - 1))
+        img = self._images[idx]
+        if img.dtype != np.uint16:
+            # 스케일 정규화
+            mn, mx = img.min(), img.max()
+            if mx > mn:
+                img = ((img.astype(np.float32) - mn) / (mx - mn) * 65535).astype(np.uint16)
+            else:
+                img = np.zeros_like(img, dtype=np.uint16)
+        return img

@@ -598,6 +598,7 @@ class MotorPanel(QWidget):
         for m, (sf, sb) in self._weight_spins.items():
             s.setValue(f"weight_fwd_m{m}", sf.value())
             s.setValue(f"weight_bwd_m{m}", sb.value())
+        s.sync()
 
     # ── Public ────────────────────────────────────────────────────────
 

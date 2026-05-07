@@ -42,11 +42,12 @@ BIN_BINARY_INV = 1   # cv2.THRESH_BINARY_INV
 BIN_TOZERO     = 2   # cv2.THRESH_TOZERO
 BIN_TOZERO_INV = 3   # cv2.THRESH_TOZERO_INV
 
+# cv2 THRESH 상수: BINARY=0, BINARY_INV=1, TRUNC=2, TOZERO=3, TOZERO_INV=4
 _BIN_MODE_MAP = {
-    BIN_BINARY:     0,
-    BIN_BINARY_INV: 1,
-    BIN_TOZERO:     2,
-    BIN_TOZERO_INV: 3,
+    BIN_BINARY:     0,   # cv2.THRESH_BINARY
+    BIN_BINARY_INV: 1,   # cv2.THRESH_BINARY_INV
+    BIN_TOZERO:     3,   # cv2.THRESH_TOZERO     ← 3 (2는 TRUNC)
+    BIN_TOZERO_INV: 4,   # cv2.THRESH_TOZERO_INV ← 4
 }
 
 
@@ -150,9 +151,9 @@ class ImageProcessor:
         self.log_level:   float = 1.0
 
         # ── 이진화 ────────────────────────────────────────────────────
-        self.bin_enabled:   bool = True
-        self.bin_threshold: int  = 127
-        self.bin_mode:      int  = BIN_BINARY
+        self.bin_enabled:    bool  = True
+        self.bin_threshold:  float = 1000.0   # raw 픽셀값 기준 (0~65535)
+        self.bin_mode:       int   = BIN_BINARY
         self.show_binary:   bool = False
 
         # ── Display 스트레칭 ──────────────────────────────────────────
@@ -338,23 +339,37 @@ class ImageProcessor:
                 filtered = cv2.GaussianBlur(
                     filtered, (ksize, ksize), self.gaussian_sigma)
 
-            # ❸ Median filter (float32, ksize 3 or 5)
+            # ❸ Median filter — uint16 경유 (float32 medianBlur는 빌드따라 불안정)
             if self.median_enabled:
                 ks = self.median_ksize if self.median_ksize % 2 == 1 \
                      else self.median_ksize + 1
-                ks = max(3, min(ks, 5))   # cv2 float32: ksize 3 or 5만 지원
-                filtered = cv2.medianBlur(filtered, ks)
+                ks = max(3, min(ks, 9))
+                # float32 → uint16 → medianBlur → float32 복원
+                f_min = float(filtered.min())
+                f_max = float(filtered.max())
+                if f_max > f_min:
+                    u16 = ((filtered - f_min) / (f_max - f_min) * 65535.0
+                           ).clip(0, 65535).astype(np.uint16)
+                    u16 = cv2.medianBlur(u16, ks)
+                    filtered = u16.astype(np.float32) / 65535.0 * (f_max - f_min) + f_min
+                # f_max == f_min → 균일 이미지, blur 불필요
 
         # ── 8. 로그 스케일 ────────────────────────────────────────────
         if self.log_enabled:
             filtered = np.log(np.clip(filtered, 0.0, None) + 1.0) * self.log_level
 
-        # ── 9. 이진화 ─────────────────────────────────────────────────
+        # ── 9. 이진화 (raw float 기준 threshold) ─────────────────────
         bin_img_u8: Optional[np.ndarray] = None
         if self.bin_enabled and _CV2_OK:
-            u8 = self._to_display(filtered)
             cv2_mode = _BIN_MODE_MAP.get(self.bin_mode, 0)
-            _, bin_img_u8 = cv2.threshold(u8, self.bin_threshold, 255, cv2_mode)
+            # float32 원본에 직접 threshold → display용 u8으로 변환
+            _, bin_raw = cv2.threshold(
+                filtered.astype(np.float32),
+                float(self.bin_threshold),
+                65535.0,
+                cv2_mode,
+            )
+            bin_img_u8 = self._to_display(bin_raw)
 
         # ── 10. Display 이미지 선택 ───────────────────────────────────
         if self.show_binary and bin_img_u8 is not None:
@@ -399,9 +414,14 @@ class ImageProcessor:
             ys_g, xs_g = np.mgrid[0:h, 0:w]
 
             if self.centroid_mode == CentroidMode.BINARY and _CV2_OK:
-                src_u8 = self._to_display(analysis_f)
                 cv2_mode = _BIN_MODE_MAP.get(self.bin_mode, 0)
-                _, bin_a = cv2.threshold(src_u8, self.bin_threshold, 255, cv2_mode)
+                # raw float 기준 threshold → moments용 float binary
+                _, bin_a = cv2.threshold(
+                    analysis_f.astype(np.float32),
+                    float(self.bin_threshold),
+                    1.0,
+                    cv2_mode,
+                )
                 M = cv2.moments(bin_a)
                 if M["m00"] != 0:
                     cx = M["m10"] / M["m00"]

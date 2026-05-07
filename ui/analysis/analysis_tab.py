@@ -557,3 +557,21 @@ class AnalysisTab(QMainWindow):
     def _natural_sort_key(s: str) -> list:
         return [int(c) if c.isdigit() else c.lower()
                 for c in re.split(r'(\d+)', s)]
+
+    def _save_settings(self):
+        s = QSettings("SpeAnalyze", "AnalysisTab")
+        s.setValue("geometry", self.saveGeometry())
+        s.setValue("windowState", self.saveState())
+        s.sync()
+
+    def _restore_settings(self):
+        s = QSettings("SpeAnalyze", "AnalysisTab")
+        try:
+            geom = s.value("geometry")
+            if geom:
+                self.restoreGeometry(geom)
+            state = s.value("windowState")
+            if state:
+                self.restoreState(state)
+        except Exception as e:
+            print(f"AnalysisTab settings restore error: {e}")

@@ -36,8 +36,8 @@ class SimulatedCamera(BaseCamera):
     · ADC 옵션 노출                  — ADC 패널 테스트
     """
 
-    _W = 2048
-    _H = 2048
+    _W = 512
+    _H = 512
 
     def __init__(self):
         self._connected   = False
