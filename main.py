@@ -10,7 +10,8 @@ main.py
 
 import sys
 import signal
-from PyQt6.QtWidgets import QApplication
+import traceback
+from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtGui import QFont
 from PyQt6.QtCore import QTimer
 
@@ -18,9 +19,30 @@ from theme.dark_theme import DARK_THEME_QSS
 #from ui.histogram_range_widget import HistogramRangeWidget
 from ui.main_window import MainWindow
 from core.spe_reader import SpeFile
+from core.logger import app_logger
+
+def _global_exception_handler(exc_type, exc_value, exc_traceback):
+    """[Phase 1] 전역 예외 처리기: 미처리 에러를 가로채어 로그 파일에 기록"""
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+        
+    err_msg = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+    app_logger.critical(f"Uncaught Exception:\\n{err_msg}")
+    
+    if QApplication.instance():
+        msg_box = QMessageBox()
+        msg_box.setIcon(QMessageBox.Icon.Critical)
+        msg_box.setWindowTitle("Fatal Error")
+        msg_box.setText("프로그램 실행 중 치명적인 오류가 발생했습니다.\\n로그 파일(logs/)을 확인해주세요.")
+        msg_box.setDetailedText(err_msg)
+        msg_box.exec()
+
+sys.excepthook = _global_exception_handler
 
 
 def main():
+    app_logger.info("SpeAnalyze Application Started.")
     app = QApplication(sys.argv)
     app.setOrganizationName("SpeAnalyze")
     app.setApplicationName("SpeAnalyze")
@@ -51,7 +73,9 @@ def main():
     # aboutToQuit: 정상 종료 / QApplication.quit() 모두 커버
     app.aboutToQuit.connect(window.save_all_settings)
 
-    sys.exit(app.exec())
+    exit_code = app.exec()
+    app_logger.info(f"SpeAnalyze Application Exited with code {exit_code}.")
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":
