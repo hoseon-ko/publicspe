@@ -1,1 +1,50 @@
 [2026-05-08 01:40:21,492] INFO     [main.py:45] SpeAnalyze Application Started.
+[2026-05-08 01:42:27,060] CRITICAL [main.py:31] Uncaught Exception:\nTraceback (most recent call last):
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python314\Lib\runpy.py", line 198, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+                     "__main__", mod_spec)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python314\Lib\runpy.py", line 88, in _run_code
+    exec(code, run_globals)
+    ~~~~^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\admin\.antigravity\extensions\ms-python.debugpy-2026.6.0-win32-x64\bundled\libs\debugpy\launcher/../..\debugpy\__main__.py", line 71, in <module>
+    cli.main()
+    ~~~~~~~~^^
+  File "c:\Users\admin\.antigravity\extensions\ms-python.debugpy-2026.6.0-win32-x64\bundled\libs\debugpy\launcher/../..\debugpy/..\debugpy\server\cli.py", line 542, in main
+    run()
+    ~~~^^
+  File "c:\Users\admin\.antigravity\extensions\ms-python.debugpy-2026.6.0-win32-x64\bundled\libs\debugpy\launcher/../..\debugpy/..\debugpy\server\cli.py", line 361, in run_file
+    runpy.run_path(target, run_name="__main__")
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\admin\.antigravity\extensions\ms-python.debugpy-2026.6.0-win32-x64\bundled\libs\debugpy\_vendored\pydevd\_pydevd_bundle\pydevd_runpy.py", line 310, in run_path
+    return _run_module_code(code, init_globals, run_name, pkg_name=pkg_name, script_name=fname)
+  File "c:\Users\admin\.antigravity\extensions\ms-python.debugpy-2026.6.0-win32-x64\bundled\libs\debugpy\_vendored\pydevd\_pydevd_bundle\pydevd_runpy.py", line 127, in _run_module_code
+    _run_code(code, mod_globals, init_globals, mod_name, mod_spec, pkg_name, script_name)
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\admin\.antigravity\extensions\ms-python.debugpy-2026.6.0-win32-x64\bundled\libs\debugpy\_vendored\pydevd\_pydevd_bundle\pydevd_runpy.py", line 118, in _run_code
+    exec(code, run_globals)
+    ~~~~^^^^^^^^^^^^^^^^^^^
+  File "D:\01_Project_Work\03. AMMI\SpeAnalyze\main.py", line 82, in <module>
+    main()
+    ~~~~^^
+  File "D:\01_Project_Work\03. AMMI\SpeAnalyze\main.py", line 55, in main
+    window = MainWindow(spe_class=SpeFile)
+  File "D:\01_Project_Work\03. AMMI\SpeAnalyze\ui\main_window.py", line 50, in __init__
+    self._build_ui()
+    ~~~~~~~~~~~~~~^^
+  File "D:\01_Project_Work\03. AMMI\SpeAnalyze\ui\main_window.py", line 131, in _build_ui
+    self.live_tab = LiveTab()
+                    ~~~~~~~^^
+  File "D:\01_Project_Work\03. AMMI\SpeAnalyze\ui\live\live_tab.py", line 282, in __init__
+    self._build_ui()
+    ~~~~~~~~~~~~~~^^
+  File "D:\01_Project_Work\03. AMMI\SpeAnalyze\ui\live\live_tab.py", line 375, in _build_ui
+    self.cam_panel = CameraControlPanel(self._proc)
+                     ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "D:\01_Project_Work\03. AMMI\SpeAnalyze\ui\live\camera_panel.py", line 88, in __init__
+    self._build_ui()
+    ~~~~~~~~~~~~~~^^
+  File "D:\01_Project_Work\03. AMMI\SpeAnalyze\ui\live\camera_panel.py", line 566, in _build_ui
+    lambda: self.camera_connect_requested.emit(self.camera_list.currentRow())
+    ^^^^^^^^^^^^^^^^
+AttributeError: 'CameraControlPanel' object has no attribute 'check_gil_block'. Did you mean: 'check_fps_lock'?
+

@@ -169,7 +169,8 @@ class SimulatedCamera(BaseCamera):
 
     def snap(self) -> np.ndarray:
         import time
-        wait_time = 5.0
+        # [Phase 6] 실제 노출 시간에 비례하여 대기 (최소 0.1초)
+        wait_time = max(0.1, self._exposure_ms / 1000.0)
         if getattr(self, 'simulate_gil_block', False):
             print(f"\n[SimCam] 🚨 BAD 모드: GIL 독점 시뮬레이션 ({wait_time}초)...")
             print("이 시간 동안 창을 드래그하거나 UI를 클릭해도 반응하지 않습니다.")
