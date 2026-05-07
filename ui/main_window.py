@@ -28,6 +28,7 @@ from ui.scan.scan_tab import ScanTab
 from ui.autofocus.autofocus_tab import AutoFocusTab
 from ui.kinematic.kinematic_tab import KinematicTab
 from theme.styles import Fonts, Sizes, C_ACCENT, C_TEXT_DIM, C_BG_MED, C_BORDER
+from core.logger import app_logger
 
 
 # ── 헤더 바 색상 (LightField 다크 헤더) ──────────────────────────
@@ -320,7 +321,7 @@ class MainWindow(QMainWindow):
             try:
                 active_tab.on_tab_activated()
             except Exception as e:
-                print(f"Error in on_tab_activated for {type(active_tab).__name__}: {e}")
+                app_logger.error(f"Error in on_tab_activated for {type(active_tab).__name__}: {e}", exc_info=True)
 
         for i, btn in enumerate(self._nav_btns):
             btn.setChecked(i == idx)
@@ -349,7 +350,7 @@ class MainWindow(QMainWindow):
                 # 메인 윈도우 전체 캡처
                 pixmap = self.grab()
                 pixmap.save(path, "PNG")
-                print(f"[UI Dump] Saved: {path}")
+                app_logger.info(f"[UI Dump] Saved: {path}")
                 
             self._switch_mode(orig_idx)
             self._on_status(f"📸 모든 탭 스크린샷 저장 완료 ({save_dir})")
@@ -432,7 +433,7 @@ class MainWindow(QMainWindow):
                 try:
                     tab._save_settings()
                 except Exception as e:
-                    print(f"Error saving settings for {type(tab).__name__}: {e}")
+                    app_logger.error(f"Error saving settings for {type(tab).__name__}: {e}")
 
     def _restore_settings(self):
         """Load saved MainWindow UI state and forward to sub‑tabs."""

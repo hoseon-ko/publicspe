@@ -19,6 +19,7 @@ except Exception as e:
 
 from core.camera.base import BaseCamera, CameraCapabilities, NotSupportedError
 from core.spe_writer import save_spe as _spe_writer_save_spe
+from core.logger import app_logger
 
 
 # 모델별로 속성명이 달라질 수 있어 alias 목록을 둔다.
@@ -445,7 +446,7 @@ class PicamCameraWrapper:
                 except Exception:
                     pass
             else:
-                print(f"[Picam] Safe commit error: {e}")
+                app_logger.error(f"[Picam] Safe commit error: {e}", exc_info=True)
 
     # ── 이미지 획득 ───────────────────────────────────────────────────
 
