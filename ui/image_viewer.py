@@ -1483,15 +1483,112 @@ class ImageViewer(QWidget):
         self.lbl_saturated.setVisible(False)
         toolbar.addWidget(self.lbl_saturated)
 
-        # 픽셀 정보
-        self.pixel_label = QLabel("Current: -  |  📍 -")
-        self.pixel_label.setStyleSheet("color: #e0e0e0; font-size: 11px;")
-        toolbar.addWidget(self.pixel_label)
-
         toolbar_widget = QWidget()
         toolbar_widget.setLayout(toolbar)
         toolbar_widget.setStyleSheet("background: #16213e;")
         layout.addWidget(toolbar_widget)
+
+        # ── 정보 바 (툴바 아래 두 번째 줄) ──────────────────────────
+        info_bar = QWidget()
+        info_bar.setFixedHeight(22)
+        info_bar.setStyleSheet(
+            "background: #0d1422; border-bottom: 1px solid #0f3460;"
+        )
+        info_row = QHBoxLayout(info_bar)
+        info_row.setContentsMargins(6, 0, 6, 0)
+        info_row.setSpacing(0)
+
+        _ib = (
+            "color: #4a7a9a; font-family: 'Courier New';"
+            " font-size: 10px; padding: 0 6px;"
+        )
+        _ib_val = (
+            "color: #a0c8e0; font-family: 'Courier New';"
+            " font-size: 10px; padding: 0 6px;"
+        )
+        _btn_zoom = (
+            "QPushButton { background: transparent; color: #3a6a8a;"
+            " border: 1px solid #1a3a55; border-radius: 2px;"
+            " font-family: 'Courier New'; font-size: 10px; padding: 0 5px; }"
+            "QPushButton:hover { color: #4ecdc4; border-color: #4ecdc4; }"
+        )
+
+        # 줌 % 표시
+        lbl_zoom_icon = QLabel("🔍")
+        lbl_zoom_icon.setStyleSheet(_ib)
+        info_row.addWidget(lbl_zoom_icon)
+
+        self._lbl_zoom_pct = QLabel("100%")
+        self._lbl_zoom_pct.setFixedWidth(46)
+        self._lbl_zoom_pct.setStyleSheet(_ib_val)
+        info_row.addWidget(self._lbl_zoom_pct)
+
+        # FIT / 1:1 버튼
+        btn_fit = QPushButton("FIT")
+        btn_fit.setFixedSize(34, 16)
+        btn_fit.setStyleSheet(_btn_zoom)
+        btn_fit.clicked.connect(self.autoRange)
+        info_row.addWidget(btn_fit)
+
+        btn_1x = QPushButton("1:1")
+        btn_1x.setFixedSize(34, 16)
+        btn_1x.setStyleSheet(_btn_zoom)
+        btn_1x.clicked.connect(self._zoom_actual)
+        info_row.addWidget(btn_1x)
+
+        # 구분선
+        def _vsep():
+            sep = QLabel("|")
+            sep.setStyleSheet("color: #1a3a55; padding: 0 4px;")
+            return sep
+        info_row.addWidget(_vsep())
+
+        # 마우스 커서 좌표·값
+        lbl_cur_icon = QLabel("✛")
+        lbl_cur_icon.setStyleSheet(_ib)
+        info_row.addWidget(lbl_cur_icon)
+
+        self._lbl_cursor = QLabel("X:—  Y:—  Val:—")
+        self._lbl_cursor.setFixedWidth(200)
+        self._lbl_cursor.setStyleSheet(_ib_val)
+        info_row.addWidget(self._lbl_cursor)
+
+        info_row.addWidget(_vsep())
+
+        # 클릭 핀 좌표·값
+        lbl_pin_icon = QLabel("📍")
+        lbl_pin_icon.setStyleSheet(_ib)
+        info_row.addWidget(lbl_pin_icon)
+
+        self._lbl_pin = QLabel("X:—  Y:—  Val:—")
+        self._lbl_pin.setFixedWidth(200)
+        self._lbl_pin.setStyleSheet(_ib_val)
+        info_row.addWidget(self._lbl_pin)
+
+        info_row.addWidget(_vsep())
+
+        # 선택 박스 크기
+        lbl_sel_icon = QLabel("▣")
+        lbl_sel_icon.setStyleSheet(_ib)
+        info_row.addWidget(lbl_sel_icon)
+
+        self._lbl_sel = QLabel("—")
+        self._lbl_sel.setFixedWidth(140)
+        self._lbl_sel.setStyleSheet(_ib_val)
+        info_row.addWidget(self._lbl_sel)
+
+        info_row.addStretch()
+
+        # 이미지 해상도 표시
+        self._lbl_img_size = QLabel("—×—")
+        self._lbl_img_size.setStyleSheet(_ib)
+        info_row.addWidget(self._lbl_img_size)
+
+        layout.addWidget(info_bar)
+
+        # 기존 pixel_label (하위호환 — 숨김 처리, 코드에서 setText 호출은 유지)
+        self.pixel_label = QLabel()
+        self.pixel_label.setVisible(False)
 
         # ── ROI 목록 패널 (토글) ──
         self._roi_list_panel = QWidget()
@@ -1617,9 +1714,17 @@ class ImageViewer(QWidget):
     # Public API
     # ─────────────────────────────────────────
 
+    def _update_img_size_label(self):
+        if self._current_image is not None:
+            h, w = self._current_image.shape[:2]
+            self._lbl_img_size.setText(f"{w}×{h}px")
+        else:
+            self._lbl_img_size.setText("—×—")
+
     def set_image(self, image: np.ndarray):
         """프레임 전환 (뷰 유지)"""
         self._current_image = image
+        self._update_img_size_label()
         self._refresh_pixmap(fit=False)
         self._recompute_profile()
         self._update_ruler_profiles()
@@ -1629,6 +1734,7 @@ class ImageViewer(QWidget):
     def set_image_first(self, image: np.ndarray):
         """첫 로드 (뷰 fit) — range 리셋"""
         self._current_image = image
+        self._update_img_size_label()
         self._display_vmin = None
         self._display_vmax = None
         if self._hist_range_widget.isVisible():
@@ -1648,6 +1754,7 @@ class ImageViewer(QWidget):
         # (프로파일/룰러/픽셀값은 raw 기준)
         if self._current_image is None:
             self._current_image = rgb
+            self._update_img_size_label()
         disp = np.rot90(rgb, k=self._rotation_k) if self._rotation_k else rgb
         h, w = disp.shape[:2]
         if disp.ndim == 3 and disp.shape[2] == 3:
@@ -1787,6 +1894,9 @@ class ImageViewer(QWidget):
     # ─────────────────────────────────────────
 
     def _on_scale_changed(self, scale: float, x_offset: float, y_offset: float):
+        # 줌 % 업데이트
+        self._lbl_zoom_pct.setText(f"{scale * 100:.0f}%")
+
         if self._current_image is None:
             return
         img = self._current_image
@@ -2245,28 +2355,35 @@ class ImageViewer(QWidget):
                 self._update_pixel_label(ix, iy, val)
 
     def _update_pixel_label(self, ix: int, iy: int, val):
-        # val이 RGB 문자열이면 그대로, 아니면 float 포맷
+        # 정보 바 커서 위치 업데이트
         if isinstance(val, str) and val.startswith("R:"):
-            cur = f"Current: X:{ix}  Y:{iy}  {val}"
+            self._lbl_cursor.setText(f"X:{ix}  Y:{iy}  {val}")
         else:
-            cur = f"Current: X:{ix}  Y:{iy}  Val:{val:.1f}"
+            self._lbl_cursor.setText(f"X:{ix:4d}  Y:{iy:4d}  Val:{val:.0f}")
+
+        # 클릭 핀
         if self._last_click_info is not None:
             lx, ly, lv = self._last_click_info
-            # 클릭값도 RGB 문자열 지원
             if isinstance(lv, str) and lv.startswith("R:"):
-                last = f"📍 X:{lx}  Y:{ly}  {lv}"
+                self._lbl_pin.setText(f"X:{lx}  Y:{ly}  {lv}")
             else:
-                last = f"📍 X:{lx}  Y:{ly}  Val:{lv:.1f}"
+                self._lbl_pin.setText(f"X:{lx:4d}  Y:{ly:4d}  Val:{lv:.0f}")
         else:
-            last = "📍 -"
-        self.pixel_label.setText(f"{cur}   |   {last}")
+            self._lbl_pin.setText("X:—  Y:—  Val:—")
+
+        # 하위호환 pixel_label (숨겨져 있지만 setValue 유지)
+        self.pixel_label.setText(f"X:{ix} Y:{iy}")
 
 
     def _on_sel_box_changed(self, x0: float, y0: float, x1: float, y1: float):
         if x0 < 0:
             self._sel_box_rect = None
+            self._lbl_sel.setText("—")
         else:
             self._sel_box_rect = (x0, y0, x1, y1)
+            w = abs(x1 - x0)
+            h = abs(y1 - y0)
+            self._lbl_sel.setText(f"{w:.0f}×{h:.0f}  @({min(x0,x1):.0f},{min(y0,y1):.0f})")
         self._update_ruler_profiles()
 
     def _on_mouse_clicked(self, x: float, y: float):
