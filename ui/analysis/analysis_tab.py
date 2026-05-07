@@ -26,6 +26,7 @@ from ui.frame_grid_panel import FrameGridPanel
 from ui.plot_panel import PlotPanel, HistogramPanel
 from ui.roi_panel import RoiPanel
 from core.async_worker import SpeLoadWorker
+from theme.styles import Fonts, Sizes, C_ACCENT, C_TEXT_DIM, C_BORDER, C_BG_MED
 
 
 class AnalysisTab(QMainWindow):
@@ -45,6 +46,37 @@ class AnalysisTab(QMainWindow):
 
         self.setWindowFlags(Qt.WindowType.Widget)   # 탭 임베드용
         self.menuBar().setVisible(False)
+
+        # 도크 타이틀 스타일
+        self.setStyleSheet(f"""
+            QDockWidget::title {{
+                background: {C_BG_MED};
+                border-bottom: 1px solid {C_BORDER};
+                padding: 3px 8px;
+                color: {C_TEXT_DIM};
+                font-family: '{Fonts.MONO}';
+                font-size: {Sizes.SMALL};
+                font-weight: bold;
+                letter-spacing: 1px;
+            }}
+            QToolBar {{
+                background: #0a0f1e;
+                border-bottom: 1px solid {C_BORDER};
+                spacing: 4px;
+                padding: 2px 6px;
+            }}
+            QToolButton {{
+                background: #0d1e38;
+                color: {C_ACCENT};
+                border: 1px solid #1a4060;
+                border-radius: 3px;
+                padding: 3px 8px;
+                font-family: '{Fonts.MONO}';
+                font-size: {Sizes.LOG};
+            }}
+            QToolButton:hover {{ background: #1a3a60; }}
+            QToolButton:checked {{ background: #1a3010; color: {C_ACCENT}; border-color: #2a6020; }}
+        """)
 
         self._space_timer = QTimer()
         self._space_timer.setSingleShot(True)
@@ -66,7 +98,7 @@ class AnalysisTab(QMainWindow):
         self.setCentralWidget(self.image_viewer)
 
         self.file_list_panel = FileListPanel()
-        self.dock_files = QDockWidget("Files", self)
+        self.dock_files = QDockWidget("📁  Files", self)
         self.dock_files.setWidget(self.file_list_panel)
         self.dock_files.setAllowedAreas(
             Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
@@ -74,7 +106,7 @@ class AnalysisTab(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_files)
 
         self.frame_grid_panel = FrameGridPanel()
-        self.dock_frames = QDockWidget("Frames", self)
+        self.dock_frames = QDockWidget("🎞  Frames", self)
         self.dock_frames.setWidget(self.frame_grid_panel)
         self.dock_frames.setAllowedAreas(
             Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
@@ -83,7 +115,7 @@ class AnalysisTab(QMainWindow):
         self.splitDockWidget(self.dock_files, self.dock_frames, Qt.Orientation.Vertical)
 
         self.plot_panel = PlotPanel("Profile")
-        self.dock_plot = QDockWidget("Profile Plot", self)
+        self.dock_plot = QDockWidget("📈  Profile Plot", self)
         self.dock_plot.setWidget(self.plot_panel)
         self.dock_plot.setAllowedAreas(
             Qt.DockWidgetArea.BottomDockWidgetArea | Qt.DockWidgetArea.TopDockWidgetArea |
@@ -92,7 +124,7 @@ class AnalysisTab(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_plot)
 
         self.histogram_panel = HistogramPanel()
-        self.dock_histogram = QDockWidget("Histogram", self)
+        self.dock_histogram = QDockWidget("📊  Histogram", self)
         self.dock_histogram.setWidget(self.histogram_panel)
         self.dock_histogram.setAllowedAreas(
             Qt.DockWidgetArea.BottomDockWidgetArea | Qt.DockWidgetArea.TopDockWidgetArea |
@@ -102,7 +134,7 @@ class AnalysisTab(QMainWindow):
         self.splitDockWidget(self.dock_plot, self.dock_histogram, Qt.Orientation.Horizontal)
 
         self.roi_panel = RoiPanel()
-        self.dock_roi = QDockWidget("ROI List", self)
+        self.dock_roi = QDockWidget("📐  ROI List", self)
         self.dock_roi.setWidget(self.roi_panel)
         self.dock_roi.setAllowedAreas(
             Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
