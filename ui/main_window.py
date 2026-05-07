@@ -25,6 +25,7 @@ from ui.live.live_tab import LiveTab
 from ui.acquisition.acquisition_tab import AcquisitionTab
 from ui.analysis.analysis_tab import AnalysisTab
 from ui.scan.scan_tab import ScanTab
+from ui.autofocus.autofocus_tab import AutoFocusTab
 from theme.styles import Fonts, Sizes, C_ACCENT, C_TEXT_DIM, C_BG_MED, C_BORDER
 
 
@@ -135,12 +136,18 @@ class MainWindow(QMainWindow):
         self.analysis_tab = AnalysisTab(spe_class=self._spe_class)
         self.analysis_tab.status_message.connect(self._on_status)
 
+        self.af_tab = AutoFocusTab()
+        self.af_tab.log_message.connect(self._on_status)
+        self.af_tab.af_starting.connect(self.live_tab.stop_live)
+        self.af_tab.af_done.connect(self.live_tab.resume_live)
+
         # 탭 버튼 + 스택 등록
         _modes = [
-            ("Live",     self.live_tab),
-            ("Acquire",  self.acq_tab),
-            ("Scan",     self.scan_tab),
-            ("Analysis", self.analysis_tab),
+            ("Live",      self.live_tab),
+            ("Acquire",   self.acq_tab),
+            ("Scan",      self.scan_tab),
+            ("AutoFocus", self.af_tab),
+            ("Analysis",  self.analysis_tab),
         ]
         for idx, (label, widget) in enumerate(_modes):
             btn = QPushButton(label)
@@ -196,6 +203,10 @@ class MainWindow(QMainWindow):
         self.live_tab.camera_disconnected.connect(self.scan_tab.clear_shared_camera)
         self.scan_tab.scan_starting.connect(self.live_tab.stop_live)
         self.scan_tab.scan_done.connect(self.live_tab.resume_live)
+
+        # 카메라 공유: Live ↔ AutoFocus
+        self.live_tab.camera_connected.connect(self.af_tab.set_shared_camera)
+        self.live_tab.camera_disconnected.connect(self.af_tab.clear_shared_camera)
 
         self.scan_tab.set_motor_panel(self.live_tab.motor_panel)
 
@@ -299,7 +310,7 @@ class MainWindow(QMainWindow):
 
     def _on_spe_saved(self, path: str):
         self.analysis_tab.open_spe(path)
-        self._switch_mode(3)
+        self._switch_mode(4)   # Analysis = index 4
         self._on_status(f"SPE 열림: {path}")
 
     def _on_status(self, msg: str):
@@ -311,4 +322,5 @@ class MainWindow(QMainWindow):
         self.live_tab.cleanup()
         self.acq_tab.cleanup()
         self.scan_tab.cleanup()
+        self.af_tab.cleanup()
         super().closeEvent(event)
