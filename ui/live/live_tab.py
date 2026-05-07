@@ -870,6 +870,26 @@ class LiveTab(QMainWindow):
 
         self.cam_panel.btn_snap.setEnabled(False)
         self._log("📷 SNAP 촬영 중...")
+        
+        # [Progress Bar] LightField 스타일 노출 게이지 애니메이션 시작
+        try:
+            exp_ms = self._cam.get_exposure_ms()
+        except Exception:
+            exp_ms = 1000.0  # fallback
+            
+        if exp_ms > 100:
+            self.cam_panel.bar_snap_progress.setValue(0)
+            self._snap_elapsed = 0
+            self._snap_total = exp_ms
+            if hasattr(self, '_snap_timer_anim') and self._snap_timer_anim.isActive():
+                self._snap_timer_anim.stop()
+            self._snap_timer_anim = QTimer()
+            self._snap_timer_anim.setInterval(max(20, int(exp_ms / 50)))
+            self._snap_timer_anim.timeout.connect(self._on_snap_progress_tick)
+            self._snap_timer_anim.start()
+        else:
+            self.cam_panel.bar_snap_progress.setValue(100)
+
         self._snap_thread = QThread()
         self._snap_worker = _SnapWorker(self._cam)
         self._snap_worker.moveToThread(self._snap_thread)
@@ -881,7 +901,20 @@ class LiveTab(QMainWindow):
         self._snap_thread.finished.connect(lambda: self.cam_panel.btn_snap.setEnabled(self._cam is not None))
         self._snap_thread.start()
 
+    def _on_snap_progress_tick(self):
+        """단일 촬영 중 프로그레스바를 부드럽게 채움."""
+        self._snap_elapsed += self._snap_timer_anim.interval()
+        if self._snap_elapsed >= self._snap_total:
+            self.cam_panel.bar_snap_progress.setValue(100)
+            self._snap_timer_anim.stop()
+        else:
+            pct = int(100 * self._snap_elapsed / self._snap_total)
+            self.cam_panel.bar_snap_progress.setValue(pct)
+
     def _on_snap_success(self, raw: np.ndarray):
+        if hasattr(self, '_snap_timer_anim') and self._snap_timer_anim.isActive():
+            self._snap_timer_anim.stop()
+        self.cam_panel.bar_snap_progress.setValue(100)
         self._last_raw = raw
         self._viewer_raw = raw         # 스냅은 즉시 뷰어에 표시됨
         self._first_frame = True       # snap 결과는 항상 FIT
@@ -892,6 +925,9 @@ class LiveTab(QMainWindow):
         self._proc_worker.submit(raw)
 
     def _on_snap_error(self, msg: str):
+        if hasattr(self, '_snap_timer_anim') and self._snap_timer_anim.isActive():
+            self._snap_timer_anim.stop()
+        self.cam_panel.bar_snap_progress.setValue(0)
         self._log(f"❌ SNAP 실패: {msg}")
 
     def _capture_bg(self):

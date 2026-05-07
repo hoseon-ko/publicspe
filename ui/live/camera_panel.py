@@ -150,14 +150,22 @@ class CameraControlPanel(QWidget):
         self.btn_snap.setToolTip("단일 프레임 촬영 (라이브 정지 상태에서 사용)")
         row3.addWidget(self.btn_snap)
 
-        self.check_gil_block = QCheckBox("Simulate GIL Block")
-        self.check_gil_block.setStyleSheet(_CHECK_STYLE)
-        self.check_gil_block.setToolTip("체크 시 UI 멈춤(GIL 독점) 현상 재현")
-        self.check_gil_block.setVisible(False)
-        row3.addWidget(self.check_gil_block)
-
         gd.addLayout(row3)
-        layout.addWidget(grp_dev) 
+        
+        # [LightField Style] 단일 촬영 노출 게이지 바
+        from PyQt6.QtWidgets import QProgressBar
+        self.bar_snap_progress = QProgressBar()
+        self.bar_snap_progress.setFixedHeight(4)
+        self.bar_snap_progress.setTextVisible(False)
+        self.bar_snap_progress.setRange(0, 100)
+        self.bar_snap_progress.setValue(0)
+        self.bar_snap_progress.setStyleSheet(
+            "QProgressBar { background: transparent; border: none; } "
+            "QProgressBar::chunk { background: #ffe66d; border-radius: 2px; }"
+        )
+        gd.addWidget(self.bar_snap_progress)
+
+        layout.addWidget(grp_dev)
 
         # ── 노출 그룹 ─────────────────────────────────────────────────
         grp_exp = CollapsibleSection("EXPOSURE")
