@@ -19,7 +19,7 @@ from PyQt6.QtGui import (
     QWheelEvent, QMouseEvent, QFont, QTransform
 )
 from typing import Optional, Union
-
+from core.logger import app_logger
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 메인 ImageViewer 위젯
@@ -34,7 +34,18 @@ class ImageViewer(QWidget):
             except Exception:
                 pass
             self._colormap_worker = None
+        
+        self.clear_memory()
         super().closeEvent(event)
+
+    def clear_memory(self):
+        """[Phase 5] 뷰어 닫힘 시 대용량 이미지 배열과 메모리 강제 해제 (누수 방지)."""
+        self._current_image = None
+        if hasattr(self, '_view') and hasattr(self._view, '_pixmap_item'):
+            self._view._pixmap_item.setPixmap(QPixmap())
+        import gc
+        gc.collect()
+
     # 시그널
     line_profile_updated = pyqtSignal(object, str)
     box_profile_updated  = pyqtSignal(object, object, str)
@@ -1370,7 +1381,7 @@ class ImageViewer(QWidget):
             pixmap = ndarray_to_qpixmap(rgba)
             QApplication.clipboard().setPixmap(pixmap)
         except Exception as e:
-            print(f"[ImageViewer] 클립보드 복사 오류: {e}")
+            app_logger.error(f"[ImageViewer] 클립보드 복사 오류: {e}", exc_info=True)
 
     # ─────────────────────────────────────────
     # 하위 호환 (main_window 에서 사용하는 속성들)
