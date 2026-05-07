@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QIcon, QPixmap, QImage
 
+from core.background_manager import BackgroundManager
 from core.image_processor import ImageProcessor, TemporalMode
 from ui.image_viewer import ImageViewer
 from ui.plot_panel import PlotPanel
@@ -96,7 +97,9 @@ class ScanTab(QWidget):
         # 무시 마스크 영역 목록 [(x1,y1,x2,y2), ...]
         self._mask_rects: list[tuple[int, int, int, int]] = []
 
-        self._background: 'np.ndarray | None' = None
+        # BG는 BackgroundManager 싱글톤으로 공유
+        self._bm = BackgroundManager.instance()
+        self._bm.bg_changed.connect(self._on_bg_changed)
         self._scan_start_time: float = 0.0
         self._step_acq_timer = None  # set after build_ui
 
@@ -691,14 +694,30 @@ class ScanTab(QWidget):
 
     # ── 백그라운드 제어 ───────────────────────────────────────────────
 
+    def _on_bg_changed(self, has_bg: bool):
+        """BackgroundManager BG 변경 시 UI 동기화."""
+        if has_bg:
+            self._lbl_bg_status.setText(self._bm.status_text())
+            self._lbl_bg_status.setStyleSheet(
+                f"color: #4ecdc4; font-family: '{_FC}'; font-size: 13px;"
+            )
+            self.chk_bg_active.setEnabled(True)
+            self.chk_bg_active.setChecked(True)
+        else:
+            self._lbl_bg_status.setText("없음")
+            self._lbl_bg_status.setStyleSheet(
+                f"color: {C_TEXT_DIM}; font-family: '{_FC}'; font-size: 13px;"
+            )
+            self.chk_bg_active.setEnabled(False)
+            self.chk_bg_active.setChecked(False)
+
     def _capture_background(self):
         if self._cam is None:
             self._log("❌ 카메라 연결 필요")
             return
         try:
             raw = np.asarray(self._cam.snap())
-            self._background = raw.astype(np.float32)
-            self._lbl_bg_status.setText(f"{raw.shape[1]}×{raw.shape[0]}")
+            self._bm.set_frame(raw)              # ← BackgroundManager에 등록
             self._log(f"📸 배경 획득: {raw.shape[1]}×{raw.shape[0]}")
         except Exception as e:
             self._log(f"⚠️ 배경 획득 실패: {e}")

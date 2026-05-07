@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, QObject, QSettings, QTimer, pyqtSignal
 
 from core.async_worker import TempPollerThread
+from core.background_manager import BackgroundManager
 from core.camera.base import BaseCamera
 from core.camera.picamp import PicamCamera
 from core.spe_writer import save_spe
@@ -163,7 +164,9 @@ class AcquisitionTab(QWidget):
         self._progress_timer.setInterval(100)
         self._progress_timer.timeout.connect(self._on_progress_tick)
         self._temp_thread: Optional[TempPollerThread] = None  # 온도 폴링 (백그라운드)
-        self._bg_frames: Optional[np.ndarray] = None  # (N, H, W) float32
+        # BG는 BackgroundManager 싱글톤으로 공유
+        self._bm = BackgroundManager.instance()
+        self._bm.bg_changed.connect(self._on_bg_changed)
         self._build_ui()
 
     def _estimate_frame_timing(self, exposure_ms: float, timeout_s: float) -> tuple[float, float, float, float]:
@@ -739,6 +742,23 @@ class AcquisitionTab(QWidget):
 
     # ── 배경 관련 ─────────────────────────────────────────────────────
 
+    def _on_bg_changed(self, has_bg: bool):
+        """BackgroundManager BG 변경 시 UI 동기화."""
+        if has_bg:
+            self._lbl_bg_status.setText(self._bm.status_text())
+            self._lbl_bg_status.setStyleSheet(
+                f"color: #4ecdc4; font-family: '{_FC}'; font-size: {_FS_SMALL};"
+            )
+            self.check_bg_sub.setEnabled(True)
+            self.check_bg_sub.setChecked(True)
+        else:
+            self._lbl_bg_status.setText("BG 없음")
+            self._lbl_bg_status.setStyleSheet(
+                f"color: {C_TEXT_DIM}; font-family: '{_FC}'; font-size: {_FS_SMALL};"
+            )
+            self.check_bg_sub.setEnabled(False)
+            self.check_bg_sub.setChecked(False)
+
     def _capture_bg(self):
         if self._cam is None:
             self._log("❌ 카메라 미연결")
@@ -750,14 +770,7 @@ class AcquisitionTab(QWidget):
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             bg_path = save_dir / f"background_{ts}.spe"
             save_spe(bg_path, [frame], exposure_ms=self.spin_exposure.value())
-            self._bg_frames = frame[np.newaxis]   # (1, H, W)
-            h, w = frame.shape
-            self._lbl_bg_status.setText(f"{w}×{h}  [{bg_path.name}]")
-            self._lbl_bg_status.setStyleSheet(
-                f"color: #4ecdc4; font-family: '{_FC}'; font-size: {_FS_SMALL};"
-            )
-            self.check_bg_sub.setEnabled(True)
-            self.check_bg_sub.setChecked(True)
+            self._bm.set_frame(frame)           # ← BackgroundManager에 등록
             self._log(f"📸 BG 획득 저장: {bg_path}")
         except Exception as e:
             self._log(f"❌ BG 획득 실패: {e}")
@@ -770,15 +783,9 @@ class AcquisitionTab(QWidget):
             return
         try:
             frames = self._read_spe_frames(path)   # (N, H, W) float32
-            self._bg_frames = frames
+            self._bm.set_frames(frames)             # ← BackgroundManager에 등록
             n, h, w = frames.shape
             name = os.path.basename(path)
-            self._lbl_bg_status.setText(f"{w}×{h}  {n}f  [{name}]")
-            self._lbl_bg_status.setStyleSheet(
-                f"color: #4ecdc4; font-family: '{_FC}'; font-size: {_FS_SMALL};"
-            )
-            self.check_bg_sub.setEnabled(True)
-            self.check_bg_sub.setChecked(True)
             self._log(f"📂 BG 로드: {name}  ({n} 프레임, {w}×{h})")
         except Exception as e:
             self._log(f"❌ BG 파일 로드 실패: {e}")
@@ -811,27 +818,15 @@ class AcquisitionTab(QWidget):
 
     def _apply_bg(self, frame: np.ndarray) -> np.ndarray:
         """BG 차감 적용 (체크박스 활성 & BG 있을 때만)."""
-        if not self.check_bg_sub.isChecked() or self._bg_frames is None:
+        if not self.check_bg_sub.isChecked() or not self._bm.has_bg:
             return frame
-        bg = self._bg_frames.mean(axis=0)
-        if bg.shape != frame.shape:
-            return frame
-        result = np.clip(frame.astype(np.float32) - bg, 0.0, None)
-        return result.astype(np.float32)
+        return self._bm.apply(frame)
 
     def _subtract_bg_from_list(self, frames: list) -> list:
         """프레임 리스트에 BG 차감 적용 (비활성 시 그대로 반환)."""
-        if not self.check_bg_sub.isChecked() or self._bg_frames is None:
+        if not self.check_bg_sub.isChecked() or not self._bm.has_bg:
             return frames
-        bg = self._bg_frames.mean(axis=0)
-        result = []
-        for f in frames:
-            arr = np.asarray(f)
-            if arr.shape == bg.shape:
-                result.append(np.clip(arr.astype(np.float32) - bg, 0.0, None))
-            else:
-                result.append(arr)
-        return result
+        return self._bm.apply_list([np.asarray(f) for f in frames])
 
     def _save_spe(self, frames: list) -> Path:
         save_dir = Path(self.edit_save_dir.text().strip() or "acquisitions")

@@ -844,8 +844,12 @@ class LiveTab(QMainWindow):
         self._log(f"❌ SNAP 실패: {msg}")
 
     def _capture_bg(self):
-        self._proc.capture_background(self._last_raw)
-        self._log("📸 배경 캡처됨")
+        from core.background_manager import BackgroundManager
+        raw = self._last_raw
+        self._proc.capture_background(raw)          # 로컬 ImageProcessor BG
+        if raw is not None:
+            BackgroundManager.instance().set_frame(raw)  # 공유 BackgroundManager
+        self._log("📸 배경 캡처됨 (전체 탭 공유)")
 
     # ── 프레임 처리 ───────────────────────────────────────────────────
 
