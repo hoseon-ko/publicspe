@@ -873,6 +873,8 @@ class ImageViewer(QWidget):
         try:
             from scipy import ndimage
             img = self._current_image.astype(np.float64)
+            if self._rotation_k:
+                img = np.rot90(img, k=self._rotation_k)
             h, w = img.shape[:2]
             num = max(int(np.hypot(x1-x0, y1-y0)), 2)
             xs = np.linspace(np.clip(x0, 0, w-1), np.clip(x1, 0, w-1), num)
@@ -887,6 +889,8 @@ class ImageViewer(QWidget):
             return
         try:
             img = self._current_image
+            if self._rotation_k:
+                img = np.rot90(img, k=self._rotation_k)
             h, w = img.shape[:2]
             ix0 = int(np.clip(min(x0,x1), 0, w-1))
             ix1 = int(np.clip(max(x0,x1), 0, w-1))
@@ -904,6 +908,8 @@ class ImageViewer(QWidget):
             return
         try:
             img = self._current_image
+            if self._rotation_k:
+                img = np.rot90(img, k=self._rotation_k)
             h, w = img.shape[:2]
             ix0 = int(np.clip(min(x0,x1), 0, w-1))
             ix1 = int(np.clip(max(x0,x1), 0, w-1))
@@ -1110,9 +1116,12 @@ class ImageViewer(QWidget):
         if self._current_image is None:
             return
         ix, iy = int(x), int(y)
-        h, w = self._current_image.shape[:2]
+        img = self._current_image
+        if self._rotation_k:
+            img = np.rot90(img, k=self._rotation_k)
+        h, w = img.shape[:2]
         if 0 <= ix < w and 0 <= iy < h:
-            val = self._current_image[iy, ix]
+            val = img[iy, ix]
             import numpy as np
             # 칼라(RGB) 픽셀 처리
             if isinstance(val, (np.ndarray, list, tuple)) and len(val) == 3:
@@ -1183,6 +1192,8 @@ class ImageViewer(QWidget):
             return
         x0, y0, x1, y1 = rect
         img = self._current_image
+        if self._rotation_k:
+            img = np.rot90(img, k=self._rotation_k)
         h, w = img.shape[:2]
         ix0 = max(0, min(int(min(x0, x1)), w - 1))
         iy0 = max(0, min(int(min(y0, y1)), h - 1))
@@ -1216,9 +1227,12 @@ class ImageViewer(QWidget):
         if self._current_image is None:
             return
         ix, iy = int(x), int(y)
-        h, w = self._current_image.shape[:2]
+        img = self._current_image
+        if self._rotation_k:
+            img = np.rot90(img, k=self._rotation_k)
+        h, w = img.shape[:2]
         if 0 <= ix < w and 0 <= iy < h:
-            val = self._current_image[iy, ix]
+            val = img[iy, ix]
             import numpy as np
             # 칼라(RGB) 픽셀 처리: 클릭 시에도 문자열로 저장
             if isinstance(val, (np.ndarray, list, tuple)) and len(val) == 3:

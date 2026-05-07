@@ -28,7 +28,7 @@ from PyQt6.QtWidgets import (
     QProgressBar, QTextEdit, QCheckBox, QRadioButton,
     QButtonGroup, QFileDialog, QListWidget, QListWidgetItem,
     QTableWidget, QTableWidgetItem, QHeaderView,
-    QFrame, QSizePolicy,
+    QFrame, QSizePolicy, QLineEdit,
 )
 from ui.widgets.auto_splitter import AutoSplitter
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QSettings, QSize
@@ -459,6 +459,36 @@ class AutoFocusTab(QWidget):
         )
         ol.addWidget(self.chk_goto_best)
 
+        ol.addWidget(_sep_h())
+        # ── Capture 저장 옵션 ──────────────────────────────────────
+        self.chk_save_frames = QCheckBox("스캔 결과 SPE 저장")
+        self.chk_save_frames.setStyleSheet(
+            f"color: #4ecdc4; font-family: '{_FC}'; font-size: {_FSS}; font-weight: bold;"
+        )
+        ol.addWidget(self.chk_save_frames)
+
+        row_dir = QHBoxLayout()
+        self.edit_save_dir = QLineEdit()
+        self.edit_save_dir.setPlaceholderText("SPE 저장 폴더 선택...")
+        self.edit_save_dir.setStyleSheet(f"""
+            QLineEdit {{
+                background: #081220; border: 1px solid #1a3060;
+                color: #a0b0d0; font-family: '{_FC}'; font-size: 10px; padding: 2px 4px;
+            }}
+        """)
+        self.btn_save_dir = QPushButton("📂")
+        self.btn_save_dir.setFixedWidth(28)
+        self.btn_save_dir.setStyleSheet(f"""
+            QPushButton {{
+                background: #1a3060; color: white; border-radius: 3px; font-size: 10px;
+            }}
+            QPushButton:hover {{ background: #2a4a8a; }}
+        """)
+        self.btn_save_dir.clicked.connect(self._browse_save_dir)
+        row_dir.addWidget(self.edit_save_dir, 1)
+        row_dir.addWidget(self.btn_save_dir)
+        ol.addLayout(row_dir)
+
         v.addWidget(sec_opt)
         v.addWidget(_sep_h())
 
@@ -511,8 +541,16 @@ class AutoFocusTab(QWidget):
         self.btn_goto.setEnabled(False)
         self.btn_goto.setToolTip("Best Z 위치로 이동")
         self.btn_goto.clicked.connect(self._on_goto)
+
+        self.btn_manual_save = _btn("💾 SPE", "#4ecdc4")
+        self.btn_manual_save.setFixedWidth(60)
+        self.btn_manual_save.setEnabled(False)
+        self.btn_manual_save.setToolTip("현재 스캔 결과 SPE로 저장")
+        self.btn_manual_save.clicked.connect(self._save_af_result_spe)
+
         res_row.addWidget(self._lbl_best_z, 1)
         res_row.addWidget(self.btn_goto)
+        res_row.addWidget(self.btn_manual_save)
 
         self._lbl_best_sh = QLabel("Sharpness:  —")
         self._lbl_best_sh.setStyleSheet(
@@ -798,6 +836,12 @@ class AutoFocusTab(QWidget):
         )
         self.btn_run.setEnabled(True)
 
+    def _browse_save_dir(self):
+        """AF 스캔 프레임 저장 폴더 선택."""
+        folder = QFileDialog.getExistingDirectory(self, "저장 폴더 선택")
+        if folder:
+            self.edit_save_dir.setText(folder)
+
     def _browse_sim_images(self):
         """파일 선택 → 지원 포맷 로드.
         SPE: 파일 하나에 여러 프레임 → 각 프레임을 독립 이미지로 분리.
@@ -998,9 +1042,13 @@ class AutoFocusTab(QWidget):
         self._lbl_best_z.setText("Best Z:  —")
         self._lbl_best_sh.setText("Sharpness:  —")
         self.btn_goto.setEnabled(False)
+        self.btn_manual_save.setEnabled(False)
         self.progress.setValue(0)
         self._lbl_status.setText("Running…")
         self._lbl_step_info.setText("—")
+
+        self._set_running(True)
+        self.af_starting.emit()
 
         self._set_running(True)
         self.af_starting.emit()
@@ -1015,6 +1063,7 @@ class AutoFocusTab(QWidget):
             avg_frames   = self.spin_avg.value(),
             sim_mode     = self._sim_active,
             roi_rect     = self._roi_rect if self.cb_use_roi.isChecked() else None,
+            rotation_k   = self.image_viewer._rotation_k,
         )
         self._worker.step_done.connect(self.on_step_done)
         self._worker.finished.connect(self.on_af_finished)
@@ -1136,10 +1185,63 @@ class AutoFocusTab(QWidget):
         self._best_vline.setPos(best_z)
         self._best_vline.show()
         self.btn_goto.setEnabled(True)
+        self.btn_manual_save.setEnabled(True)
         self.progress.setValue(100)
         self._lbl_status.setText(f"완료 — Best Z: {best_z:+.2f} µm")
         self._log(f"AF 완료 — Best Z: {best_z:+.2f} µm  Sharpness: {best_sh:.1f}")
+
+        # SPE 저장 처리
+        if self.chk_save_frames.isChecked() and self._image_list:
+            self._save_af_result_spe()
+
         self._set_running(False)
+
+    def _save_af_result_spe(self):
+        """현재 스캔된 모든 프레임을 하나의 SPE 파일로 저장."""
+        base_path = self.edit_save_dir.text().strip()
+        if not base_path:
+            # 수동 저장 시 경로가 없으면 폴더 브라우저 열기
+            self._browse_save_dir()
+            base_path = self.edit_save_dir.text().strip()
+            if not base_path:
+                self._log("⚠️ 저장 경로가 지정되지 않아 SPE 저장을 취소합니다.")
+                return
+
+        try:
+            import os
+            from datetime import datetime
+            from core.spe_writer import save_spe
+
+            if not os.path.exists(base_path):
+                os.makedirs(base_path, exist_ok=True)
+
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            fname = f"AF_Scan_{ts}.spe"
+            fpath = os.path.join(base_path, fname)
+
+            # _image_list: (step, frame, z, sh)
+            frames = [item[1] for item in self._image_list]
+            z_list = [item[2] for item in self._image_list]
+            sh_list = [item[3] for item in self._image_list]
+
+            # 메타데이터 구성
+            extra = {
+                "AutoFocus": {
+                    "Metric": self.combo_metric.currentText(),
+                    "BestZ": self._best_z,
+                    "Z_Positions": z_list,
+                    "Sharpness_Values": sh_list
+                }
+            }
+
+            save_spe(
+                fpath, frames,
+                exposure_ms = 0.0, # AF 스냅 시 노출 정보가 필요하면 worker에서 전달받아야 함
+                extra_metadata = extra
+            )
+            self._log(f"✅ 스캔 결과 저장 완료 (SPE): {fname}")
+        except Exception as e:
+            self._log(f"❌ SPE 저장 실패: {e}")
         self.af_done.emit()
 
         # 테이블 및 리스트에서 Best 결과 하이라이트
@@ -1191,6 +1293,8 @@ class AutoFocusTab(QWidget):
         s.setValue("spin_settle", self.spin_settle.value())
         s.setValue("spin_avg", self.spin_avg.value())
         s.setValue("chk_goto_best", self.chk_goto_best.isChecked())
+        s.setValue("chk_save_frames", self.chk_save_frames.isChecked())
+        s.setValue("save_dir", self.edit_save_dir.text())
         if hasattr(self, "_splitter"):
             s.setValue("splitter", self._splitter.saveState())
         if hasattr(self, "_main_splitter"):
@@ -1208,6 +1312,8 @@ class AutoFocusTab(QWidget):
             self.spin_settle.setValue(int(s.value("spin_settle", 200)))
             self.spin_avg.setValue(int(s.value("spin_avg", 1)))
             self.chk_goto_best.setChecked(s.value("chk_goto_best", True, type=bool))
+            self.chk_save_frames.setChecked(s.value("chk_save_frames", False, type=bool))
+            self.edit_save_dir.setText(s.value("save_dir", ""))
             if hasattr(self, "_splitter") and s.value("splitter"):
                 self._splitter.restoreState(s.value("splitter"))
             if hasattr(self, "_main_splitter") and s.value("main_splitter"):

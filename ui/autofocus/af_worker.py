@@ -106,6 +106,9 @@ class AutoFocusWorker(QThread):
         avg_frames: int  = 1,
         sim_mode:  bool  = False,          # True면 kimm 이동 스킵
         roi_rect:  Optional[tuple[int, int, int, int]] = None,
+        save_frames: bool = False,
+        save_dir:    Optional[str] = None,
+        rotation_k:  int = 0,
         parent=None,
     ):
         super().__init__(parent)
@@ -117,7 +120,9 @@ class AutoFocusWorker(QThread):
         self._avg_frames  = max(1, avg_frames)
         self._sim_mode    = sim_mode
         self._roi_rect    = roi_rect
+        self._rotation_k  = rotation_k
         self._stop_req    = False
+        self._frames: List[np.ndarray] = []
 
     def request_stop(self):
         self._stop_req = True
@@ -145,9 +150,12 @@ class AutoFocusWorker(QThread):
                     self.error.emit("KIMM 컨트롤러 미연결")
                     return
                 try:
-                    self._kimm.move_to_z(z)
+                    ok = self._kimm.move_to_z(z)
+                    if not ok:
+                        self.error.emit(f"Z 이동 실패 (Move Done 타임아웃): {z:+.2f} µm")
+                        return
                 except Exception as e:
-                    self.error.emit(f"Z 이동 실패: {e}")
+                    self.error.emit(f"Z 이동 예외 발생: {e}")
                     return
 
             # ── Settle 대기 ──────────────────────────────────────────
@@ -172,9 +180,13 @@ class AutoFocusWorker(QThread):
 
             # ── 선예도 계산 ──────────────────────────────────────────
             metric_frame = frame_avg
+            # 뷰어와 좌표계를 맞추기 위해 회전 적용
+            if self._rotation_k:
+                metric_frame = np.rot90(metric_frame, k=self._rotation_k)
+
             if self._roi_rect is not None:
                 x0, y0, x1, y1 = self._roi_rect
-                h, w = frame_avg.shape[:2]
+                h, w = metric_frame.shape[:2]
                 x0, x1 = max(0, min(x0, w)), max(0, min(x1, w))
                 y0, y1 = max(0, min(y0, h)), max(0, min(y1, h))
                 if x0 < x1 and y0 < y1:
