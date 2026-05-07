@@ -308,6 +308,49 @@ class LiveTab(QMainWindow):
         self._centroid_timer.timeout.connect(self._refresh_centroid_labels)
         self._centroid_timer.start()
 
+    # ── 독 헬퍼 ──────────────────────────────────────────────────────
+
+    def _make_dock_header(self, title: str) -> QWidget:
+        """슬림 커스텀 독 헤더 바 (타이틀바 대체)."""
+        hdr = QWidget()
+        hdr.setFixedHeight(22)
+        hdr.setStyleSheet(
+            f"background: #0c1428; border-bottom: 1px solid #0f3460;"
+        )
+        row = QHBoxLayout(hdr)
+        row.setContentsMargins(8, 0, 8, 0)
+        lbl = QLabel(title)
+        lbl.setStyleSheet(
+            f"color: #3a5878; font-family: '{_FC}'; font-size: {_FS_HDR};"
+            " font-weight: bold; letter-spacing: 2px;"
+            " background: transparent; border: none;"
+        )
+        row.addWidget(lbl)
+        return hdr
+
+    def _wrap_dock(
+        self,
+        obj_name: str,
+        title: str,
+        content: QWidget,
+        area: Qt.DockWidgetArea,
+    ) -> QDockWidget:
+        """커스텀 헤더 + 콘텐츠를 감싸서 QDockWidget 반환."""
+        wrap = QWidget()
+        vbox = QVBoxLayout(wrap)
+        vbox.setContentsMargins(0, 0, 0, 0)
+        vbox.setSpacing(0)
+        vbox.addWidget(self._make_dock_header(title))
+        vbox.addWidget(content, 1)
+
+        dock = QDockWidget(self)
+        dock.setObjectName(obj_name)
+        dock.setWidget(wrap)
+        dock.setTitleBarWidget(QWidget())
+        dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
+        self.addDockWidget(area, dock)
+        return dock
+
     # ── UI 빌드 ───────────────────────────────────────────────────────
 
     def _build_ui(self):
@@ -368,20 +411,18 @@ class LiveTab(QMainWindow):
 
         # ── Dock: Profile Plot (하단 좌) ──────────────────────────────
         self.plot_panel = PlotPanel("Profile")
-        self.dock_plot = QDockWidget("📈  Profile", self)
-        self.dock_plot.setWidget(self.plot_panel)
-        self.dock_plot.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_plot)
-        self.dock_plot.setObjectName("dock_plot")
+        self.dock_plot = self._wrap_dock(
+            "dock_plot", "📈  PROFILE", self.plot_panel,
+            Qt.DockWidgetArea.BottomDockWidgetArea,
+        )
 
         # ── Dock: Histogram (하단 우) ─────────────────────────────────
         self.hist_panel = HistogramPanel()
-        self.dock_hist = QDockWidget("📊  Histogram", self)
-        self.dock_hist.setWidget(self.hist_panel)
-        self.dock_hist.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_hist)
+        self.dock_hist = self._wrap_dock(
+            "dock_hist", "📊  HISTOGRAM", self.hist_panel,
+            Qt.DockWidgetArea.BottomDockWidgetArea,
+        )
         self.splitDockWidget(self.dock_plot, self.dock_hist, Qt.Orientation.Horizontal)
-        self.dock_hist.setObjectName("dock_hist")
 
         # ── Dock: System Log (우측) ── #1 타임스탬프 #2 클리어버튼 ────
         log_container = QWidget()
@@ -418,8 +459,9 @@ class LiveTab(QMainWindow):
         """)
         log_layout.addWidget(self.log_display, 1)
 
-        self.dock_log = QDockWidget("🖥  System Log", self)
+        self.dock_log = QDockWidget(self)
         self.dock_log.setWidget(log_container)
+        self.dock_log.setTitleBarWidget(QWidget())   # 타이틀바 숨김 (내부 헤더 사용)
         self.dock_log.setAllowedAreas(
             Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
         )
@@ -472,11 +514,12 @@ class LiveTab(QMainWindow):
         self._roi_list_widget.itemClicked.connect(self._on_roi_list_click)
         roi_v.addWidget(self._roi_list_widget, 1)
 
-        self.dock_roi = QDockWidget("📐  ROI List", self)
+        self.dock_roi = QDockWidget(self)
         self.dock_roi.setWidget(roi_container)
+        self.dock_roi.setTitleBarWidget(QWidget())   # 타이틀바 숨김 (내부 헤더 사용)
         self.dock_roi.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_roi)
-        self.tabifyDockWidget(self.dock_log, self.dock_roi)
+        self.splitDockWidget(self.dock_log, self.dock_roi, Qt.Orientation.Vertical)
         self.dock_roi.setObjectName("dock_roi")
 
         # 좌측 패널 고정폭
