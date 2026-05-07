@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QDoubleSpinBox, QSpinBox,
     QComboBox, QCheckBox, QLineEdit, QProgressBar,
-    QTextEdit, QFileDialog, QSizePolicy, QFrame
+    QTextEdit, QFileDialog, QSizePolicy, QFrame, QToolButton
 )
 from PyQt6.QtCore import Qt, QThread, QObject, QSettings, QTimer, pyqtSignal
 
@@ -283,7 +283,7 @@ class AcquisitionTab(QWidget):
             row = QHBoxLayout()
             lbl = QLabel(label)
             lbl.setStyleSheet(_LBL)
-            lbl.setFixedWidth(110)
+            lbl.setFixedWidth(125)
             if "." in str(default):
                 w = QDoubleSpinBox()
                 w.setRange(*rng)

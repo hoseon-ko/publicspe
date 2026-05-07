@@ -298,8 +298,7 @@ class PicamCameraWrapper:
         self.cam.set_attribute_value("Sensor Temperature Set Point", target)
         # Picam SDK는 set_attribute_value만으로는 하드웨어에 반영되지 않음.
         # Picam_CommitParameters를 호출해야 실제 적용된다.
-        if hasattr(self.cam, "_commit_parameters"):
-            self.cam._commit_parameters()
+        self._safe_commit()
         return self.read_temperature_block()
 
     def wait_temperature_lock(
@@ -386,9 +385,7 @@ class PicamCameraWrapper:
         """노출시간(ms)을 설정하고 적용된 ms 값을 반환한다."""
         cam = _require_open_camera(self)
         cam.set_exposure(float(exposure_ms) / 1000.0)
-        # set_attribute_value 단독으로는 하드웨어에 반영 안 됨 — Commit 필요
-        if hasattr(cam, "_commit_parameters"):
-            cam._commit_parameters()
+        self._safe_commit()
         return cam.get_exposure() * 1000.0
 
     def get_roi(self):
@@ -408,9 +405,47 @@ class PicamCameraWrapper:
         """ROI를 설정하고 적용된 ROI를 반환한다."""
         cam = _require_open_camera(self)
         result = cam.set_roi(hstart=hstart, hend=hend, vstart=vstart, vend=vend, hbin=hbin, vbin=vbin)
-        if hasattr(cam, "_commit_parameters"):
-            cam._commit_parameters()
+        self._safe_commit()
         return result
+
+    def _safe_commit(self):
+        """Picam_CommitParameters를 안전하게 호출한다.
+        카메라가 촬영 중이면 잠시 멈추고 설정 적용 후 다시 시작한다.
+        """
+        if self.cam is None: return
+        
+        # 1) 촬영 중인지 확인
+        was_acquiring = False
+        try:
+            # Picam Acquisition State: 1=Running, 0=Idle
+            state = self.cam.get_attribute_value("Acquisition State", error_on_missing=False, default=0)
+            was_acquiring = (str(state) == "1" or state == 1)
+        except Exception:
+            pass
+
+        try:
+            if was_acquiring:
+                self.cam.stop_acquisition()
+            
+            if hasattr(self.cam, "_commit_parameters"):
+                self.cam._commit_parameters()
+            
+            if was_acquiring:
+                # 라이브 스트림 등을 위해 다시 시작 (continuous 모드 유지 가정)
+                self.cam.start_acquisition()
+        except Exception as e:
+            # 이미 촬영 중 에러가 났을 경우에 대한 최종 폴백
+            if "AcquisitionInProgress" in str(e):
+                try:
+                    self.cam.stop_acquisition()
+                    if hasattr(self.cam, "_commit_parameters"):
+                        self.cam._commit_parameters()
+                    if was_acquiring:
+                        self.cam.start_acquisition()
+                except Exception:
+                    pass
+            else:
+                print(f"[Picam] Safe commit error: {e}")
 
     # ── 이미지 획득 ───────────────────────────────────────────────────
 

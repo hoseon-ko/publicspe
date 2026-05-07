@@ -98,7 +98,7 @@ class MotorCard(QFrame):
         self.spin = QSpinBox()
         self.spin.setRange(-999999, 999999)
         self.spin.setValue(100)
-        self.spin.setFixedWidth(78)
+        self.spin.setFixedWidth(85)
         self.spin.setStyleSheet(_SPIN_STYLE)
         step_row.addWidget(lbl_s)
         step_row.addWidget(self.spin)
@@ -276,7 +276,7 @@ class MotorPanel(QWidget):
 
         # 헤더 행
         hdr = QHBoxLayout()
-        for text, width in [("Motor", 44), ("+ FWD", 68), ("− BWD", 68)]:
+        for text, width in [("Motor", 55), ("+ FWD", 85), ("− BWD", 85)]:
             lbl = QLabel(text)
             lbl.setFixedWidth(width)
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -293,7 +293,7 @@ class MotorPanel(QWidget):
             row.setSpacing(4)
 
             lbl_m = QLabel(f"M{m}")
-            lbl_m.setFixedWidth(44)
+            lbl_m.setFixedWidth(55)
             lbl_m.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl_m.setStyleSheet(
                 "color: #4ecdc4; font-family: 'Courier New'; font-weight: bold; font-size: 12px;"
@@ -304,7 +304,7 @@ class MotorPanel(QWidget):
             spin_fwd.setSingleStep(0.1)
             spin_fwd.setDecimals(3)
             spin_fwd.setValue(1.0)
-            spin_fwd.setFixedWidth(68)
+            spin_fwd.setFixedWidth(85)
             spin_fwd.setStyleSheet(_SPIN_STYLE)
             spin_fwd.setToolTip(f"Motor {m} 전진(+) 가중치\n실제 스텝 = 입력 × 가중치")
 
@@ -313,7 +313,7 @@ class MotorPanel(QWidget):
             spin_bwd.setSingleStep(0.1)
             spin_bwd.setDecimals(3)
             spin_bwd.setValue(1.0)
-            spin_bwd.setFixedWidth(68)
+            spin_bwd.setFixedWidth(85)
             spin_bwd.setStyleSheet(_SPIN_STYLE)
             spin_bwd.setToolTip(f"Motor {m} 후진(-) 가중치\n실제 스텝 = 입력 × 가중치")
 

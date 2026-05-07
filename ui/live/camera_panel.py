@@ -425,7 +425,7 @@ class CameraControlPanel(QWidget):
             row = QHBoxLayout()
             lbl = QLabel(f"{label}:")
             lbl.setStyleSheet(_LBL_STYLE)
-            lbl.setFixedWidth(70)
+            lbl.setFixedWidth(95)
             cb = QComboBox()
             cb.setStyleSheet("""
                 QComboBox { background: #080e1e; border: 1px solid #0f3460;

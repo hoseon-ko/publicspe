@@ -40,7 +40,7 @@ from ui.plot_panel import PlotPanel, HistogramPanel
 from ui.live.camera_panel import CameraControlPanel
 from ui.live.motor_panel import MotorPanel
 from ui.live.kimm_z_panel import KIMMZPanel
-from ui.live.autofocus_panel import AutoFocusPanel
+from ui.live.acs_stage_panel import AcsStagePanel
 from theme.styles import Fonts, Sizes, C_ACCENT, C_TEXT_DEAD, BTN_PRIMARY, TEXTEDIT_LOG
 from ui.widgets.collapsible_section import CollapsibleSection
 
@@ -389,14 +389,12 @@ class LiveTab(QMainWindow):
         self._sec_kimm.add_widget(self.kimm_z_panel)
         sidebar_v.addWidget(self._sec_kimm)
 
-        # AUTO FOCUS 섹션 (기본 접힘)
-        self._sec_af = CollapsibleSection("🔍  AUTO FOCUS", accent="#7a9a4a", collapsed=True)
-        self.autofocus_panel = AutoFocusPanel()
-        self.autofocus_panel.run_requested.connect(self._on_af_run_requested)
-        self.autofocus_panel.stop_requested.connect(self._on_af_stop_requested)
-        self.autofocus_panel.btn_goto.clicked.connect(self._on_af_goto)
-        self._sec_af.add_widget(self.autofocus_panel)
-        sidebar_v.addWidget(self._sec_af)
+        # ACS 6축 키네마틱 스테이지 섹션 (기본 접힘)
+        self._sec_acs = CollapsibleSection("⬡  ACS 6-AXIS KINEMATIC", accent="#7a6aaa", collapsed=True)
+        self.acs_stage_panel = AcsStagePanel()
+        self.acs_stage_panel.log_message.connect(self._log)
+        self._sec_acs.add_widget(self.acs_stage_panel)
+        sidebar_v.addWidget(self._sec_acs)
 
         sidebar_v.addStretch(1)
 
@@ -582,6 +580,14 @@ class LiveTab(QMainWindow):
         act_fit.setToolTip("이미지를 화면에 맞춤 (F)")
         act_fit.triggered.connect(lambda: self.image_viewer.autoRange())
         tb.addAction(act_fit)
+
+        tb.addSeparator()
+
+        self.act_roi_range = QAction("🎯 ROI RANGE", self)
+        self.act_roi_range.setCheckable(True)
+        self.act_roi_range.setToolTip("선택 영역(드래그) 내 픽셀 min/max로 컬러맵 범위 설정")
+        self.act_roi_range.triggered.connect(self._on_roi_range_toggled)
+        tb.addAction(self.act_roi_range)
 
         tb.addSeparator()
 
@@ -990,6 +996,12 @@ class LiveTab(QMainWindow):
         else:
             super().keyPressEvent(event)
 
+    def _on_roi_range_toggled(self, checked: bool):
+        if self.image_viewer.btn_roi_range.isChecked() != checked:
+            self.image_viewer.btn_roi_range.setChecked(checked)
+        if hasattr(self.image_viewer, '_on_roi_range_toggled'):
+            self.image_viewer._on_roi_range_toggled(checked)
+
     # ── #12 줌 레벨 표시 ─────────────────────────────────────────────
 
     def _on_zoom_changed(self, scale: float, _x: float, _y: float):
@@ -1179,44 +1191,7 @@ class LiveTab(QMainWindow):
         msg_html = f"<span style='color:{color}'>{msg}</span>"
         self.log_display.append(f"{ts_html} {msg_html}")
 
-    # ── Auto Focus 슬롯 (UI only — 실제 이동/촬영은 추후 연결) ──────
-
-    def _on_af_run_requested(self, center: float, half: float,
-                              step: float, metric: str):
-        """AF RUN 버튼 → Worker 연결 전까지 로그만."""
-        n = int(2 * half / max(step, 0.01)) + 1
-        self._log(
-            f"[AF] RUN 요청: center={center:+.1f}µm  ±{half:.1f}µm  "
-            f"step={step:.1f}µm  ({n}steps)  metric={metric}"
-        )
-        # TODO: 실제 Worker 연결 시 아래 주석 해제
-        # self._af_worker = AutoFocusWorker(self._cam, self.kimm_z_panel._ctrl,
-        #                                   center, half, step, metric)
-        # self._af_worker.progress.connect(self.autofocus_panel.update_progress)
-        # self._af_worker.done.connect(self.autofocus_panel.set_result)
-        # self._af_worker.error.connect(self.autofocus_panel.set_error)
-        # self._af_worker.start()
-
-        # 연결 전까지: 즉시 finish_state로 돌려 UI 잠금 해제
-        self.autofocus_panel._finish_state()
-
-    def _on_af_stop_requested(self):
-        """AF STOP 버튼."""
-        self._log("[AF] 정지 요청")
-        # TODO: self._af_worker.stop()
-
-    def _on_af_goto(self):
-        """Best Z 위치로 이동 (UI only — 이동 명령 구현 후 연결)."""
-        z = self.autofocus_panel.best_z
-        if z is None:
-            return
-        self._log(f"[AF] Best Z로 이동 요청: {z:+.2f} µm")
-        if self.kimm_z_panel._ctrl:
-            self.kimm_z_panel._ctrl.move_to_z(z)
-        else:
-            self._log("❌ KIMM 컨트롤러 미연결")
-
-    # ── 정리 ─────────────────────────────────────────────────────────
+    # ── 설정 / 정리 ───────────────────────────────────────────────────
 
     def _save_settings(self):
         s = QSettings("SpeAnalyze", "LiveTab")
@@ -1228,8 +1203,6 @@ class LiveTab(QMainWindow):
         state = s.value("dockState")
         if state:
             self.restoreState(state)
-
-    # ── 정리 ─────────────────────────────────────────────────────────
 
     def cleanup(self):
         self._centroid_timer.stop()

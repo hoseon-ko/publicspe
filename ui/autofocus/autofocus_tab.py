@@ -28,7 +28,7 @@ from PyQt6.QtWidgets import (
     QProgressBar, QTextEdit, QCheckBox, QRadioButton,
     QButtonGroup, QFileDialog, QListWidget, QListWidgetItem,
     QTableWidget, QTableWidgetItem, QHeaderView,
-    QFrame, QSizePolicy, QLineEdit,
+    QFrame, QSizePolicy, QLineEdit, QToolButton,
 )
 from ui.widgets.auto_splitter import AutoSplitter
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QSettings, QSize
@@ -346,9 +346,9 @@ class AutoFocusTab(QWidget):
 
         def _row(label: str, widget: QWidget) -> QHBoxLayout:
             h = QHBoxLayout()
-            h.setSpacing(6)
+            h.setSpacing(10)
             lb = QLabel(label)
-            lb.setFixedWidth(70)
+            lb.setFixedWidth(110)
             lb.setStyleSheet(
                 f"color: {C_TEXT_DIM}; font-family: '{_FC}'; font-size: {_FSS};"
             )
@@ -473,7 +473,7 @@ class AutoFocusTab(QWidget):
         self.edit_save_dir.setStyleSheet(f"""
             QLineEdit {{
                 background: #081220; border: 1px solid #1a3060;
-                color: #a0b0d0; font-family: '{_FC}'; font-size: 10px; padding: 2px 4px;
+                color: #a0b0d0; font-family: '{_FC}'; font-size: 11px; padding: 3px 6px;
             }}
         """)
         self.btn_save_dir = QPushButton("📂")
@@ -537,13 +537,13 @@ class AutoFocusTab(QWidget):
             f"color: #e94560; font-family: '{_FC}'; font-size: {Sizes.BTN}; font-weight: bold;"
         )
         self.btn_goto = _btn("GO", "#e94560")
-        self.btn_goto.setFixedWidth(48)
+        self.btn_goto.setFixedWidth(60)
         self.btn_goto.setEnabled(False)
         self.btn_goto.setToolTip("Best Z 위치로 이동")
         self.btn_goto.clicked.connect(self._on_goto)
 
         self.btn_manual_save = _btn("💾 SPE", "#4ecdc4")
-        self.btn_manual_save.setFixedWidth(60)
+        self.btn_manual_save.setFixedWidth(85)
         self.btn_manual_save.setEnabled(False)
         self.btn_manual_save.setToolTip("현재 스캔 결과 SPE로 저장")
         self.btn_manual_save.clicked.connect(self._save_af_result_spe)

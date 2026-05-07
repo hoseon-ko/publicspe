@@ -19,13 +19,14 @@ from PyQt6.QtWidgets import (
     QLabel, QFrame, QVBoxLayout, QHBoxLayout, QPushButton,
 )
 from PyQt6.QtCore import Qt, QSize, QSettings
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QShortcut, QKeySequence, QPixmap, QPainter
 
 from ui.live.live_tab import LiveTab
 from ui.acquisition.acquisition_tab import AcquisitionTab
 from ui.analysis.analysis_tab import AnalysisTab
 from ui.scan.scan_tab import ScanTab
 from ui.autofocus.autofocus_tab import AutoFocusTab
+from ui.kinematic.kinematic_tab import KinematicTab
 from theme.styles import Fonts, Sizes, C_ACCENT, C_TEXT_DIM, C_BG_MED, C_BORDER
 
 
@@ -47,6 +48,12 @@ class MainWindow(QMainWindow):
         self.resize(1700, 1000)
         self._build_ui()
         self._restore_settings()
+        self._setup_shortcuts()
+
+    def _setup_shortcuts(self):
+        # UI 디버깅용 스크린샷 덤프 (Ctrl+Alt+S)
+        self.sc_dump = QShortcut(QKeySequence("Ctrl+Alt+S"), self)
+        self.sc_dump.activated.connect(self.dump_ui_screenshots)
 
     # ── UI ───────────────────────────────────────────────────────────
 
@@ -142,12 +149,18 @@ class MainWindow(QMainWindow):
         self.af_tab.af_starting.connect(self.live_tab.stop_live)
         self.af_tab.af_done.connect(self.live_tab.resume_live)
 
+        self.kin_tab = KinematicTab()
+        self.kin_tab.log_message.connect(self._on_status)
+        self.kin_tab.kin_starting.connect(self.live_tab.stop_live)
+        self.kin_tab.kin_done.connect(self.live_tab.resume_live)
+
         # 탭 버튼 + 스택 등록
         _modes = [
             ("Live",      self.live_tab),
             ("Acquire",   self.acq_tab),
             ("Scan",      self.scan_tab),
             ("AutoFocus", self.af_tab),
+            ("Kinematic", self.kin_tab),
             ("Analysis",  self.analysis_tab),
         ]
         for idx, (label, widget) in enumerate(_modes):
@@ -212,6 +225,14 @@ class MainWindow(QMainWindow):
         # KIMM 공유: Live ↔ AutoFocus
         self.live_tab.kimm_z_panel.kimm_connected.connect(self.af_tab.set_kimm_ctrl)
         self.live_tab.kimm_z_panel.kimm_disconnected.connect(self.af_tab.clear_kimm_ctrl)
+
+        # 카메라 공유: Live ↔ Kinematic
+        self.live_tab.camera_connected.connect(self.kin_tab.set_shared_camera)
+        self.live_tab.camera_disconnected.connect(self.kin_tab.clear_shared_camera)
+
+        # ACS 스테이지 공유: Live ↔ Kinematic
+        self.live_tab.acs_stage_panel.acs_connected.connect(self.kin_tab.set_acs_ctrl)
+        self.live_tab.acs_stage_panel.acs_disconnected.connect(self.kin_tab.clear_acs_ctrl)
 
         self.scan_tab.set_motor_panel(self.live_tab.motor_panel)
 
@@ -280,11 +301,20 @@ class MainWindow(QMainWindow):
         # 활성화된 탭에 알림 (특수 동작 수행용)
         active_tab = self.stack.widget(idx)
 
-        # #AF_SYNC: AutoFocus 탭 진입 시 Live 탭의 마지막 이미지를 가져와서 표시
-        if active_tab == self.af_tab:
+        # #SYNC: 특정 탭 진입 시 Live 탭의 마지막 이미지를 가져와서 뷰어에 표시 (ROI 등 편의성)
+        if active_tab in (self.af_tab, getattr(self, 'kin_tab', None), self.acq_tab):
             last_raw = self.live_tab.get_last_raw()
             if last_raw is not None:
-                self.af_tab.image_viewer.set_source_image(last_raw)
+                viewer = None
+                if active_tab == self.af_tab:
+                    viewer = self.af_tab.image_viewer
+                elif active_tab == getattr(self, 'kin_tab', None):
+                    viewer = self.kin_tab.image_viewer
+                elif active_tab == self.acq_tab:
+                    viewer = self.acq_tab.preview_viewer
+                
+                if viewer is not None and hasattr(viewer, 'set_source_image'):
+                    viewer.set_source_image(last_raw)
 
         if hasattr(active_tab, "on_tab_activated"):
             try:
@@ -294,6 +324,37 @@ class MainWindow(QMainWindow):
 
         for i, btn in enumerate(self._nav_btns):
             btn.setChecked(i == idx)
+
+    def dump_ui_screenshots(self):
+        """모든 탭을 순회하며 스크린샷을 찍어 'UI_Debug' 폴더에 저장한다."""
+        import os
+        from datetime import datetime
+        
+        save_dir = "UI_Debug"
+        os.makedirs(save_dir, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        orig_idx = self.stack.currentIndex()
+        
+        try:
+            for i in range(self.stack.count()):
+                self._switch_mode(i)
+                QApplication.processEvents() # UI 갱신 대기
+                
+                tab = self.stack.widget(i)
+                label = self._nav_btns[i].text().strip()
+                filename = f"tab_{i}_{label}_{ts}.png"
+                path = os.path.join(save_dir, filename)
+                
+                # 메인 윈도우 전체 캡처
+                pixmap = self.grab()
+                pixmap.save(path, "PNG")
+                print(f"[UI Dump] Saved: {path}")
+                
+            self._switch_mode(orig_idx)
+            self._on_status(f"📸 모든 탭 스크린샷 저장 완료 ({save_dir})")
+        except Exception as e:
+            self._on_status(f"❌ 스크린샷 저장 실패: {e}")
 
     # ── 슬롯 ─────────────────────────────────────────────────────────
 
@@ -340,7 +401,7 @@ class MainWindow(QMainWindow):
 
     def _on_spe_saved(self, path: str):
         self.analysis_tab.open_spe(path)
-        self._switch_mode(4)   # Analysis = index 4
+        self._switch_mode(5)   # Analysis = index 5 (Kinematic inserted at 4)
         self._on_status(f"SPE 열림: {path}")
 
     def _on_status(self, msg: str):
@@ -357,6 +418,7 @@ class MainWindow(QMainWindow):
         self.acq_tab.cleanup()
         self.scan_tab.cleanup()
         self.af_tab.cleanup()
+        self.kin_tab.cleanup()
 
         # 2. MainWindow 상태 저장
         s = QSettings("SpeAnalyze", "MainWindow")
@@ -365,7 +427,7 @@ class MainWindow(QMainWindow):
         s.setValue("active_tab", self.stack.currentIndex())
 
         # 3. 모든 서브 탭 설정 저장
-        for tab in (self.live_tab, self.acq_tab, self.scan_tab, self.af_tab, self.analysis_tab):
+        for tab in (self.live_tab, self.acq_tab, self.scan_tab, self.af_tab, self.kin_tab, self.analysis_tab):
             if hasattr(tab, "_save_settings"):
                 try:
                     tab._save_settings()
