@@ -40,6 +40,7 @@ from ui.plot_panel import PlotPanel, HistogramPanel
 from ui.live.camera_panel import CameraControlPanel
 from ui.live.motor_panel import MotorPanel
 from ui.live.kimm_z_panel import KIMMZPanel
+from ui.live.autofocus_panel import AutoFocusPanel
 from theme.styles import Fonts, Sizes, C_ACCENT, C_TEXT_DEAD, BTN_PRIMARY, TEXTEDIT_LOG
 from ui.widgets.collapsible_section import CollapsibleSection
 
@@ -371,6 +372,15 @@ class LiveTab(QMainWindow):
         self._sec_kimm.add_widget(self.kimm_z_panel)
         sidebar_v.addWidget(self._sec_kimm)
 
+        # AUTO FOCUS 섹션 (기본 접힘)
+        self._sec_af = CollapsibleSection("🔍  AUTO FOCUS", accent="#7a9a4a", collapsed=True)
+        self.autofocus_panel = AutoFocusPanel()
+        self.autofocus_panel.run_requested.connect(self._on_af_run_requested)
+        self.autofocus_panel.stop_requested.connect(self._on_af_stop_requested)
+        self.autofocus_panel.btn_goto.clicked.connect(self._on_af_goto)
+        self._sec_af.add_widget(self.autofocus_panel)
+        sidebar_v.addWidget(self._sec_af)
+
         sidebar_v.addStretch(1)
 
         left_scroll = QScrollArea()
@@ -391,7 +401,7 @@ class LiveTab(QMainWindow):
             Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
         )
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_left)
-        self.resizeDocks([self.dock_left], [300], Qt.Orientation.Horizontal)
+        self.resizeDocks([self.dock_left], [600], Qt.Orientation.Horizontal)
 
         # ── Dock: Profile Plot (하단 좌) ──────────────────────────────
         self.plot_panel = PlotPanel("Profile")
@@ -1142,6 +1152,40 @@ class LiveTab(QMainWindow):
         ts_html  = f"<span style='color:#2a4060;font-size:{_FS_SMALL}'>[{ts}]</span>"
         msg_html = f"<span style='color:{color}'>{msg}</span>"
         self.log_display.append(f"{ts_html} {msg_html}")
+
+    # ── Auto Focus 슬롯 (UI only — 실제 이동/촬영은 추후 연결) ──────
+
+    def _on_af_run_requested(self, center: float, half: float,
+                              step: float, metric: str):
+        """AF RUN 버튼 → Worker 연결 전까지 로그만."""
+        n = int(2 * half / max(step, 0.01)) + 1
+        self._log(
+            f"[AF] RUN 요청: center={center:+.1f}µm  ±{half:.1f}µm  "
+            f"step={step:.1f}µm  ({n}steps)  metric={metric}"
+        )
+        # TODO: 실제 Worker 연결 시 아래 주석 해제
+        # self._af_worker = AutoFocusWorker(self._cam, self.kimm_z_panel._ctrl,
+        #                                   center, half, step, metric)
+        # self._af_worker.progress.connect(self.autofocus_panel.update_progress)
+        # self._af_worker.done.connect(self.autofocus_panel.set_result)
+        # self._af_worker.error.connect(self.autofocus_panel.set_error)
+        # self._af_worker.start()
+
+        # 연결 전까지: 즉시 finish_state로 돌려 UI 잠금 해제
+        self.autofocus_panel._finish_state()
+
+    def _on_af_stop_requested(self):
+        """AF STOP 버튼."""
+        self._log("[AF] 정지 요청")
+        # TODO: self._af_worker.stop()
+
+    def _on_af_goto(self):
+        """Best Z 위치로 이동 (UI only — 이동 명령 구현 후 연결)."""
+        z = self.autofocus_panel.best_z
+        if z is None:
+            return
+        self._log(f"[AF] Best Z로 이동 요청: {z:+.2f} µm")
+        # TODO: self.kimm_z_panel._ctrl.move_to_z(z)
 
     # ── 정리 ─────────────────────────────────────────────────────────
 
