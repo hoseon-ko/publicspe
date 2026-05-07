@@ -243,28 +243,12 @@ class LiveTab(QMainWindow):
         self.setWindowFlags(Qt.WindowType.Widget)
         self.menuBar().setVisible(False)
 
-        # ── Dock 타이틀 바 스타일 (LightField 스타일 — 컴팩트) ──────
-        self.setStyleSheet(f"""
-            QDockWidget {{
-                titlebar-close-icon: url(none);
-                titlebar-normal-icon: url(none);
-            }}
-            QDockWidget::title {{
-                background: #0c1428;
-                border-bottom: 1px solid #0f3460;
-                padding: 3px 8px;
-                color: #4a6a9a;
-                font-family: '{_FC}';
-                font-size: {_FS_HDR};
-                font-weight: bold;
-                letter-spacing: 1px;
-                text-align: left;
-            }}
-            QDockWidget::float-button, QDockWidget::close-button {{
-                background: transparent;
-                border: none;
-                padding: 0 2px;
-            }}
+        # 모든 QDockWidget 타이틀바를 setTitleBarWidget(QWidget())로 숨기므로
+        # QDockWidget::title QSS 불필요 — 플로트/클로즈 버튼만 투명화
+        self.setStyleSheet("""
+            QDockWidget::float-button, QDockWidget::close-button {
+                background: transparent; border: none;
+            }
         """)
 
         self._cam: Optional[BaseCamera] = None
