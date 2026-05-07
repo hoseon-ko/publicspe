@@ -606,7 +606,18 @@ class AutoFocusTab(QWidget):
             f"color: #4a6a8a; font-family: '{_FC}'; font-size: {_FSS};"
         )
         self._lbl_step_info.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self._btn_roi_range = QToolButton()
+        self._btn_roi_range.setText("🎯 ROI Range")
+        self._btn_roi_range.setCheckable(True)
+        self._btn_roi_range.setStyleSheet("""
+            QToolButton { background: transparent; color: #a0a0b0; border: 1px solid #1a3a60;
+                border-radius: 3px; font-size: 10px; padding: 1px 4px; }
+            QToolButton:checked { background: #1a2a10; color: #ffe66d; border-color: #ffe66d; }
+        """)
+        self._btn_roi_range.toggled.connect(self._on_roi_range_toggled)
+
         vhdr_h.addWidget(lbl_view)
+        vhdr_h.addWidget(self._btn_roi_range)
         vhdr_h.addWidget(self._lbl_step_info, 1)
         vv.addWidget(vhdr)
 
@@ -978,6 +989,12 @@ class AutoFocusTab(QWidget):
             self._roi_rect = None
             self._log("⚪ ROI 모드 비활성")
             self._lbl_roi_rect.setText("영역: 전체 이미지")
+
+    def _on_roi_range_toggled(self, checked: bool):
+        if self.image_viewer.btn_roi_range.isChecked() != checked:
+            self.image_viewer.btn_roi_range.setChecked(checked)
+        if hasattr(self.image_viewer, '_on_roi_range_toggled'):
+            self.image_viewer._on_roi_range_toggled(checked)
 
     def _on_roi_drawn(self, mode: str, pts: list):
         """Capture drawn ROI rectangle for cropping.

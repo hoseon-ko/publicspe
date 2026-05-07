@@ -1075,6 +1075,10 @@ class LiveTab(QMainWindow):
         except Exception:
             pass
 
+    def get_last_raw(self) -> Optional[np.ndarray]:
+        """현재 뷰어에 표시 중인 최신 원본 이미지를 반환한다."""
+        return self._viewer_raw
+
     # ── #14 라이브 SPE 저장 ──────────────────────────────────────────
 
     def _save_live_spe(self):

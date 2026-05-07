@@ -185,6 +185,14 @@ class AnalysisTab(QMainWindow):
             toolbar.addAction(act)
 
         toolbar.addSeparator()
+
+        self.act_roi_range = QAction("🎯  ROI Range", self)
+        self.act_roi_range.setCheckable(True)
+        self.act_roi_range.setToolTip("선택 영역(드래그) 내 픽셀 min/max로 컬러맵 범위 설정")
+        self.act_roi_range.triggered.connect(self._on_roi_range_toggled)
+        toolbar.addAction(self.act_roi_range)
+
+        toolbar.addSeparator()
         act_reset = QAction("⟳  Reset View", self)
         act_reset.triggered.connect(self._on_reset_view)
         toolbar.addAction(act_reset)
@@ -471,6 +479,14 @@ class AnalysisTab(QMainWindow):
             cx = sum(p[0] for p in pts) / len(pts)
             cy = sum(p[1] for p in pts) / len(pts)
             self.image_viewer._view.centerOn(cx, cy)
+
+    def _on_roi_range_toggled(self, checked: bool):
+        # 뷰어 내부 버튼과 동기화
+        if self.image_viewer.btn_roi_range.isChecked() != checked:
+            self.image_viewer.btn_roi_range.setChecked(checked)
+        # 뷰어 내부 토글 로직 직접 호출 (혹은 시그널 연결로 자동 처리됨)
+        if hasattr(self.image_viewer, '_on_roi_range_toggled'):
+            self.image_viewer._on_roi_range_toggled(checked)
 
     def _on_reset_view(self):
         self.image_viewer.autoRange()

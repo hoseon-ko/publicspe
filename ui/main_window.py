@@ -279,6 +279,13 @@ class MainWindow(QMainWindow):
 
         # 활성화된 탭에 알림 (특수 동작 수행용)
         active_tab = self.stack.widget(idx)
+
+        # #AF_SYNC: AutoFocus 탭 진입 시 Live 탭의 마지막 이미지를 가져와서 표시
+        if active_tab == self.af_tab:
+            last_raw = self.live_tab.get_last_raw()
+            if last_raw is not None:
+                self.af_tab.image_viewer.set_source_image(last_raw)
+
         if hasattr(active_tab, "on_tab_activated"):
             try:
                 active_tab.on_tab_activated()

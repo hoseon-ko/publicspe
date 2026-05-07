@@ -459,13 +459,28 @@ class AcquisitionTab(QWidget):
         right_layout = QVBoxLayout()
         right_layout.setSpacing(4)
 
-        # #15 프리뷰
+        # #15 프리뷰 헤더
+        prev_hdr = QHBoxLayout()
         lbl_prev = QLabel("PREVIEW")
         lbl_prev.setStyleSheet(
             f"color: #e94560; font-family: '{_FC}'; font-size: {_FS_CTRL};"
             "font-weight: bold; letter-spacing: 2px;"
         )
-        right_layout.addWidget(lbl_prev)
+        self.btn_roi_range = QToolButton()
+        self.btn_roi_range.setText("🎯 ROI Range")
+        self.btn_roi_range.setCheckable(True)
+        self.btn_roi_range.setStyleSheet(f"""
+            QToolButton {{ background: transparent; color: #a0a0b0; border: 1px solid #1a3a60;
+                border-radius: 3px; font-family: '{_FC}'; font-size: 10px; padding: 1px 4px; }}
+            QToolButton:checked {{ background: #1a2a10; color: #ffe66d; border-color: #ffe66d; }}
+        """)
+        self.btn_roi_range.toggled.connect(self._on_roi_range_toggled)
+
+        prev_hdr.addWidget(lbl_prev)
+        prev_hdr.addWidget(self.btn_roi_range)
+        prev_hdr.addStretch()
+        right_layout.addLayout(prev_hdr)
+
         self.preview_viewer = ImageViewer()
         self.preview_viewer.setMinimumHeight(220)
         right_layout.addWidget(self.preview_viewer, 2)
@@ -737,6 +752,12 @@ class AcquisitionTab(QWidget):
         self.lbl_temp_reading.setText("  |  ".join(parts))
 
     # ── 배경 관련 ─────────────────────────────────────────────────────
+
+    def _on_roi_range_toggled(self, checked: bool):
+        if self.preview_viewer.btn_roi_range.isChecked() != checked:
+            self.preview_viewer.btn_roi_range.setChecked(checked)
+        if hasattr(self.preview_viewer, '_on_roi_range_toggled'):
+            self.preview_viewer._on_roi_range_toggled(checked)
 
     def _on_bg_changed(self, has_bg: bool):
         """BackgroundManager BG 변경 시 UI 동기화."""
