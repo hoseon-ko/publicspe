@@ -9,7 +9,10 @@ Tab 3: SPE Analysis  — SpeAnalyze 전체 기능
 
 from __future__ import annotations
 
-from PyQt6.QtWidgets import QMainWindow, QTabWidget, QStatusBar, QLabel, QFrame
+from PyQt6.QtWidgets import (
+    QMainWindow, QWidget, QStackedWidget, QStatusBar,
+    QLabel, QFrame, QVBoxLayout, QHBoxLayout, QPushButton,
+)
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QAction, QIcon
 
@@ -32,62 +35,100 @@ class MainWindow(QMainWindow):
     # ── UI ───────────────────────────────────────────────────────────
 
     def _build_ui(self):
-        # ── 탭 위젯 ──────────────────────────────────────────────────
-        self.tabs = QTabWidget()
-        self.tabs.setStyleSheet("""
-            QTabWidget::pane {
-                border: 1px solid #0f3460;
-                background: #0a0f1e;
-            }
-            QTabBar::tab {
-                background: #0f1729;
-                color: #4a5a7a;
-                padding: 8px 20px;
-                font-family: 'Courier New';
-                font-size: 12px;
-                font-weight: bold;
-                border: 1px solid #0f3460;
-                letter-spacing: 1px;
-            }
-            QTabBar::tab:selected {
-                background: #0a0f1e;
-                color: #e94560;
-                border-bottom: 2px solid #e94560;
-            }
-            QTabBar::tab:hover:!selected {
-                color: #c0d0e0;
-                background: #141f35;
-            }
-        """)
-        self.setCentralWidget(self.tabs)
+        # ── 루트 레이아웃: [모드 내비 사이드바] + [콘텐츠 스택] ─────
+        root = QWidget()
+        root.setObjectName("root")
+        root.setStyleSheet("QWidget#root { background: #080e1e; }")
+        root_h = QHBoxLayout(root)
+        root_h.setContentsMargins(0, 0, 0, 0)
+        root_h.setSpacing(0)
+        self.setCentralWidget(root)
 
-        # ── Tab 1: Live Control ───────────────────────────────────────
+        # ── 모드 내비 사이드바 (64px 고정폭, LightField 스타일) ──────
+        nav = QWidget()
+        nav.setObjectName("nav")
+        nav.setFixedWidth(64)
+        nav.setStyleSheet(
+            "QWidget#nav { background: #06080f; border-right: 1px solid #0f2040; }"
+        )
+        nav_v = QVBoxLayout(nav)
+        nav_v.setContentsMargins(4, 8, 4, 8)
+        nav_v.setSpacing(2)
+
+        _FC = Fonts.MONO
+        _nav_base = f"""
+            QPushButton {{
+                background: transparent;
+                color: #3a5070;
+                border: none;
+                border-radius: 6px;
+                font-family: '{_FC}';
+                font-size: 9px;
+                font-weight: bold;
+                letter-spacing: 1px;
+                padding: 6px 2px;
+            }}
+            QPushButton:hover {{
+                background: #0d1830;
+                color: #8ab0d0;
+            }}
+            QPushButton:checked {{
+                background: #0f2040;
+                color: {C_ACCENT};
+                border-left: 2px solid {C_ACCENT};
+            }}
+        """
+
+        self._nav_btns: list[QPushButton] = []
+
+        # ── 콘텐츠 스택 ──────────────────────────────────────────────
+        self.stack = QStackedWidget()
+        self.stack.setStyleSheet("background: #0a0f1e;")
+
+        # ── 모드별 탭 인스턴스 생성 ─────────────────────────────────
         self.live_tab = LiveTab()
         self.live_tab.status_message.connect(self._on_status)
         self.live_tab.camera_connected.connect(self._on_cam_connected)
         self.live_tab.camera_disconnected.connect(self._on_cam_disconnected)
         self.live_tab.cam_panel.exposure_applied.connect(self._on_exposure_changed)
         self.live_tab.frame_stats_updated.connect(self._on_frame_stats)
-        self.tabs.addTab(self.live_tab, "📷  LIVE CONTROL")
 
-        # ── Tab 2: Acquisition ────────────────────────────────────────
         self.acq_tab = AcquisitionTab()
         self.acq_tab.spe_saved.connect(self._on_spe_saved)
         self.acq_tab.log_message.connect(self._on_status)
-        self.tabs.addTab(self.acq_tab, "🔬  ACQUISITION")
 
-        # ── 카메라 공유: Live ↔ Acquisition ──────────────────────────
-        # Live 탭에서 연결한 카메라를 Acquisition 탭이 그대로 사용
-        self.live_tab.camera_connected.connect(self.acq_tab.set_shared_camera)
-        self.live_tab.camera_disconnected.connect(self.acq_tab.clear_shared_camera)
-        # Acquisition 시작 시 Live 스트림 자동 정지, 완료 시 재개
-        self.acq_tab.acquisition_starting.connect(self.live_tab.stop_live)
-        self.acq_tab.acquisition_done.connect(self.live_tab.resume_live)
-
-        # ── Tab 3: Auto Scan ──────────────────────────────────────────
         self.scan_tab = ScanTab()
         self.scan_tab.log_message.connect(self._on_status)
-        self.tabs.addTab(self.scan_tab, "🔄  AUTO SCAN")
+
+        self.analysis_tab = AnalysisTab(spe_class=self._spe_class)
+        self.analysis_tab.status_message.connect(self._on_status)
+
+        # ── 내비 버튼 + 스택 등록 ────────────────────────────────────
+        _modes = [
+            ("📷", "LIVE",   self.live_tab),
+            ("🔬", "ACQ",    self.acq_tab),
+            ("🔄", "SCAN",   self.scan_tab),
+            ("📊", "DATA",   self.analysis_tab),
+        ]
+        for idx, (icon, label, widget) in enumerate(_modes):
+            btn = QPushButton(f"{icon}\n{label}")
+            btn.setCheckable(True)
+            btn.setFixedSize(56, 52)
+            btn.setStyleSheet(_nav_base)
+            btn.clicked.connect(lambda checked, i=idx: self._switch_mode(i))
+            nav_v.addWidget(btn)
+            self._nav_btns.append(btn)
+            self.stack.addWidget(widget)
+
+        nav_v.addStretch(1)
+        self._nav_btns[0].setChecked(True)   # LIVE 기본 선택
+
+        # ── 인터탭 연결 ──────────────────────────────────────────────
+        # 카메라 공유: Live ↔ Acquisition
+        self.live_tab.camera_connected.connect(self.acq_tab.set_shared_camera)
+        self.live_tab.camera_disconnected.connect(self.acq_tab.clear_shared_camera)
+        self.acq_tab.acquisition_starting.connect(self.live_tab.stop_live)
+        self.acq_tab.acquisition_done.connect(self.live_tab.resume_live)
 
         # 카메라 공유: Live ↔ Scan
         self.live_tab.camera_connected.connect(self.scan_tab.set_shared_camera)
@@ -95,21 +136,17 @@ class MainWindow(QMainWindow):
         self.scan_tab.scan_starting.connect(self.live_tab.stop_live)
         self.scan_tab.scan_done.connect(self.live_tab.resume_live)
 
-        # 모터 패널 공유: Live 탭의 motor_panel → Scan 탭
+        # 모터 패널 공유: Live → Scan
         self.scan_tab.set_motor_panel(self.live_tab.motor_panel)
 
-        # 노출 동기화 (Live ↔ Scan 양방향)
+        # 노출 동기화 (Live ↔ Scan / Acquisition 양방향)
         self.live_tab.cam_panel.exposure_applied.connect(self.scan_tab.set_exposure_ui)
         self.scan_tab.exposure_changed.connect(self.live_tab.sync_exposure_ui)
-
-        # 노출 동기화 (Live ↔ Acquisition 양방향)
         self.live_tab.cam_panel.exposure_applied.connect(self.acq_tab.set_exposure_ui)
         self.acq_tab.exposure_changed.connect(self.live_tab.sync_exposure_ui)
 
-        # ── Tab 4: Analysis ───────────────────────────────────────────
-        self.analysis_tab = AnalysisTab(spe_class=self._spe_class)
-        self.analysis_tab.status_message.connect(self._on_status)
-        self.tabs.addTab(self.analysis_tab, "📊  SPE ANALYSIS")
+        root_h.addWidget(nav)
+        root_h.addWidget(self.stack, 1)
 
         # ── 상태바 ────────────────────────────────────────────────────
         self._status_bar = QStatusBar()
@@ -172,6 +209,13 @@ class MainWindow(QMainWindow):
         self._status_bar.addPermanentWidget(self._sb_fps)
         self._status_bar.addPermanentWidget(_sep())
 
+    # ── 모드 전환 ────────────────────────────────────────────────────
+
+    def _switch_mode(self, idx: int):
+        self.stack.setCurrentIndex(idx)
+        for i, btn in enumerate(self._nav_btns):
+            btn.setChecked(i == idx)
+
     # ── 슬롯 ─────────────────────────────────────────────────────────
 
     # ── 상태바 슬롯 ──────────────────────────────────────────────────
@@ -210,7 +254,7 @@ class MainWindow(QMainWindow):
     def _on_spe_saved(self, path: str):
         """Acquisition 탭에서 SPE 저장 완료 → Analysis 탭으로 자동 전달."""
         self.analysis_tab.open_spe(path)
-        self.tabs.setCurrentWidget(self.analysis_tab)
+        self._switch_mode(3)   # DATA 탭으로 이동
         self._on_status(f"SPE 열림: {path}")
 
     def _on_status(self, msg: str):
