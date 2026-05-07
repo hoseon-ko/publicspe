@@ -613,6 +613,21 @@ class AcquisitionTab(QWidget):
         if self._cam is None or not isinstance(self._cam, PicamCamera):
             return
 
+        # [Phase 4] 디스크 용량 체크 (세이프가드)
+        import shutil
+        save_dir = self.edit_save_dir.text().strip() or "acquisitions"
+        abs_dir = os.path.abspath(save_dir)
+        try:
+            os.makedirs(abs_dir, exist_ok=True)
+            _, _, free = shutil.disk_usage(abs_dir)
+            if free < 1024 * 1024 * 1024:  # 1GB 미만
+                self._log("❌ 획득 중단: 저장 드라이브의 잔여 용량이 1GB 미만입니다!")
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.critical(self, "디스크 공간 부족", "저장 드라이브에 최소 1GB 이상의 여유 공간이 필요합니다.")
+                return
+        except Exception as e:
+            self._log(f"⚠️ 디스크 확인 오류 (무시됨): {e}")
+
         # 라이브 스트림 먼저 정지
         self.acquisition_starting.emit()
 
