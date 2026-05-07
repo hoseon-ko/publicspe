@@ -48,3 +48,9 @@
     ^^^^^^^^^^^^^^^^
 AttributeError: 'CameraControlPanel' object has no attribute 'check_gil_block'. Did you mean: 'check_fps_lock'?
 
+[2026-05-08 01:42:36,178] INFO     [main.py:45] SpeAnalyze Application Started.
+[2026-05-08 01:45:11,884] INFO     [main.py:45] SpeAnalyze Application Started.
+[2026-05-08 01:50:42,386] INFO     [main.py:45] SpeAnalyze Application Started.
+[2026-05-08 01:50:55,549] INFO     [main.py:45] SpeAnalyze Application Started.
+[2026-05-08 01:53:07,089] INFO     [main.py:77] SpeAnalyze Application Exited with code 0.
+[2026-05-08 01:53:07,092] INFO     [main.py:77] SpeAnalyze Application Exited with code 0.

@@ -873,8 +873,7 @@ class LiveTab(QMainWindow):
         
         # [Progress Bar] LightField 스타일 노출 게이지 애니메이션 시작
         try:
-            from core.camera.picamp import PicamCamera
-            if isinstance(self._cam, PicamCamera) and hasattr(self._cam, '_get_frame_total_s'):
+            if hasattr(self._cam, '_get_frame_total_s'):
                 exp_ms = self._cam._get_frame_total_s() * 1000.0
             else:
                 exp_ms = self._cam.get_exposure_ms()

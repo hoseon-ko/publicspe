@@ -121,6 +121,10 @@ class SimulatedCamera(BaseCamera):
         self._exposure_ms = float(ms)
         return self._exposure_ms
 
+    def _get_frame_total_s(self) -> float:
+        """가상 리드아웃 시간(45ms) 포함 프레임 소요 시간"""
+        return (self._exposure_ms / 1000.0) + 0.045
+
     def get_fps(self) -> float:
         return self._fps
 
@@ -169,8 +173,8 @@ class SimulatedCamera(BaseCamera):
 
     def snap(self) -> np.ndarray:
         import time
-        # [Phase 6] 실제 노출 시간에 비례하여 대기 (최소 0.1초)
-        wait_time = max(0.1, self._exposure_ms / 1000.0)
+        # [Phase 6] 실제 노출 시간 + 리드아웃에 비례하여 대기
+        wait_time = self._get_frame_total_s()
         if getattr(self, 'simulate_gil_block', False):
             print(f"\n[SimCam] 🚨 BAD 모드: GIL 독점 시뮬레이션 ({wait_time}초)...")
             print("이 시간 동안 창을 드래그하거나 UI를 클릭해도 반응하지 않습니다.")
@@ -210,9 +214,20 @@ class SimulatedCamera(BaseCamera):
     def _live_loop(self, frame_cb: Callable[[np.ndarray], None]) -> None:
         while not self._stop_evt.is_set():
             t0 = time.monotonic()
+            
+            # 1. 하드웨어 물리적 지연 (노출 + 리드아웃)
+            hardware_delay = self._get_frame_total_s()
+            if self._stop_evt.wait(hardware_delay):
+                break
+                
             frame_cb(self._make_frame())
-            sleep = max(0.0, 1.0 / self._fps - (time.monotonic() - t0))
-            self._stop_evt.wait(sleep)
+            
+            # 2. 지정된 FPS 한계가 더 길면 추가 대기
+            elapsed = time.monotonic() - t0
+            target_frame_time = 1.0 / self._fps
+            sleep = max(0.0, target_frame_time - elapsed)
+            if sleep > 0:
+                self._stop_evt.wait(sleep)
 
     def _make_frame(self) -> np.ndarray:
         """
