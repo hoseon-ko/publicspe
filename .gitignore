@@ -23,3 +23,8 @@ Scan_Data/
 *.md
 *.csv
 *.png
+*.mmd
+*.html
+*.ipynb
+*.pyc
+*.log
