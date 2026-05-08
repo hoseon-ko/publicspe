@@ -283,6 +283,10 @@ class LiveTab(QMainWindow):
         self._setup_toolbar()
         self._connect_signals()
 
+
+        
+        self._log("Live Tab Initialized", "sys")
+
         # #21 독 레이아웃 복원
         _s = QSettings("SpeAnalyze", "LiveTab")
         _state = _s.value("dockState")
@@ -385,14 +389,12 @@ class LiveTab(QMainWindow):
         # KIMM Z 섹션 (기본 접힘)
         self._sec_kimm = CollapsibleSection("🎯  KIMM Z", accent="#9a6a4a", collapsed=True)
         self.kimm_z_panel = KIMMZPanel()
-        self.kimm_z_panel.log_message.connect(self._log)
         self._sec_kimm.add_widget(self.kimm_z_panel)
         sidebar_v.addWidget(self._sec_kimm)
 
         # ACS 6축 키네마틱 스테이지 섹션 (기본 접힘)
         self._sec_acs = CollapsibleSection("⬡  ACS 6-AXIS KINEMATIC", accent="#7a6aaa", collapsed=True)
         self.acs_stage_panel = AcsStagePanel()
-        self.acs_stage_panel.log_message.connect(self._log)
         self._sec_acs.add_widget(self.acs_stage_panel)
         sidebar_v.addWidget(self._sec_acs)
 
@@ -437,50 +439,6 @@ class LiveTab(QMainWindow):
             Qt.DockWidgetArea.BottomDockWidgetArea,
         )
         self.splitDockWidget(self.dock_plot, self.dock_hist, Qt.Orientation.Horizontal)
-
-        # ── Dock: System Log (우측) ── #1 타임스탬프 #2 클리어버튼 ────
-        log_container = QWidget()
-        log_layout = QVBoxLayout(log_container)
-        log_layout.setContentsMargins(0, 0, 0, 0)
-        log_layout.setSpacing(0)
-
-        # 로그 헤더 (클리어 버튼)
-        log_header = QWidget()
-        log_header.setStyleSheet("background: #0c1428; border-bottom: 1px solid #0f3460;")
-        hdr_row = QHBoxLayout(log_header)
-        hdr_row.setContentsMargins(8, 3, 4, 3)
-        lbl_log_title = QLabel("SYSTEM LOG")
-        lbl_log_title.setStyleSheet(
-            f"color: #4a5a7a; font-family: '{_FC}'; font-size: {_FS_HDR}; font-weight: bold; letter-spacing: 2px;"
-        )
-        btn_clear_log = QPushButton("CLEAR")
-        btn_clear_log.setFixedHeight(20)
-        btn_clear_log.setStyleSheet(f"""
-            QPushButton {{ background: transparent; color: #304060; border: 1px solid #1a2840;
-                border-radius: 2px; font-family: '{_FC}'; font-size: {_FS_HDR}; padding: 0 6px; }}
-            QPushButton:hover {{ color: #e94560; border-color: #e94560; }}
-        """)
-        btn_clear_log.clicked.connect(lambda: self.log_display.clear())
-        hdr_row.addWidget(lbl_log_title, 1)
-        hdr_row.addWidget(btn_clear_log)
-        log_layout.addWidget(log_header)
-
-        self.log_display = QTextEdit()
-        self.log_display.setReadOnly(True)
-        self.log_display.setStyleSheet(f"""
-            QTextEdit {{ background: #080e1e; border: none;
-                color: #00cc88; font-family: '{_FC}'; font-size: {_FS_LOG}; }}
-        """)
-        log_layout.addWidget(self.log_display, 1)
-
-        self.dock_log = QDockWidget(self)
-        self.dock_log.setWidget(log_container)
-        self.dock_log.setTitleBarWidget(QWidget())   # 타이틀바 숨김 (내부 헤더 사용)
-        self.dock_log.setAllowedAreas(
-            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
-        )
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_log)
-        self.dock_log.setObjectName("dock_log")
 
         # ── Dock: ROI List (우측, Log 아래) ──────────────────────────
         roi_container = QWidget()
@@ -533,7 +491,6 @@ class LiveTab(QMainWindow):
         self.dock_roi.setTitleBarWidget(QWidget())   # 타이틀바 숨김 (내부 헤더 사용)
         self.dock_roi.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_roi)
-        self.splitDockWidget(self.dock_log, self.dock_roi, Qt.Orientation.Vertical)
         self.dock_roi.setObjectName("dock_roi")
 
         # 좌측 패널 고정폭
@@ -541,7 +498,6 @@ class LiveTab(QMainWindow):
         self.dock_left.setMaximumWidth(500)
 
         self.resizeDocks([self.dock_plot], [200], Qt.Orientation.Vertical)
-        self.resizeDocks([self.dock_log], [280], Qt.Orientation.Horizontal)
 
     def _setup_toolbar(self):
         tb = QToolBar("Live Toolbar")
@@ -563,7 +519,6 @@ class LiveTab(QMainWindow):
             ("⬤ Controls",   "dock_left"),
             ("📈 Profile",   "dock_plot"),
             ("📊 Histogram", "dock_hist"),
-            ("🖥 Log",       "dock_log"),
             ("📐 ROI List",  "dock_roi"),
         ]:
             act = QAction(label, self)
@@ -660,11 +615,19 @@ class LiveTab(QMainWindow):
         self.cam_panel.camera_stop_requested.connect(self._stop_camera)
         self.cam_panel.snap_requested.connect(self._snap_image)
         self.cam_panel.bg_capture_requested.connect(self._capture_bg)
-        self.cam_panel.log_message.connect(self._log)
+        self.cam_panel.log_message.connect(lambda m: self._log(m, "cam"))
         self.cam_panel.exposure_applied.connect(self.exposure_applied)
 
-        self.motor_panel.log_message.connect(self._log)
+        self.motor_panel.log_message.connect(lambda m: self._log(m, "dev"))
+        self.kimm_z_panel.log_message.connect(lambda m: self._log(m, "dev"))
+        self.acs_stage_panel.log_message.connect(lambda m: self._log(m, "dev"))
         self.motor_panel.pre_move_info_cb = self._get_pre_move_info
+
+        # 이미지 프로세서 / 오토포커스 / 스캔 등
+        if hasattr(self, "af_tab"):
+            self.af_tab.log_message.connect(lambda m: self._log(m, "calc"))
+        if hasattr(self, "scan_tab"):
+            self.scan_tab.log_message.connect(lambda m: self._log(m, "calc"))
 
         # ImageViewer → 플롯/히스토그램
         self.image_viewer.line_profile_updated.connect(
@@ -695,7 +658,7 @@ class LiveTab(QMainWindow):
     def _scan_cameras(self):
         """#9 스캔 결과 힌트 포함. SDK 스레드 제약으로 메인 스레드에서 실행."""
         cam_type = self.cam_panel.get_selected_camera_type()
-        self._log(f"🔄 {cam_type} 스캔 중...")
+        self._log(f"🔄 {cam_type} 스캔 중...", "cam")
         try:
             if cam_type == "HIKVISION":
                 items = hik_devices()
@@ -704,11 +667,11 @@ class LiveTab(QMainWindow):
             else:
                 items = picam_devices()
         except Exception as e:
-            self._log(f"❌ 스캔 오류: {e}")
+            self._log(f"❌ 스캔 오류: {e}", "cam")
             items = []
         if items:
             self.cam_panel.populate_camera_list(items)
-            self._log(f"✅ {len(items)}개 발견 ({cam_type})")
+            self._log(f"✅ {len(items)}개 발견 ({cam_type})", "cam")
         else:
             self.cam_panel.populate_camera_list([])
             hints = {
@@ -716,12 +679,12 @@ class LiveTab(QMainWindow):
                 "SIMULATED":  "simulated.py 임포트 오류",
                 "Picam":      "Picam 라이브러리/하드웨어 확인",
             }
-            self._log(f"⚠️ 카메라 없음 — {hints.get(cam_type, '연결 확인')}")
+            self._log(f"⚠️ 카메라 없음 — {hints.get(cam_type, '연결 확인')}", "cam")
 
     def _connect_camera(self, index: int):
         """#6 카메라 연결을 백그라운드 스레드에서 실행 — UI 응답 유지."""
         if self._conn_thread is not None and self._conn_thread.isRunning():
-            self._log("⚠️ 연결 중..."); return
+            self._log("⚠️ 연결 중...", "cam"); return
 
         # 다른 카메라가 연결되어 있으면 먼저 해제 후 재연결
         if self._cam is not None:
@@ -733,8 +696,8 @@ class LiveTab(QMainWindow):
                 "Picam":      PicamCamera,
             }
             if cur_cls is _same_map.get(new_type):
-                self._log("⚠️ 이미 동일 카메라 연결됨"); return
-            self._log(f"🔄 카메라 변경 — 기존 연결 해제 후 재연결...")
+                self._log("⚠️ 이미 동일 카메라 연결됨", "cam"); return
+            self._log(f"🔄 카메라 변경 — 기존 연결 해제 후 재연결...", "cam")
             self._pending_connect_index = index
             self._disconnect_camera()   # 완료 후 _on_disconnect_done → _connect_pending
             return
@@ -748,10 +711,10 @@ class LiveTab(QMainWindow):
             else:
                 cam = PicamCamera()
         except Exception as e:
-            self._log(f"❌ 카메라 생성 실패: {e}"); return
+            self._log(f"❌ 카메라 생성 실패: {e}", "cam"); return
 
         # 로딩 상태 표시
-        self._log(f"🔄 {cam_type} 연결 중...")
+        self._log(f"🔄 {cam_type} 연결 중...", "cam")
         self._sec_cam._title_lbl.setText("📷  CAMERA  [ 연결 중… ]")
         self.cam_panel.setEnabled(False)
 
@@ -773,7 +736,7 @@ class LiveTab(QMainWindow):
         self.cam_panel.attach_camera(cam)
         cam_type = type(cam).__name__.replace("Camera", "")
         self._sec_cam._title_lbl.setText(f"📷  {cam_type.upper()}  ● LIVE")
-        self._log(f"✅ {cam_type} 연결 완료")
+        self._log(f"✅ {cam_type} 연결 완료", "cam")
         self.status_message.emit(f"{cam_type} 연결됨")
         self.camera_connected.emit(cam)
 
@@ -781,7 +744,7 @@ class LiveTab(QMainWindow):
         """연결 실패 — 메인 스레드에서 실행됨."""
         self.cam_panel.setEnabled(True)
         self._sec_cam._title_lbl.setText("📷  CAMERA CONTROL")
-        self._log(f"❌ 연결 실패: {msg}")
+        self._log(f"❌ 연결 실패: {msg}", "cam")
 
     def _disconnect_camera(self):
         """DISCONNECT 버튼 — stop_live + disconnect를 백그라운드에서 실행."""
@@ -791,7 +754,7 @@ class LiveTab(QMainWindow):
         self._cam = None                    # 즉시 참조 해제 — 새 프레임 무시
         self.cam_panel.setEnabled(False)
         self.cam_panel.set_grabbing(False)
-        self._log("🔄 연결 해제 중...")
+        self._log("🔄 연결 해제 중...", "cam")
 
         self._disc_thread = QThread()
         self._disc_worker = _DisconnectWorker(cam)
@@ -807,7 +770,7 @@ class LiveTab(QMainWindow):
         self.cam_panel.detach_camera()
         self._proc.reset_buffer()
         self._sec_cam._title_lbl.setText("📷  CAMERA CONTROL")
-        self._log("카메라 연결 해제")
+        self._log("카메라 연결 해제", "cam")
         self.status_message.emit("카메라 해제")
         self.camera_disconnected.emit()
         # 카메라 변경 시 해제 완료 → 새 카메라로 바로 연결
@@ -820,28 +783,51 @@ class LiveTab(QMainWindow):
         if self._cam is None: return
         try:
             self._first_frame = True
-            self._cam.start_live(self._on_frame)
+            self._cam.start_live(self._on_new_frame)
             self.cam_panel.set_grabbing(True)
-            self._log("▶ 카메라 시작")
+            self._log("▶ 카메라 시작", "cam")
+            
+            # [Phase] 라이브 프로그레스 타이머 설정 (노출이 길 경우)
+            try:
+                if hasattr(self._cam, '_get_frame_total_s'):
+                    exp_ms = self._cam._get_frame_total_s() * 1000.0
+                else:
+                    exp_ms = self._cam.get_exposure_ms()
+            except: exp_ms = 0
+            
+            if exp_ms > 100:
+                self._live_total = exp_ms
+                self._live_elapsed = 0
+                if hasattr(self, '_live_timer_anim') and self._live_timer_anim.isActive():
+                    self._live_timer_anim.stop()
+                self._live_timer_anim = QTimer()
+                self._live_timer_anim.setInterval(max(20, int(exp_ms / 50)))
+                self._live_timer_anim.timeout.connect(self._on_live_progress_tick)
+                self._live_timer_anim.start()
+            else:
+                self.cam_panel.bar_snap_progress.setValue(100)
         except Exception as e:
-            self._log(f"❌ 시작 실패: {e}")
+            self._log(f"❌ 시작 실패: {e}", "cam")
 
     def _stop_camera(self):
         """STOP 버튼 — stop_live()를 백그라운드에서 실행, UI는 즉시 갱신."""
         if self._cam is None: return
-        self.cam_panel.set_grabbing(False)  # 버튼 상태 즉시 갱신
+        self.cam_panel.set_grabbing(False)
         cam = self._cam
+        
+        if hasattr(self, '_live_timer_anim') and self._live_timer_anim.isActive():
+            self._live_timer_anim.stop()
+        self.cam_panel.bar_snap_progress.setValue(0)
 
         def _do_stop():
             try:
                 cam.stop_live()
-            except Exception:
-                pass
+            except Exception: pass
 
         import threading
         t = threading.Thread(target=_do_stop, daemon=True, name="StopLive")
         t.start()
-        self._log("■ 카메라 정지")
+        self._log("■ 카메라 정지", "cam")
 
     def stop_live(self):
         """외부(Acquisition/Scan 탭) 호출 — 동기적으로 완료 보장."""
@@ -859,17 +845,34 @@ class LiveTab(QMainWindow):
         """Acquisition/Scan 완료 후 — stop_live() 직전에 grabbing 중이었으면 재개."""
         if getattr(self, "_was_live", False) and self._cam is not None:
             self._start_camera()
-        self._was_live = False
+
+    def _on_live_progress_tick(self):
+
+        """라이브 모드 중 프로그레스바를 노출 주기에 맞춰 채움."""
+        self._live_elapsed += self._live_timer_anim.interval()
+        if self._live_elapsed >= self._live_total:
+            self.cam_panel.bar_snap_progress.setValue(99)
+        else:
+            pct = int(100 * self._live_elapsed / self._live_total)
+            self.cam_panel.bar_snap_progress.setValue(pct)
+
+    def _on_new_frame(self, raw: np.ndarray):
+        """카메라로부터 새 프레임 수신 (백그라운드 스레드에서 호출됨)."""
+        # 라이브 프로그레스 리셋 (메인 스레드에서 UI 갱신 필요하므로 타이머 값만 리셋)
+        self._live_elapsed = 0
+            
+        if self._freeze_mode:
+            return
+        self._on_frame(raw)
 
     def _snap_image(self):
         """단일 프레임 촬영 — 백그라운드 스레드에서 실행."""
-        if self._cam is None:
-            return
+        if self._cam is None: return
         if self._snap_thread is not None and self._snap_thread.isRunning():
-            self._log("⚠️ 촬영 중..."); return
+            self._log("⚠️ 촬영 중...", "cam"); return
 
         self.cam_panel.btn_snap.setEnabled(False)
-        self._log("📷 SNAP 촬영 중...")
+        self._log("📷 SNAP 촬영 중...", "cam")
         
         # [Progress Bar] LightField 스타일 노출 게이지 애니메이션 시작
         try:
@@ -878,7 +881,7 @@ class LiveTab(QMainWindow):
             else:
                 exp_ms = self._cam.get_exposure_ms()
         except Exception:
-            exp_ms = 1000.0  # fallback
+            exp_ms = 1000.0
             
         if exp_ms > 100:
             self.cam_panel.bar_snap_progress.setValue(0)
@@ -919,19 +922,18 @@ class LiveTab(QMainWindow):
             self._snap_timer_anim.stop()
         self.cam_panel.bar_snap_progress.setValue(100)
         self._last_raw = raw
-        self._viewer_raw = raw         # 스냅은 즉시 뷰어에 표시됨
-        self._first_frame = True       # snap 결과는 항상 FIT
-        self._last_display_t = 0.0     # 30fps 캡 우회 — 즉시 표시
-        self._log("✅ SNAP 완료")
-        # _proc_worker에 위임 → 메인 스레드 블로킹 없음
-        # 결과는 _on_processed() 에서 수신
+        self._viewer_raw = raw
+        self._first_frame = True
+        self._last_display_t = 0.0
+        self._log("✅ SNAP 완료", "cam")
         self._proc_worker.submit(raw)
 
     def _on_snap_error(self, msg: str):
         if hasattr(self, '_snap_timer_anim') and self._snap_timer_anim.isActive():
             self._snap_timer_anim.stop()
         self.cam_panel.bar_snap_progress.setValue(0)
-        self._log(f"❌ SNAP 실패: {msg}")
+        self._log(f"❌ SNAP 실패: {msg}", "cam")
+
 
     def _capture_bg(self):
         from core.background_manager import BackgroundManager
@@ -939,7 +941,7 @@ class LiveTab(QMainWindow):
         self._proc.capture_background(raw)          # 로컬 ImageProcessor BG
         if raw is not None:
             BackgroundManager.instance().set_frame(raw)  # 공유 BackgroundManager
-        self._log("📸 배경 캡처됨 (전체 탭 공유)")
+        self._log("📸 배경 캡처됨 (전체 탭 공유)", "cam")
 
     # ── 프레임 처리 ───────────────────────────────────────────────────
 
@@ -1010,10 +1012,10 @@ class LiveTab(QMainWindow):
         self._frozen = checked
         if checked:
             self._act_freeze.setText("❄ FROZEN")
-            self._log("❄ 프레임 고정 — 현재 프레임 유지")
+            self._log("❄ 프레임 고정 — 현재 프레임 유지", "calc")
         else:
             self._act_freeze.setText("❄ FREEZE")
-            self._log("▶ 프레임 재개")
+            self._log("▶ 프레임 재개", "calc")
 
     # ── #8 키보드 단축키 ─────────────────────────────────────────────
 
@@ -1031,7 +1033,7 @@ class LiveTab(QMainWindow):
             self.image_viewer.autoRange()
         elif key == Qt.Key.Key_R:
             self._clear_all_rois()
-            self._log("ROI 초기화")
+            self._log("ROI 초기화", "calc")
         else:
             super().keyPressEvent(event)
 
@@ -1082,6 +1084,16 @@ class LiveTab(QMainWindow):
             if item.data(0x100) == roi_id:
                 self._roi_list_widget.setCurrentItem(item)
                 return
+
+    def _log(self, msg: str, category: str = "sys"):
+        """로깅 인터페이스: 메인 윈도우의 전역 로그 시스템을 호출하거나 직접 로그 기록."""
+        from core.logger import sys_logger, dev_logger, cam_logger, calc_logger
+        logger = sys_logger
+        if category == "dev": logger = dev_logger
+        elif category == "cam": logger = cam_logger
+        elif category == "calc": logger = calc_logger
+        
+        logger.info(msg)
 
     def _on_roi_list_click(self, item: QListWidgetItem):
         """목록 클릭 → ImageViewer 에서 해당 ROI 선택."""
@@ -1205,30 +1217,7 @@ class LiveTab(QMainWindow):
             f"&nbsp;&nbsp;Centroid=({cx}, {cy})  Motors={motor_pos}"
         )
 
-    # ── #1 타임스탬프 #3 색상 구분 로그 ──────────────────────────────
 
-    def _log(self, msg: str):
-        ts = datetime.now().strftime("%H:%M:%S")
-
-        # 색상 분기 (#3)
-        if any(k in msg for k in ("✅", "💾", "▶", "📸")):
-            color = "#4ecdc4"   # teal  — 성공/정상
-        elif any(k in msg for k in ("⚠️",)):
-            color = "#ffe66d"   # yellow — 경고
-        elif any(k in msg for k in ("❌", "FAIL", "실패", "오류")):
-            color = "#e94560"   # red   — 에러
-        elif any(k in msg for k in ("❄",)):
-            color = "#a0c8ff"   # blue  — freeze
-        elif any(k in msg for k in ("■", "연결 해제")):
-            color = "#4a5a7a"   # dim   — 정지/해제
-        elif "🔄" in msg:
-            color = "#ffe66d"   # yellow — 진행 중
-        else:
-            color = "#00cc88"   # default green
-
-        ts_html  = f"<span style='color:#2a4060;font-size:{_FS_SMALL}'>[{ts}]</span>"
-        msg_html = f"<span style='color:{color}'>{msg}</span>"
-        self.log_display.append(f"{ts_html} {msg_html}")
 
     # ── 설정 / 정리 ───────────────────────────────────────────────────
 

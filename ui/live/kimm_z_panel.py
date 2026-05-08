@@ -19,6 +19,12 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, QSettings, pyqtSignal
 
 from core.motor.kimm_z import KIMMZController
+from ui.widgets.collapsible_section import CollapsibleSection
+from theme.styles import (
+    C_ACCENT, C_DANGER, C_WARN, C_BORDER, C_BG_DEEP, C_BG_DARK, C_TEXT, C_TEXT_DIM,
+    Fonts, Sizes, BTN_SMALL, SPIN_STYLE, grp_style
+)
+
 
 # ── 스타일 토큰 ────────────────────────────────────────────────────────────────
 _FC = "Courier New"
@@ -82,75 +88,88 @@ class KIMMZPanel(QWidget):
         root.setContentsMargins(6, 6, 6, 6)
         root.setSpacing(6)
 
-        # ── 연결 그룹 ──────────────────────────────────────────────────
-        grp_conn = QGroupBox("CONNECTION")
-        grp_conn.setStyleSheet(_GRP_STYLE.format(color="#4ecdc4"))
-        conn_layout = QVBoxLayout(grp_conn)
-        conn_layout.setSpacing(4)
+        # 1. Connection
+        self.sec_conn = CollapsibleSection("KIMM FINE STAGE (Z)", accent=C_ACCENT)
+        self._build_conn_group(self.sec_conn.content_layout())
+        root.addWidget(self.sec_conn)
+
+        # 2. Status & Position
+        self.sec_stat = CollapsibleSection("STATUS & POSITION", accent=C_DANGER)
+        self._build_status_group(self.sec_stat.content_layout())
+        root.addWidget(self.sec_stat)
+
+        # 3. Manual Control
+        self.sec_ctrl = CollapsibleSection("MANUAL CONTROL", accent=C_ACCENT)
+        self._build_control_group(self.sec_ctrl.content_layout())
+        root.addWidget(self.sec_ctrl)
+
+        # 4. Settings (기본 접힘)
+        self.sec_set = CollapsibleSection("SETTINGS", accent=C_WARN, collapsed=True)
+        self._build_settings_group(self.sec_set.content_layout())
+        root.addWidget(self.sec_set)
+
+        root.addStretch()
+
+    def _build_conn_group(self, lay: QVBoxLayout):
+        lay.setSpacing(4)
+
 
         # IP 입력
         row_ip = QHBoxLayout()
         lbl_ip = QLabel("IP")
         lbl_ip.setStyleSheet(f"color:#8090b0; font-family:'{_FC}'; font-size:14px;")
-        lbl_ip.setFixedWidth(28)
+        lbl_ip.setFixedWidth(40)
         self.edit_ip = QLineEdit()
         self.edit_ip.setPlaceholderText("192.168.1.100")
         self.edit_ip.setStyleSheet(_EDIT_STYLE)
         row_ip.addWidget(lbl_ip)
         row_ip.addWidget(self.edit_ip)
-        conn_layout.addLayout(row_ip)
+        lay.addLayout(row_ip)
 
         # Port 입력
         row_port = QHBoxLayout()
         lbl_port = QLabel("PORT")
         lbl_port.setStyleSheet(f"color:#8090b0; font-family:'{_FC}'; font-size:14px;")
-        lbl_port.setFixedWidth(28)
+        lbl_port.setFixedWidth(40)
         self.edit_port = QLineEdit()
         self.edit_port.setPlaceholderText("5000")
-        self.edit_port.setStyleSheet(_EDIT_STYLE)
-        self.edit_port.setFixedWidth(60)
+        self.edit_port.setFixedWidth(75)
         row_port.addWidget(lbl_port)
         row_port.addWidget(self.edit_port)
         row_port.addStretch()
-        conn_layout.addLayout(row_port)
+        lay.addLayout(row_port)
 
-        # Connect / Disconnect 버튼
+        # 버튼
         row_btn = QHBoxLayout()
         self.btn_connect = QPushButton("CONNECT")
-        self.btn_connect.setStyleSheet(self._btn_style("#4ecdc4"))
+        self.btn_connect.setStyleSheet(BTN_SMALL)
         self.btn_connect.clicked.connect(self._on_connect)
 
         self.btn_disconnect = QPushButton("DISCONNECT")
-        self.btn_disconnect.setStyleSheet(self._btn_style("#e94560"))
         self.btn_disconnect.setEnabled(False)
+        self.btn_disconnect.setStyleSheet(BTN_SMALL.replace(C_ACCENT, C_DANGER))
         self.btn_disconnect.clicked.connect(self._on_disconnect)
 
         row_btn.addWidget(self.btn_connect)
         row_btn.addWidget(self.btn_disconnect)
-        conn_layout.addLayout(row_btn)
+        lay.addLayout(row_btn)
 
-        # 연결 상태 표시
-        self.lbl_conn_status = QLabel("● DISCONNECTED")
-        self.lbl_conn_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_conn_status.setStyleSheet(
-            f"color:#e94560; font-family:'{_FC}'; font-size:14px; font-weight:bold;"
+        self.lbl_status = QLabel("● DISCONNECTED")
+        self.lbl_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_status.setStyleSheet(
+            f"color:{C_DANGER}; font-family:'{Fonts.MONO}'; font-size:14px; font-weight:bold;"
         )
-        conn_layout.addWidget(self.lbl_conn_status)
-        root.addWidget(grp_conn)
+        lay.addWidget(self.lbl_status)
 
-        # ── 위치 표시 그룹 ─────────────────────────────────────────────
-        grp_pos = QGroupBox("Z  POSITION")
-        grp_pos.setStyleSheet(_GRP_STYLE.format(color="#e94560"))
-        pos_layout = QVBoxLayout(grp_pos)
-        pos_layout.setSpacing(6)
-
+    def _build_status_group(self, lay: QVBoxLayout):
+        lay.setContentsMargins(4, 4, 4, 4)
         # Z 위치 (큰 숫자)
         self.lbl_z = QLabel("---  um")
         self.lbl_z.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_z.setStyleSheet(
             f"color:#d8e8ff; font-family:'{_FC}'; font-size:26px; font-weight:bold;"
         )
-        pos_layout.addWidget(self.lbl_z)
+        lay.addWidget(self.lbl_z)
 
         # Servo 상태
         row_servo = QHBoxLayout()
@@ -163,139 +182,80 @@ class KIMMZPanel(QWidget):
         row_servo.addWidget(lbl_s)
         row_servo.addStretch()
         row_servo.addWidget(self.lbl_servo)
-        pos_layout.addLayout(row_servo)
-        root.addWidget(grp_pos)
+        lay.addLayout(row_servo)
 
-        # ── 수동 제어 그룹 (JOG / MOVE) ──────────────────────────────────
-        grp_manual = QGroupBox("MANUAL CONTROL")
-        grp_manual.setStyleSheet(_GRP_STYLE.format(color="#e0e0e0"))
-        man_layout = QVBoxLayout(grp_manual)
-        man_layout.setContentsMargins(10, 15, 10, 10)
-        man_layout.setSpacing(10)
-
-        # (1) 조그 버튼 (3열 2행 그리드)
+    def _build_control_group(self, lay: QVBoxLayout):
+        lay.setContentsMargins(4, 4, 4, 4)
+        # 조그 버튼 (3열 2행 그리드)
         jog_grid = QGridLayout()
-        jog_grid.setSpacing(6)
-        jog_grid.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
+        
         def add_jog(text: str, val: float, r: int, c: int, color: str):
             btn = QPushButton(text)
-            btn.setStyleSheet(self._btn_style(color))
-            btn.setFixedWidth(56)   # 너비 통일
+            btn.setStyleSheet(BTN_SMALL.replace(C_ACCENT, color))
             btn.setEnabled(False)
             btn.clicked.connect(lambda _, v=val: self._on_jog(v))
             jog_grid.addWidget(btn, r, c)
             self._move_btns.append(btn)
 
-        # 상단: + 방향 (10, 1, 0.1)
-        add_jog("+10",  10.0, 0, 0, "#4ecdc4")
-        add_jog("+1",    1.0, 0, 1, "#4ecdc4")
-        add_jog("+0.1",  0.1, 0, 2, "#4ecdc4")
-        # 하단: - 방향 (10, 1, 0.1)
-        add_jog("-10", -10.0, 1, 0, "#e94560")
-        add_jog("-1",   -1.0, 1, 1, "#e94560")
-        add_jog("-0.1", -0.1, 1, 2, "#e94560")
+        add_jog("+10",  10.0, 0, 0, C_ACCENT)
+        add_jog("+1",    1.0, 0, 1, C_ACCENT)
+        add_jog("+0.1",  0.1, 0, 2, C_ACCENT)
+        add_jog("-10", -10.0, 1, 0, C_DANGER)
+        add_jog("-1",   -1.0, 1, 1, C_DANGER)
+        add_jog("-0.1", -0.1, 1, 2, C_DANGER)
+        lay.addLayout(jog_grid)
 
-        man_layout.addLayout(jog_grid)
-
-        # (2) 절대 이동 (Target + GO)
+        # 절대 이동 (Target + GO)
         row_abs = QHBoxLayout()
-        row_abs.setSpacing(4)
-        lbl_target = QLabel("ABS")
-        lbl_target.setStyleSheet(f"color:#8090b0; font-family:'{_FC}'; font-size:13px;")
-        
         self.spin_abs = QDoubleSpinBox()
         self.spin_abs.setRange(-10000.0, 10000.0)
-        self.spin_abs.setDecimals(2)
         self.spin_abs.setSuffix(" um")
-        self.spin_abs.setStyleSheet(self._spin_style())
+        self.spin_abs.setStyleSheet(SPIN_STYLE)
         
-        self.btn_go = QPushButton("GO")
-        self.btn_go.setFixedWidth(40)
-        self.btn_go.setStyleSheet(self._btn_style(C_ACCENT))
-        self.btn_go.setEnabled(False)
-        self.btn_go.clicked.connect(self._on_abs_move)
-        self._move_btns.append(self.btn_go)
+        self.btn_abs_move = QPushButton("GO")
+        self.btn_abs_move.setStyleSheet(BTN_SMALL)
+        self.btn_abs_move.setEnabled(False)
+        self.btn_abs_move.clicked.connect(self._on_abs_move)
+        self._move_btns.append(self.btn_abs_move)
 
-        row_abs.addWidget(lbl_target)
         row_abs.addWidget(self.spin_abs, 1)
-        row_abs.addWidget(self.btn_go)
-        man_layout.addLayout(row_abs)
+        row_abs.addWidget(self.btn_abs_move)
+        lay.addLayout(row_abs)
 
-        root.addWidget(grp_manual)
-
-        # ── 설정 그룹 (리밋/속도) ──────────────────────────────────────
-        grp_set = QGroupBox("SETTINGS")
-        grp_set.setStyleSheet(_GRP_STYLE.format(color="#9a6a4a"))
-        set_layout = QVBoxLayout(grp_set)
-        set_layout.setSpacing(4)
-
+    def _build_settings_group(self, lay: QVBoxLayout):
+        lay.setContentsMargins(4, 4, 4, 4)
+        lay.setSpacing(4)
         # Safety Limit
         row_lim = QHBoxLayout()
         lbl_lim = QLabel("Limit(um)")
         lbl_lim.setStyleSheet(f"color:#8090b0; font-family:'{_FC}'; font-size:14px;")
-        lbl_lim.setFixedWidth(65)
         self.spin_limit = QDoubleSpinBox()
         self.spin_limit.setRange(0.0, 10000.0)
         self.spin_limit.setValue(10000.0)
-        self.spin_limit.setDecimals(1)
-        self.spin_limit.setStyleSheet(self._spin_style())
+        self.spin_limit.setStyleSheet(SPIN_STYLE)
         self.spin_limit.valueChanged.connect(self._on_limit_changed)
         row_lim.addWidget(lbl_lim)
-        row_lim.addWidget(self.spin_limit, 1)
-        set_layout.addLayout(row_lim)
+        row_lim.addWidget(self.spin_limit)
+        lay.addLayout(row_lim)
 
         # Velocity
         row_vel = QHBoxLayout()
         lbl_vel = QLabel("Vel(um/s)")
         lbl_vel.setStyleSheet(f"color:#8090b0; font-family:'{_FC}'; font-size:14px;")
-        lbl_vel.setFixedWidth(65)
         self.spin_vel = QDoubleSpinBox()
         self.spin_vel.setRange(0.1, 100.0)
         self.spin_vel.setValue(10.0)
-        self.spin_vel.setDecimals(1)
-        self.spin_vel.setStyleSheet(self._spin_style())
+        self.spin_vel.setStyleSheet(SPIN_STYLE)
         self.spin_vel.valueChanged.connect(self._on_vel_changed)
         row_vel.addWidget(lbl_vel)
-        row_vel.addWidget(self.spin_vel, 1)
-        set_layout.addLayout(row_vel)
+        row_vel.addWidget(self.spin_vel)
+        lay.addLayout(row_vel)
 
         # Dry Run
         self.check_dry = QCheckBox("DRY RUN (Simulate Move)")
-        self.check_dry.setStyleSheet("""
-            QCheckBox { color: #ffe66d; font-family: 'Courier New'; font-size: 14px; font-weight: bold; }
-        """)
+        self.check_dry.setStyleSheet(f"color:{C_WARN}; font-family:'{Fonts.UI}'; font-size:14px; font-weight:bold;")
         self.check_dry.toggled.connect(self._on_dry_run_changed)
-        set_layout.addWidget(self.check_dry)
-
-        root.addWidget(grp_set)
-        root.addStretch()
-
-    # ── 버튼 스타일 헬퍼 ──────────────────────────────────────────────
-
-    @staticmethod
-    def _spin_style() -> str:
-        return """
-            QDoubleSpinBox {
-                background: #080e1e; border: 1px solid #0f3460;
-                color: #c0d0ff; border-radius: 3px;
-                font-family: 'Courier New'; font-size: 14px; padding: 1px 4px;
-            }
-            QDoubleSpinBox::up-button, QDoubleSpinBox::down-button { width: 0px; }
-        """
-
-    @staticmethod
-    def _btn_style(color: str) -> str:
-        return f"""
-            QPushButton {{
-                background: transparent; color: {color};
-                border: 1px solid {color}; border-radius: 3px;
-                font-family: 'Courier New'; font-size: 14px;
-                font-weight: bold; padding: 3px 8px;
-            }}
-            QPushButton:hover {{ background: {color}22; }}
-            QPushButton:disabled {{ color: #304060; border-color: #1a2840; }}
-        """
+        lay.addWidget(self.check_dry)
 
     # ── 연결 / 해제 ────────────────────────────────────────────────────
 
@@ -320,11 +280,12 @@ class KIMMZPanel(QWidget):
         self._ctrl.dry_run = self.check_dry.isChecked()
         self._log(f"KIMM: 연결 시도 → {ip}:{port}")
 
-        if self._ctrl.connect():
+        try:
+            self._ctrl.connect()
             self._log(f"KIMM: 연결 성공 (Limit={self._ctrl.z_safety_limit}um, Vel={self._ctrl.default_velocity}um/s)")
-            self.lbl_conn_status.setText("● CONNECTED")
-            self.lbl_conn_status.setStyleSheet(
-                f"color:#4ecdc4; font-family:'Courier New'; font-size:14px; font-weight:bold;"
+            self.lbl_status.setText("● CONNECTED")
+            self.lbl_status.setStyleSheet(
+                f"color:{C_ACCENT}; font-family:'{Fonts.MONO}'; font-size:14px; font-weight:bold;"
             )
             self.btn_connect.setEnabled(False)
             self.btn_disconnect.setEnabled(True)
@@ -333,8 +294,8 @@ class KIMMZPanel(QWidget):
             for b in self._move_btns: b.setEnabled(True)
             self.kimm_connected.emit(self._ctrl)
             self._poll_timer.start()
-        else:
-            self._log("KIMM: 연결 실패 — IP/Port 확인")
+        except Exception as e:
+            self._log(f"KIMM: 연결 실패 — {e}")
             self._ctrl = None
 
     def _on_disconnect(self):
@@ -342,14 +303,14 @@ class KIMMZPanel(QWidget):
         if self._ctrl:
             self._ctrl.disconnect()
             self._ctrl = None
-        self.lbl_conn_status.setText("● DISCONNECTED")
-        self.lbl_conn_status.setStyleSheet(
-            f"color:#e94560; font-family:'Courier New'; font-size:14px; font-weight:bold;"
+        self.lbl_status.setText("● DISCONNECTED")
+        self.lbl_status.setStyleSheet(
+            f"color:{C_DANGER}; font-family:'{Fonts.MONO}'; font-size:14px; font-weight:bold;"
         )
         self.lbl_z.setText("---  um")
         self.lbl_servo.setText("OFF")
         self.lbl_servo.setStyleSheet(
-            f"color:#4a5a7a; font-family:'Courier New'; font-size:14px; font-weight:bold;"
+            f"color:{C_TEXT_DIM}; font-family:'{Fonts.MONO}'; font-size:14px; font-weight:bold;"
         )
         self.btn_connect.setEnabled(True)
         self.btn_disconnect.setEnabled(False)
@@ -358,6 +319,7 @@ class KIMMZPanel(QWidget):
         for b in self._move_btns: b.setEnabled(False)
         self.kimm_disconnected.emit()
         self._log("KIMM: 연결 해제")
+
 
     # ── 폴링 ──────────────────────────────────────────────────────────
 
@@ -386,14 +348,27 @@ class KIMMZPanel(QWidget):
     def _on_jog(self, delta: float):
         if not self._ctrl or not self._ctrl.is_connected: return
         self._log(f"KIMM Jog: {delta:+.2f} um")
-        # 비동기 실행 (UI 프리징 방지 위해 간단히)
-        threading.Thread(target=self._ctrl.move_by_z, args=(delta,), daemon=True).start()
+        
+        def run():
+            try:
+                self._ctrl.move_by_z(delta)
+            except Exception as e:
+                self.log_message.emit(f"KIMM Jog 실패: {e}")
+                
+        threading.Thread(target=run, daemon=True).start()
 
     def _on_abs_move(self):
         if not self._ctrl or not self._ctrl.is_connected: return
         target = self.spin_abs.value()
         self._log(f"KIMM Move To: {target:.2f} um")
-        threading.Thread(target=self._ctrl.move_to_z, args=(target,), daemon=True).start()
+        
+        def run():
+            try:
+                self._ctrl.move_to_z(target)
+            except Exception as e:
+                self.log_message.emit(f"KIMM Move To 실패: {e}")
+                
+        threading.Thread(target=run, daemon=True).start()
 
     def _on_limit_changed(self, val: float):
         if self._ctrl:

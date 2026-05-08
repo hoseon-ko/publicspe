@@ -8,6 +8,41 @@ import logging
 import os
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
+from typing import Callable, List, Optional
+
+# UI와 연결하기 위한 콜백 리스트
+_ui_callbacks: List[Callable[[str, str], None]] = []
+_logging_lock = False # 재진입 방지용 플래그
+
+class UIBridgeHandler(logging.Handler):
+    """로깅 메시지를 등록된 UI 콜백으로 전달하는 핸들러."""
+    def emit(self, record):
+        global _logging_lock
+        if _logging_lock:
+            return
+            
+        try:
+            _logging_lock = True
+            msg = self.format(record)
+            # logger name에서 카테고리 추출 (예: 'SpeAnalyze.dev' -> 'dev')
+            parts = record.name.split('.')
+            category = parts[-1] if len(parts) > 1 else "sys"
+            if category not in ["sys", "dev", "cam", "calc"]:
+                category = "sys"
+            
+            for cb in _ui_callbacks:
+                cb(msg, category)
+        finally:
+            _logging_lock = False
+
+def register_ui_callback(callback: Callable[[str, str], None]):
+    """UI에서 로그 메시지를 수신할 콜백 등록 (msg, category)."""
+    if callback not in _ui_callbacks:
+        _ui_callbacks.append(callback)
+
+def clear_ui_callbacks():
+    """모든 UI 콜백 초기화 (재시작 시 중복 방지용)."""
+    _ui_callbacks.clear()
 
 def setup_logger() -> logging.Logger:
     root_logger = logging.getLogger()
@@ -51,12 +86,22 @@ def setup_logger() -> logging.Logger:
     root_logger.addHandler(hw_handler)
     root_logger.addHandler(console_handler)
     
+    # 4. UI 브릿지 핸들러
+    ui_handler = UIBridgeHandler()
+    ui_handler.setLevel(logging.INFO)
+    ui_handler.setFormatter(logging.Formatter('%(message)s'))  # UI 포맷은 자체 시간 표시 사용
+    root_logger.addHandler(ui_handler)
+    
     # 서드파티 라이브러리 노이즈 제거
     logging.getLogger("matplotlib").setLevel(logging.WARNING)
     logging.getLogger("PyQt6").setLevel(logging.WARNING)
     
     return logging.getLogger("SpeAnalyze")
 
-# 전역 기본 로거 인스턴스
+# 전역 카테고리별 로거 인스턴스
 app_logger = setup_logger()
+sys_logger  = logging.getLogger("SpeAnalyze.sys")
+dev_logger  = logging.getLogger("SpeAnalyze.dev")
+cam_logger  = logging.getLogger("SpeAnalyze.cam")
+calc_logger = logging.getLogger("SpeAnalyze.calc")
 

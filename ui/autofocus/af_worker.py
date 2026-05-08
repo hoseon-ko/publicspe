@@ -13,6 +13,8 @@ from typing import Optional, List
 import numpy as np
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from core.logger import calc_logger
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 선예도(Sharpness) 메트릭
@@ -196,6 +198,7 @@ class AutoFocusWorker(QThread):
             z_vals.append(z)
             sh_vals.append(sh)
 
+            calc_logger.info(f"AF Step {step}/{total}: Z={z:.2f}, Score={sh:.2e}")
             self.step_done.emit(step, total, z, sh, frame_avg)
 
         # ── Best Z 결정 ──────────────────────────────────────────────

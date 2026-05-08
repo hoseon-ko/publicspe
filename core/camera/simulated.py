@@ -217,10 +217,19 @@ class SimulatedCamera(BaseCamera):
             
             # 1. 하드웨어 물리적 지연 (노출 + 리드아웃)
             hardware_delay = self._get_frame_total_s()
-            if self._stop_evt.wait(hardware_delay):
-                break
+            
+            if getattr(self, 'simulate_gil_block', False):
+                # [BAD] Busy-wait (GIL 선점 시도)
+                while time.monotonic() - t0 < hardware_delay:
+                    if self._stop_evt.is_set(): break
+            else:
+                # [GOOD] Event wait (GIL 양보)
+                if self._stop_evt.wait(hardware_delay):
+                    break
                 
+            if self._stop_evt.is_set(): break
             frame_cb(self._make_frame())
+
             
             # 2. 지정된 FPS 한계가 더 길면 추가 대기
             elapsed = time.monotonic() - t0

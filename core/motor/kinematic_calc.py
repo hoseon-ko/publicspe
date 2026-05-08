@@ -31,8 +31,9 @@ if _PROJ_ROOT not in sys.path:
     sys.path.insert(0, _PROJ_ROOT)
 
 try:
-    from AlignStageAlgorithm import CalculateBallPositionPivot
+    from AlignStageAlgorithm import CalculateBallPositionPivot, CalculateAttitudePivot
     _ALGO_OK = True
+
 except Exception as e:
     _ALGO_OK = False
     log.warning(f"[Kinematic] AlignStageAlgorithm import 실패: {e}")
@@ -164,6 +165,95 @@ class KinematicCalc:
         except Exception as e:
             log.error(f"[Kinematic] calculate error: {e}")
             return None, None, False, [str(e)]
+
+    def calculate_forward(
+        self,
+        motor_positions: np.ndarray,
+        pivot_override: Optional[np.ndarray] = None,
+        x0: Optional[np.ndarray] = None,
+    ) -> Optional[np.ndarray]:
+        """
+        6축 모터 위치 → 6DOF [Rx, Ry, Rz, Tx, Ty, Tz] (rad/mm) 계산.
+        
+        Args:
+            motor_positions: [Y1, Z1, X1, Z2, Y2, Z3] (mm)
+            x0: 초기 추정값 [Rx, Ry, Rz, Tx, Ty, Tz], None일 경우 0으로 시작.
+        """
+        if not _ALGO_OK: return None
+        
+        try:
+            enc = self.encoder_pos
+            ssp3 = self.stage_setup.reshape(3, 3)
+            d = self.direction
+            piv = pivot_override if pivot_override is not None else self.pivot
+            
+            # 1. 모터 위치 → 볼 위치 (b1, b2, b3) 역산
+            # ball[stage, comp] = (motor - enc) / d + ssp
+            b = np.zeros(9)
+            # Stage 0: Y1(0), Z1(1)
+            b[0] = (motor_positions[0] - enc[0, 0]) / d[0, 0] + ssp3[0, 0] # Y
+            b[1] = (motor_positions[1] - enc[0, 1]) / d[0, 1] + ssp3[0, 1] # Z
+            b[2] = ssp3[0, 2] # X는 stage0에서 고정
+            
+            # Stage 1: X1(2), Z2(3)
+            b[3] = ssp3[1, 0] # Y는 stage1에서 고정
+            b[4] = (motor_positions[3] - enc[1, 1]) / d[1, 1] + ssp3[1, 1] # Z
+            b[5] = (motor_positions[2] - enc[1, 2]) / d[1, 2] + ssp3[1, 2] # X
+            
+            # Stage 2: Y2(4), Z3(5)
+            b[6] = (motor_positions[4] - enc[2, 0]) / d[2, 0] + ssp3[2, 0] # Y
+            b[7] = (motor_positions[5] - enc[2, 1]) / d[2, 1] + ssp3[2, 1] # Z
+            b[8] = ssp3[2, 2] # X는 stage2에서 고정
+            
+            if x0 is None:
+                x0 = np.zeros(6)
+            
+            # 2. 최적화 알고리즘 호출 (Rx, Ry, Rz, Tx, Ty, Tz 순서)
+            res = CalculateAttitudePivot(
+                self.stage_setup, self.stage_setup,
+                self._mapping, self.stage_setup,
+                self._mapping, self.stage_setup,
+                b, x0, piv
+            )
+            return res # [Rx, Ry, Rz, Tx, Ty, Tz]
+            
+        except Exception as e:
+            log.error(f"[Kinematic] calculate_forward error: {e}")
+            return None
+
+    def calculate_clamped(
+        self,
+        trans_mm: list[float],
+        rotate_mrad: list[float],
+        pivot_override: Optional[np.ndarray] = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """
+        리밋을 반영한 실제 도달 가능한 DOF 계산.
+        Returns: (clamped_motor_positions, actual_dof [Tx, Ty, Tz, Rx, Ry, Rz])
+        """
+        # 1. 역기네마틱 계산
+        cal_pos, _, _, _ = self.calculate(trans_mm, rotate_mrad, pivot_override)
+        if cal_pos is None:
+            return None, None
+            
+        # 2. 리밋 클램핑
+        clamped = np.clip(cal_pos, self.minus_limits, self.plus_limits)
+        
+        # 3. 순기네마틱 계산 (실제 도달 위치 추정)
+        # x0는 원래 요청값으로 설정하여 수렴 속도 향상
+        x0 = np.array([
+            rotate_mrad[0]/1000.0, rotate_mrad[1]/1000.0, rotate_mrad[2]/1000.0,
+            trans_mm[0], trans_mm[1], trans_mm[2]
+        ])
+        res = self.calculate_forward(clamped, pivot_override, x0)
+        
+        if res is not None:
+            # res: [Rx, Ry, Rz, Tx, Ty, Tz] -> actual: [Tx, Ty, Tz, Rx, Ry, Rz]
+            actual = np.array([res[3], res[4], res[5], res[0]*1000.0, res[1]*1000.0, res[2]*1000.0])
+            return clamped, actual
+        
+        return clamped, None
+
 
     def check_interlock(self, cal_pos: np.ndarray) -> tuple[bool, list[str]]:
         violations = []

@@ -17,6 +17,7 @@ from __future__ import annotations
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QStackedWidget, QStatusBar,
     QLabel, QFrame, QVBoxLayout, QHBoxLayout, QPushButton,
+    QDockWidget, QTextEdit, QTabWidget, QApplication,
 )
 from PyQt6.QtCore import Qt, QSize, QSettings
 from PyQt6.QtGui import QFont, QShortcut, QKeySequence, QPixmap, QPainter
@@ -28,7 +29,7 @@ from ui.scan.scan_tab import ScanTab
 from ui.autofocus.autofocus_tab import AutoFocusTab
 from ui.kinematic.kinematic_tab import KinematicTab
 from theme.styles import Fonts, Sizes, C_ACCENT, C_TEXT_DIM, C_BG_MED, C_BORDER
-from core.logger import app_logger
+from core.logger import app_logger, register_ui_callback
 
 
 # ── 헤더 바 색상 (LightField 다크 헤더) ──────────────────────────
@@ -47,6 +48,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("SpeAnalyze — Integrated Lab Control")
         self.setMinimumSize(1300, 850)
         self.resize(1700, 1000)
+        self._setup_log_dock()
+        register_ui_callback(self._log)
         self._build_ui()
         self._restore_settings()
         self._setup_shortcuts()
@@ -415,26 +418,100 @@ class MainWindow(QMainWindow):
 
     def save_all_settings(self):
         """aboutToQuit / SIGINT 등 모든 종료 경로에서 설정 저장 및 UI 상태 저장."""
-        # 1. 서브 탭 하드웨어/워커 정리 (먼저 수행)
-        self.live_tab.cleanup()
-        self.acq_tab.cleanup()
-        self.scan_tab.cleanup()
-        self.af_tab.cleanup()
-        self.kin_tab.cleanup()
-
-        # 2. MainWindow 상태 저장
+        # 1. MainWindow 상태 저장
         s = QSettings("SpeAnalyze", "MainWindow")
         s.setValue("geometry", self.saveGeometry())
         s.setValue("windowState", self.saveState())
         s.setValue("active_tab", self.stack.currentIndex())
 
-        # 3. 모든 서브 탭 설정 저장
+        # 2. 서브 탭 설정 저장 및 하드웨어/워커 정리
         for tab in (self.live_tab, self.acq_tab, self.scan_tab, self.af_tab, self.kin_tab, self.analysis_tab):
             if hasattr(tab, "_save_settings"):
-                try:
-                    tab._save_settings()
-                except Exception as e:
-                    app_logger.error(f"Error saving settings for {type(tab).__name__}: {e}")
+                try: tab._save_settings()
+                except Exception: pass
+            
+            if hasattr(tab, "cleanup"):
+                try: tab.cleanup()
+                except Exception: pass
+
+    def _setup_log_dock(self):
+        """[Phase 2] 전역 하단 로그 도크 — 모든 탭의 메시지를 통합 수신."""
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # 탭 디자인
+        self.log_tabs = QTabWidget()
+        self.log_tabs.setStyleSheet(f"""
+            QTabWidget::pane {{ border: none; background: #050a15; border-top: 1px solid #0f3460; }}
+            QTabBar::tab {{
+                background: #0c1428; color: #506080; padding: 6px 14px;
+                font-family: '{Fonts.MONO}'; font-size: 11px; font-weight: bold;
+                border-top-left-radius: 4px; border-top-right-radius: 4px;
+                margin-right: 2px;
+            }}
+            QTabBar::tab:selected {{ background: #050a15; color: #4ecdc4; border-bottom: 2px solid #4ecdc4; }}
+            QTabBar::tab:hover {{ color: #c0d0ff; }}
+        """)
+
+        _LOG_STYLE = f"background: #080e1e; border: none; color: #c0d0ff; font-family: '{Fonts.MONO}'; font-size: 12px;"
+        self.txt_sys = QTextEdit(); self.txt_sys.setReadOnly(True); self.txt_sys.setStyleSheet(_LOG_STYLE)
+        self.txt_dev = QTextEdit(); self.txt_dev.setReadOnly(True); self.txt_dev.setStyleSheet(_LOG_STYLE)
+        self.txt_cam = QTextEdit(); self.txt_cam.setReadOnly(True); self.txt_cam.setStyleSheet(_LOG_STYLE)
+        self.txt_calc = QTextEdit(); self.txt_calc.setReadOnly(True); self.txt_calc.setStyleSheet(_LOG_STYLE)
+
+        self.log_tabs.addTab(self.txt_sys, "SYSTEM")
+        self.log_tabs.addTab(self.txt_dev, "DEVICE")
+        self.log_tabs.addTab(self.txt_cam, "CAMERA")
+        self.log_tabs.addTab(self.txt_calc, "CALC")
+        layout.addWidget(self.log_tabs)
+
+        self.dock_log = QDockWidget("📜  OUTPUT", self)
+        self.dock_log.setObjectName("dock_global_log")
+        self.dock_log.setWidget(container)
+        self.dock_log.setAllowedAreas(Qt.DockWidgetArea.BottomDockWidgetArea)
+        self.dock_log.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable | QDockWidget.DockWidgetFeature.DockWidgetClosable)
+        
+        # 커스텀 헤더 (옵션)
+        hdr = QWidget()
+        hdr.setFixedHeight(24)
+        hdr.setStyleSheet("background: #0c1428; border-bottom: 1px solid #1a3060;")
+        hl = QHBoxLayout(hdr); hl.setContentsMargins(10, 0, 10, 0)
+        lbl = QLabel("📜  SYSTEM CONSOLE")
+        lbl.setStyleSheet(f"color: {C_ACCENT}; font-size: 11px; font-weight: bold;")
+        hl.addWidget(lbl); hl.addStretch()
+        self.dock_log.setTitleBarWidget(hdr)
+
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_log)
+
+    def _log(self, msg: str, category: str = "sys"):
+        """전역 로깅 콜백 — 카테고리에 맞춰 UI 업데이트."""
+        from datetime import datetime
+        ts = datetime.now().strftime("%H:%M:%S")
+        ts_html = f"<span style='color:#4a5a7a; font-family: {Fonts.MONO}; font-size:11px;'>[{ts}]</span>"
+        
+        cat_tag = ""
+        if category != "sys":
+            tag_color = "#aa7acc" if category == "calc" else "#4ecdc4" if category == "cam" else "#ff9f43"
+            cat_tag = f"<span style='color:{tag_color}; font-weight:bold;'>[{category.upper()}]</span> "
+
+        color = "#c0d0ff"
+        msg_lower = msg.lower()
+        if any(x in msg_lower for x in ["성공", "connected", "ok", "success"]): color = "#4ecdc4"
+        elif any(x in msg_lower for x in ["실패", "failed", "error", "위반", "❌"]): color = "#e94560"
+        elif any(x in msg_lower for x in ["⚠", "⚠️", "warning"]): color = "#ffe66d"
+
+        msg_html = f"<span style='color:{color}; font-family: {Fonts.MONO};'>{msg}</span>"
+        html = f"{ts_html} {cat_tag}{msg_html}"
+
+        target = self.txt_sys
+        if category == "dev": target = self.txt_dev
+        elif category == "cam": target = self.txt_cam
+        elif category == "calc": target = self.txt_calc
+        
+        target.append(html)
+        target.moveCursor(target.textCursor().MoveOperation.End)
 
     def _restore_settings(self):
         """Load saved MainWindow UI state and forward to sub‑tabs."""
@@ -455,7 +532,7 @@ class MainWindow(QMainWindow):
             print(f"MainWindow settings restore error: {e}")
 
         # Restore sub‑tab settings
-        for tab in (self.live_tab, self.acq_tab, self.scan_tab, self.af_tab, self.analysis_tab):
+        for tab in (self.live_tab, self.acq_tab, self.scan_tab, self.af_tab, self.kin_tab, self.analysis_tab):
             if hasattr(tab, "_restore_settings"):
                 try:
                     tab._restore_settings()

@@ -20,7 +20,9 @@ import os
 import logging
 from pathlib import Path
 from typing import Optional
+import threading
 
+from core.logger import dev_logger
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
 log = logging.getLogger(__name__)
@@ -133,6 +135,7 @@ class AcsStageController:
 
         self._worker: Optional[_PollingWorker] = None
         self._thread: Optional[QThread] = None
+        self._cmd_lock = threading.Lock()
 
         self.dry_run = False
         
@@ -157,7 +160,7 @@ class AcsStageController:
 
     # ── 연결 ─────────────────────────────────────────────────────────
 
-    def connect(self, ip: str, port: int = DEFAULT_PORT) -> bool:
+    def connect(self, ip: str, port: int = DEFAULT_PORT) -> None:
         if not _ACS_OK:
             raise RuntimeError(f"ACS DLL 로드 실패: {_ACS_IMPORT_ERROR}")
         try:
@@ -165,15 +168,12 @@ class AcsStageController:
             self._api.OpenCommEthernetTCP(ip, port)
             self._connected = True
             self._simulator = False
-            log.info(f"[ACS] Connected → {ip}:{port}")
-            return True
+            dev_logger.info(f"ACS Connected: {ip}:{port}")
         except Exception as e:
-            log.error(f"[ACS] Connection failed: {e}")
-            self._api = None
-            self._connected = False
-            return False
+            dev_logger.error(f"ACS Connection Failed: {e}")
+            raise ConnectionError(f"ACS 연결 실패: {e}")
 
-    def connect_simulator(self) -> bool:
+    def connect_simulator(self) -> None:
         if not _ACS_OK:
             raise RuntimeError(f"ACS DLL 로드 실패: {_ACS_IMPORT_ERROR}")
         try:
@@ -182,12 +182,10 @@ class AcsStageController:
             self._connected = True
             self._simulator = True
             log.info("[ACS] Simulator connected")
-            return True
         except Exception as e:
-            log.error(f"[ACS] Simulator failed: {e}")
             self._api = None
             self._connected = False
-            return False
+            raise ConnectionError(f"[ACS] Simulator failed: {e}")
 
     def disconnect(self):
         self.stop_polling()
@@ -212,39 +210,40 @@ class AcsStageController:
 
     # ── 이동 ─────────────────────────────────────────────────────────
 
-    def move_to(self, axis: int, target_mm: float, wait: bool = False) -> bool:
+    def move_to(self, axis: int, target_mm: float, wait: bool = False) -> None:
         """절대 이동. wait=True 면 완료까지 블로킹 (최대 30초)."""
         self._require_connected()
         
         if target_mm > self.plus_limits[axis] or target_mm < self.minus_limits[axis]:
-            log.error(f"[ACS] Soft Limit Block: Axis{axis}({AXIS_LABELS[axis]}) target {target_mm:.4f} is out of bounds [{self.minus_limits[axis]:.4f}, {self.plus_limits[axis]:.4f}]")
-            return False
+            raise ValueError(f"Target for Axis{axis} is out of bounds: {target_mm:.4f}")
 
-        if self.dry_run:
-            log.info(f"[ACS DRY-RUN] Axis{axis}({AXIS_LABELS[axis]}) → {target_mm:.4f} mm")
-            return True
+        if not self._cmd_lock.acquire(blocking=False):
+            raise RuntimeError("Motion already in progress. Command ignored.")
+
         try:
+            if self.dry_run:
+                log.info(f"[ACS DRY-RUN] Axis{axis}({AXIS_LABELS[axis]}) → {target_mm:.4f} mm")
+                return
+                
             ax = _axis_enum(axis)
             self._api.ToPoint(0, ax, float(target_mm))
             if wait:
                 self._api.WaitMotionEnd(ax, 30000)
-            return True
+                log.info(f"[ACS] Move_to {target_mm:.2f} 완료")
         except Exception as e:
-            log.error(f"[ACS] move_to axis{axis} {target_mm:.4f}: {e}")
-            return False
+            raise RuntimeError(f"ACS move_to failed: {e}")
+        finally:
+            self._cmd_lock.release()
 
-    def move_by(self, axis: int, delta_mm: float, wait: bool = False) -> bool:
+    def move_by(self, axis: int, delta_mm: float, wait: bool = False) -> None:
         """상대 이동."""
         self._require_connected()
         if self.dry_run:
             log.info(f"[ACS DRY-RUN] Axis{axis}({AXIS_LABELS[axis]}) Δ{delta_mm:+.4f} mm")
-            return True
-        try:
-            current = self.get_position(axis)
-            return self.move_to(axis, current + delta_mm, wait=wait)
-        except Exception as e:
-            log.error(f"[ACS] move_by axis{axis} Δ{delta_mm:+.4f}: {e}")
-            return False
+            return
+            
+        current = self.get_position(axis)
+        self.move_to(axis, current + delta_mm, wait=wait)
 
     # ── Enable / Disable ─────────────────────────────────────────────
 

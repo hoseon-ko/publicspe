@@ -15,11 +15,18 @@ from typing import Dict, List, Optional, Tuple
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QSpinBox, QDoubleSpinBox,
-    QFrame, QGroupBox
+    QFrame, QGroupBox, QGridLayout
 )
+
 from PyQt6.QtCore import Qt, QTimer, QSettings, pyqtSignal
 
 from core.motor.picomotor import PicomotorController
+from ui.widgets.collapsible_section import CollapsibleSection
+from theme.styles import (
+    C_ACCENT, C_DANGER, C_WARN, C_BORDER, C_BG_DEEP, C_BG_DARK, C_TEXT, C_TEXT_DIM,
+    Fonts, Sizes, BTN_SMALL, SPIN_STYLE, grp_style
+)
+
 
 # ── 공통 스타일 ────────────────────────────────────────────────────────────────
 _CARD_STYLE = """
@@ -224,55 +231,56 @@ class MotorPanel(QWidget):
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(6)
 
-        # ── 연결 그룹 ──────────────────────────────────────────────────
-        grp_con = QGroupBox("PICOMOTOR 8742")
-        grp_con.setStyleSheet(_GRP_STYLE.format(color="#4ecdc4"))
-        gc = QVBoxLayout(grp_con)
+        # 1. Connection
+        self.sec_conn = CollapsibleSection("PICOMOTOR 8742", accent=C_ACCENT)
+        self._build_conn_group(self.sec_conn.content_layout())
+        layout.addWidget(self.sec_conn)
 
+        # 2. Motor Cards (Axis Controls)
+        self.sec_axes = CollapsibleSection("AXIS CONTROLS", accent=C_ACCENT)
+        self._build_axes_group(self.sec_axes.content_layout())
+        layout.addWidget(self.sec_axes)
+
+        # 3. Weight Settings
+        self.sec_weight = CollapsibleSection("STEP WEIGHT SETTINGS", accent=C_WARN, collapsed=True)
+        self._build_weight_group(self.sec_weight.content_layout())
+        layout.addWidget(self.sec_weight)
+
+        layout.addStretch()
+
+    def _build_conn_group(self, lay: QVBoxLayout):
+        lay.setSpacing(6)
         self.lbl_status = QLabel("● DISCONNECTED")
         self.lbl_status.setStyleSheet(
-            "color: #e94560; font-family: 'Courier New'; font-size: 14px;"
+            f"color: {C_DANGER}; font-family: '{Fonts.MONO}'; font-size: 14px;"
         )
-        gc.addWidget(self.lbl_status)
+        lay.addWidget(self.lbl_status)
 
         con_row = QHBoxLayout()
         self.btn_connect = QPushButton("CONNECT")
-        self.btn_connect.setStyleSheet("""
-            QPushButton { background: #0d2820; color: #4ecdc4; border: 1px solid #1a5040;
-                border-radius: 4px; font-family: 'Courier New'; font-weight: bold; padding: 5px 10px; }
-            QPushButton:hover { background: #1a4838; }
-            QPushButton:disabled { color: #1a2840; background: #080e1e; }
-        """)
+        self.btn_connect.setStyleSheet(BTN_SMALL.replace(Sizes.BTN, "14px"))
         self.btn_disconnect = QPushButton("DISCONNECT")
         self.btn_disconnect.setEnabled(False)
-        self.btn_disconnect.setStyleSheet("""
-            QPushButton { background: #281020; color: #e94560; border: 1px solid #5a2040;
-                border-radius: 4px; font-family: 'Courier New'; font-weight: bold; padding: 5px 10px; }
-            QPushButton:hover { background: #3a1830; }
-            QPushButton:disabled { color: #1a2840; background: #080e1e; }
-        """)
+        self.btn_disconnect.setStyleSheet(BTN_SMALL.replace(C_ACCENT, C_DANGER).replace(Sizes.BTN, "14px"))
+        
         con_row.addWidget(self.btn_connect)
         con_row.addWidget(self.btn_disconnect)
-        gc.addLayout(con_row)
-        layout.addWidget(grp_con)
+        lay.addLayout(con_row)
 
-        # ── 모터 카드 2×2 그리드 ──────────────────────────────────────
+    def _build_axes_group(self, lay: QVBoxLayout):
+        grid = QGridLayout()
+        grid.setSpacing(6)
         self.motor_cards: List[MotorCard] = []
-        row_top = QHBoxLayout()
-        row_bot = QHBoxLayout()
         for i in range(1, 5):
             card = MotorCard(i)
             card.move_requested.connect(self._on_move_requested)
             self.motor_cards.append(card)
-            (row_top if i <= 2 else row_bot).addWidget(card)
-        layout.addLayout(row_top)
-        layout.addLayout(row_bot)
+            grid.addWidget(card, (i-1)//2, (i-1)%2)
+        lay.addLayout(grid)
 
-        # ── 가중치 설정 그룹 (M1~M3) ─────────────────────────────────
-        grp_w = QGroupBox("STEP WEIGHT  ( M1 – M3 )")
-        grp_w.setStyleSheet(_GRP_STYLE.format(color="#ffe66d"))
-        gw = QVBoxLayout(grp_w)
-        gw.setSpacing(5)
+    def _build_weight_group(self, lay: QVBoxLayout):
+        lay.setSpacing(5)
+
 
         # 헤더 행
         hdr = QHBoxLayout()
@@ -281,11 +289,12 @@ class MotorPanel(QWidget):
             lbl.setFixedWidth(width)
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl.setStyleSheet(
-                "color: #ffe66d; font-family: 'Courier New'; font-size: 13px; font-weight: bold;"
+                f"color: {C_WARN}; font-family: '{Fonts.MONO}'; font-size: 13px; font-weight: bold;"
             )
             hdr.addWidget(lbl)
         hdr.addStretch()
-        gw.addLayout(hdr)
+        lay.addLayout(hdr)
+
 
         # M1~M3 각각 한 행
         for m in self._WEIGHT_MOTORS:
@@ -323,22 +332,16 @@ class MotorPanel(QWidget):
                 "color: #4a5a7a; font-family: 'Courier New'; font-size: 13px;"
             )
 
-            # 가중치 변경 시 미리보기 갱신
-            def _update_preview(_, sf=spin_fwd, sb=spin_bwd, lp=lbl_preview):
-                f = sf.value()
-                b = sb.value()
-                lp.setText(f"→{int(round(100*f))}/←{int(round(100*b))}")
-            spin_fwd.valueChanged.connect(_update_preview)
-            spin_bwd.valueChanged.connect(_update_preview)
+            spin_fwd.setStyleSheet(SPIN_STYLE)
+            spin_bwd.setStyleSheet(SPIN_STYLE)
+            self._weight_spins[m] = (spin_fwd, spin_bwd)
 
             row.addWidget(lbl_m)
             row.addWidget(spin_fwd)
             row.addWidget(spin_bwd)
-            row.addWidget(lbl_preview)
             row.addStretch()
-            gw.addLayout(row)
+            lay.addLayout(row)
 
-            self._weight_spins[m] = (spin_fwd, spin_bwd)
 
         # 리셋 버튼
         btn_reset_w = QPushButton("Reset all weights → 1.0")

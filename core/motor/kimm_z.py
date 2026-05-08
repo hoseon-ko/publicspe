@@ -13,9 +13,11 @@ KIMM Fine Stage — Z축 TCP 소켓 통신 (위치 조회 전용 우선 구현)
 from __future__ import annotations
 
 import socket
-import threading
 import logging
+import threading
 from typing import Optional
+
+from core.logger import dev_logger
 
 log = logging.getLogger(__name__)
 
@@ -40,7 +42,8 @@ class KIMMZController:
 
         self._sock: Optional[socket.socket] = None
         self._connected = False
-        self._lock = threading.Lock()
+        self._send_lock = threading.Lock()  # 통신 전송용 락
+        self._cmd_lock = threading.Lock()   # 모션 중복 방지용 락
 
         # 마지막으로 수신된 각 축 위치
         self._positions: list[float] = [0.0] * 6
@@ -76,10 +79,10 @@ class KIMMZController:
 
     # ── 연결 / 해제 ─────────────────────────────────────────────────
 
-    def connect(self) -> bool:
-        """TCP 연결. 성공 시 True."""
+    def connect(self) -> None:
+        """TCP 연결. 실패 시 예외 발생."""
         if self._connected:
-            return True
+            return
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(5.0)
@@ -93,12 +96,11 @@ class KIMMZController:
                 target=self._recv_loop, daemon=True, name="kimm_recv"
             )
             self._recv_thread.start()
-            log.info(f"[KIMM] Connected → {self.ip}:{self.port}")
-            return True
+            dev_logger.info(f"KIMM Connected: {self.ip}:{self.port}")
         except Exception as e:
-            log.error(f"[KIMM] Connection failed: {e}")
             self._connected = False
-            return False
+            dev_logger.error(f"KIMM Connection Failed: {e}")
+            raise ConnectionError(f"KIMM 연결 실패: {e}")
 
     def disconnect(self):
         """연결 종료."""
@@ -119,76 +121,87 @@ class KIMMZController:
 
     # ── 이동 명령 ────────────────────────────────────────────────────
 
-    def move_to_z(self, target_um: float, velocity: Optional[float] = None) -> bool:
+    def move_to_z(self, target_um: float, velocity: Optional[float] = None) -> None:
         """Z축 절대 이동."""
-        if not self._connected and not self.dry_run: return False
+        if not self._connected and not self.dry_run:
+            raise ConnectionError("KIMM Not connected")
+            
         vel = velocity if velocity is not None else self.default_velocity
 
         # 안전 리밋 체크 (상한/하한 동시 체크)
         if target_um > self.z_safety_limit or target_um < self.z_lower_limit:
-            log.error(f"[KIMM] Safety Block: Target Z({target_um:.1f}) out of bounds [{self.z_lower_limit:.1f}, {self.z_safety_limit:.1f}]")
-            return False
+            raise ValueError(f"Target Z({target_um:.1f}) out of bounds [{self.z_lower_limit:.1f}, {self.z_safety_limit:.1f}]")
 
-        cmd = f"Move({AXIS_Z},Abs,{target_um:.3f},{vel:.0f})\r\n"
+        if not self._cmd_lock.acquire(blocking=False):
+            raise RuntimeError("Motion already in progress. Ignoring command.")
 
-        if self.dry_run:
-            log.info(f"[KIMM DRY-RUN] {cmd.strip()} (Limit={self.z_safety_limit})")
-            # 시뮬레이션: 즉시 성공
-            return True
+        try:
+            cmd = f"Move({AXIS_Z},Abs,{target_um:.3f},{vel:.0f})\r\n"
 
-        self._ack_received.clear()
-        self._done_received.clear()
+            if self.dry_run:
+                log.info(f"[KIMM DRY-RUN] {cmd.strip()} (Limit={self.z_safety_limit})")
+                return
 
-        if self._send(cmd):
+            self._ack_received.clear()
+            self._done_received.clear()
+
+            self._send(cmd)
             # Ack 대기 (5초)
             if not self._ack_received.wait(timeout=5.0):
-                log.error("[KIMM] Move Ack timeout")
-                return False
+                raise TimeoutError("Move Ack timeout")
             # Done 대기 (30초)
             if not self._done_received.wait(timeout=30.0):
-                log.error("[KIMM] Move Done timeout")
-                return False
-            return True
-        return False
+                raise TimeoutError("Move Done timeout")
+            
+            log.info(f"[KIMM] Move_to {target_um:.2f} 완료")
+        finally:
+            self._cmd_lock.release()
 
-    def move_by_z(self, delta_um: float, velocity: Optional[float] = None) -> bool:
+    def move_by_z(self, delta_um: float, velocity: Optional[float] = None) -> None:
         """Z축 상대 이동."""
-        if not self._connected and not self.dry_run: return False
+        if not self._connected and not self.dry_run:
+            raise ConnectionError("KIMM Not connected")
+            
         vel = velocity if velocity is not None else self.default_velocity
-
         target_um = self.current_z + delta_um
+        
         if target_um > self.z_safety_limit or target_um < self.z_lower_limit:
-            log.error(f"[KIMM] Safety Block (Rel): Target Z({target_um:.1f}) out of bounds [{self.z_lower_limit:.1f}, {self.z_safety_limit:.1f}]")
-            return False
+            raise ValueError(f"Target Z({target_um:.1f}) out of bounds [{self.z_lower_limit:.1f}, {self.z_safety_limit:.1f}]")
 
-        cmd = f"Move({AXIS_Z},Rel,{delta_um:.3f},{vel:.0f})\r\n"
+        if not self._cmd_lock.acquire(blocking=False):
+            raise RuntimeError("Motion already in progress. Ignoring command.")
 
-        if self.dry_run:
-            log.info(f"[KIMM DRY-RUN] {cmd.strip()} (Limit={self.z_safety_limit})")
-            return True
+        try:
+            cmd = f"Move({AXIS_Z},Rel,{delta_um:.3f},{vel:.0f})\r\n"
 
-        self._ack_received.clear()
-        self._done_received.clear()
+            if self.dry_run:
+                log.info(f"[KIMM DRY-RUN] {cmd.strip()} (Limit={self.z_safety_limit})")
+                return
 
-        if self._send(cmd):
-            if not self._ack_received.wait(timeout=5.0): return False
-            if not self._done_received.wait(timeout=30.0): return False
-            return True
-        return False
+            self._ack_received.clear()
+            self._done_received.clear()
+
+            self._send(cmd)
+            if not self._ack_received.wait(timeout=5.0):
+                raise TimeoutError("Move Ack timeout")
+            if not self._done_received.wait(timeout=30.0):
+                raise TimeoutError("Move Done timeout")
+                
+            log.info(f"[KIMM] Move_by {delta_um:+.2f} 완료")
+        finally:
+            self._cmd_lock.release()
 
     # ── 내부: 전송 ────────────────────────────────────────────────────
 
-    def _send(self, command: str) -> bool:
-        with self._lock:
+    def _send(self, command: str) -> None:
+        with self._send_lock:
             if not self._connected or self._sock is None:
-                return False
+                raise ConnectionError("Socket not connected")
             try:
                 self._sock.sendall(command.encode("utf-8"))
-                return True
             except Exception as e:
-                log.error(f"[KIMM] Send error: {e}")
                 self._connected = False
-                return False
+                raise ConnectionError(f"Send error: {e}")
 
     # ── 내부: 수신 루프 ───────────────────────────────────────────────
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import sys
 from typing import List, Optional
 
+from core.logger import dev_logger
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
 _PICO_OK = False
@@ -133,6 +134,7 @@ class PicomotorController:
         self._master = self._cmdlib.GetMasterDeviceAddress(self._key)
         model = self._cmdlib.GetModelSerial(self._key, self._master)
         self._connected = True
+        dev_logger.info(f"Picomotor Connected: {model}")
         return str(model)
 
     def disconnect(self) -> None:

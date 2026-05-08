@@ -1264,7 +1264,7 @@ class AutoFocusTab(QWidget):
         # 테이블 및 리스트에서 Best 결과 하이라이트
         for r in range(self._table.rowCount()):
             z_val = float(self._table.item(r, 1).text())
-            if abs(z_val - best_z) < 0.001:
+            if abs(z_val - self._best_z) < 0.001:
                 self._table.selectRow(r)
                 self._frame_list.setCurrentRow(r)
                 break
