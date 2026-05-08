@@ -54,7 +54,8 @@ class KIMMZController:
         self._done_received = threading.Event()
 
         # 설정값 (UI에서 업데이트 예정)
-        self.z_safety_limit = 0.0  # um
+        self.z_safety_limit = 10000.0  # um (상한 기본값)
+        self.z_lower_limit = -10000.0  # um (하한 리밋 추가)
         self.default_velocity = 10.0  # um/s
         self.dry_run = False
 
@@ -123,9 +124,9 @@ class KIMMZController:
         if not self._connected and not self.dry_run: return False
         vel = velocity if velocity is not None else self.default_velocity
 
-        # 안전 리밋 체크
-        if self.current_z >= self.z_safety_limit and target_um > self.current_z:
-            log.error(f"[KIMM] Safety Block: Current Z({self.current_z:.1f}) >= Limit({self.z_safety_limit:.1f})")
+        # 안전 리밋 체크 (상한/하한 동시 체크)
+        if target_um > self.z_safety_limit or target_um < self.z_lower_limit:
+            log.error(f"[KIMM] Safety Block: Target Z({target_um:.1f}) out of bounds [{self.z_lower_limit:.1f}, {self.z_safety_limit:.1f}]")
             return False
 
         cmd = f"Move({AXIS_Z},Abs,{target_um:.3f},{vel:.0f})\r\n"
@@ -155,8 +156,9 @@ class KIMMZController:
         if not self._connected and not self.dry_run: return False
         vel = velocity if velocity is not None else self.default_velocity
 
-        if self.current_z >= self.z_safety_limit and delta_um > 0:
-            log.error(f"[KIMM] Safety Block (Rel): Current Z({self.current_z:.1f}) >= Limit({self.z_safety_limit:.1f})")
+        target_um = self.current_z + delta_um
+        if target_um > self.z_safety_limit or target_um < self.z_lower_limit:
+            log.error(f"[KIMM] Safety Block (Rel): Target Z({target_um:.1f}) out of bounds [{self.z_lower_limit:.1f}, {self.z_safety_limit:.1f}]")
             return False
 
         cmd = f"Move({AXIS_Z},Rel,{delta_um:.3f},{vel:.0f})\r\n"

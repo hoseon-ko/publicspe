@@ -236,8 +236,8 @@ class KIMMZPanel(QWidget):
         lbl_lim.setStyleSheet(f"color:#8090b0; font-family:'{_FC}'; font-size:11px;")
         lbl_lim.setFixedWidth(65)
         self.spin_limit = QDoubleSpinBox()
-        self.spin_limit.setRange(-1000.0, 1000.0)
-        self.spin_limit.setValue(0.0)
+        self.spin_limit.setRange(0.0, 10000.0)
+        self.spin_limit.setValue(10000.0)
         self.spin_limit.setDecimals(1)
         self.spin_limit.setStyleSheet(self._spin_style())
         self.spin_limit.valueChanged.connect(self._on_limit_changed)
@@ -313,7 +313,9 @@ class KIMMZPanel(QWidget):
 
         self._save_settings()
         self._ctrl = KIMMZController(ip, port)
-        self._ctrl.z_safety_limit = self.spin_limit.value()
+        limit_val = self.spin_limit.value()
+        self._ctrl.z_safety_limit = limit_val
+        self._ctrl.z_lower_limit = -limit_val
         self._ctrl.default_velocity = self.spin_vel.value()
         self._ctrl.dry_run = self.check_dry.isChecked()
         self._log(f"KIMM: 연결 시도 → {ip}:{port}")
@@ -396,6 +398,7 @@ class KIMMZPanel(QWidget):
     def _on_limit_changed(self, val: float):
         if self._ctrl:
             self._ctrl.z_safety_limit = val
+            self._ctrl.z_lower_limit = -val
         self._save_settings()
 
     def _on_vel_changed(self, val: float):
@@ -424,7 +427,7 @@ class KIMMZPanel(QWidget):
     def _load_settings(self):
         self.edit_ip.setText(self._settings.value(_SETTINGS_KEY_IP,   "192.168.1.100"))
         self.edit_port.setText(self._settings.value(_SETTINGS_KEY_PORT, "5000"))
-        self.spin_limit.setValue(float(self._settings.value(_SETTINGS_KEY_LIMIT, 0.0)))
+        self.spin_limit.setValue(float(self._settings.value(_SETTINGS_KEY_LIMIT, 10000.0)))
         self.spin_vel.setValue(float(self._settings.value(_SETTINGS_KEY_VEL, 10.0)))
         self.check_dry.setChecked(self._settings.value(_SETTINGS_KEY_DRY, False, type=bool))
 

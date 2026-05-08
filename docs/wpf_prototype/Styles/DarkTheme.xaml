@@ -1,0 +1,239 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- ── 색상 팔레트 ─────────────────────────────────────────────── -->
+    <Color x:Key="Col.BgDeep">#080e1e</Color>
+    <Color x:Key="Col.BgDark">#0a1020</Color>
+    <Color x:Key="Col.BgMed">#0f1729</Color>
+    <Color x:Key="Col.BgCard">#111827</Color>
+    <Color x:Key="Col.Border">#1a4060</Color>
+    <Color x:Key="Col.BorderHi">#1a3a60</Color>
+    <Color x:Key="Col.Accent">#4ecdc4</Color>
+    <Color x:Key="Col.Danger">#e94560</Color>
+    <Color x:Key="Col.Amber">#ffe66d</Color>
+    <Color x:Key="Col.Purple">#aa7acc</Color>
+    <Color x:Key="Col.Green">#4a9a7a</Color>
+    <Color x:Key="Col.TextNorm">#c0d0ff</Color>
+    <Color x:Key="Col.TextDim">#a0b0d0</Color>
+    <Color x:Key="Col.TextDead">#6080a0</Color>
+    <Color x:Key="Col.HdrBg">#161b27</Color>
+    <Color x:Key="Col.HdrBorder">#1e2a3e</Color>
+    <Color x:Key="Col.TabNormal">#4a5a70</Color>
+    <Color x:Key="Col.TabHover">#8aa0bc</Color>
+    <Color x:Key="Col.TabActive">#e0e8f0</Color>
+
+    <!-- SolidColorBrush 변환 -->
+    <SolidColorBrush x:Key="Brush.BgDeep"    Color="{StaticResource Col.BgDeep}"/>
+    <SolidColorBrush x:Key="Brush.BgDark"    Color="{StaticResource Col.BgDark}"/>
+    <SolidColorBrush x:Key="Brush.BgMed"     Color="{StaticResource Col.BgMed}"/>
+    <SolidColorBrush x:Key="Brush.BgCard"    Color="{StaticResource Col.BgCard}"/>
+    <SolidColorBrush x:Key="Brush.Border"    Color="{StaticResource Col.Border}"/>
+    <SolidColorBrush x:Key="Brush.Accent"    Color="{StaticResource Col.Accent}"/>
+    <SolidColorBrush x:Key="Brush.Danger"    Color="{StaticResource Col.Danger}"/>
+    <SolidColorBrush x:Key="Brush.Amber"     Color="{StaticResource Col.Amber}"/>
+    <SolidColorBrush x:Key="Brush.Purple"    Color="{StaticResource Col.Purple}"/>
+    <SolidColorBrush x:Key="Brush.TextNorm"  Color="{StaticResource Col.TextNorm}"/>
+    <SolidColorBrush x:Key="Brush.TextDim"   Color="{StaticResource Col.TextDim}"/>
+    <SolidColorBrush x:Key="Brush.TextDead"  Color="{StaticResource Col.TextDead}"/>
+
+    <!-- ── 폰트 ──────────────────────────────────────────────────────── -->
+    <FontFamily x:Key="FontMono">Courier New</FontFamily>
+    <FontFamily x:Key="FontUI">Segoe UI</FontFamily>
+    <system:Double x:Key="FontSize.Small"  xmlns:system="clr-namespace:System;assembly=mscorlib">11</system:Double>
+    <system:Double x:Key="FontSize.Normal" xmlns:system="clr-namespace:System;assembly=mscorlib">12</system:Double>
+    <system:Double x:Key="FontSize.Large"  xmlns:system="clr-namespace:System;assembly=mscorlib">13</system:Double>
+
+    <!-- ── 공통 TextBlock ────────────────────────────────────────────── -->
+    <Style x:Key="MonoText" TargetType="TextBlock">
+        <Setter Property="FontFamily"  Value="{StaticResource FontMono}"/>
+        <Setter Property="FontSize"    Value="{StaticResource FontSize.Small}"/>
+        <Setter Property="Foreground"  Value="{StaticResource Brush.TextDim}"/>
+    </Style>
+    <Style x:Key="DimLabel" BasedOn="{StaticResource MonoText}" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource Brush.TextDead}"/>
+    </Style>
+    <Style x:Key="AccentLabel" BasedOn="{StaticResource MonoText}" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource Brush.Accent}"/>
+        <Setter Property="FontWeight" Value="Bold"/>
+    </Style>
+
+    <!-- ── Separator 수평선 ──────────────────────────────────────────── -->
+    <Style x:Key="HSep" TargetType="Separator">
+        <Setter Property="Background"  Value="{StaticResource Brush.Border}"/>
+        <Setter Property="Height"      Value="1"/>
+        <Setter Property="Margin"      Value="0,4"/>
+    </Style>
+
+    <!-- ── 헤더 탭 ToggleButton ──────────────────────────────────────── -->
+    <Style x:Key="HeaderTabButton" TargetType="ToggleButton">
+        <Setter Property="Background"           Value="Transparent"/>
+        <Setter Property="Foreground"           Value="#4a5a70"/>
+        <Setter Property="BorderThickness"      Value="0,0,0,2"/>
+        <Setter Property="BorderBrush"          Value="Transparent"/>
+        <Setter Property="FontFamily"           Value="{StaticResource FontMono}"/>
+        <Setter Property="FontSize"             Value="{StaticResource FontSize.Small}"/>
+        <Setter Property="FontWeight"           Value="Bold"/>
+        <Setter Property="Padding"              Value="16,0"/>
+        <Setter Property="Height"               Value="30"/>
+        <Setter Property="Cursor"               Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border x:Name="bd"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="bd" Property="Background" Value="#06ffffff"/>
+                            <Setter Property="Foreground" Value="#8aa0bc"/>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter Property="Foreground"   Value="#e0e8f0"/>
+                            <Setter Property="BorderBrush"  Value="{StaticResource Brush.Accent}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ── 일반 액션 버튼 ─────────────────────────────────────────────── -->
+    <Style x:Key="ActionButton" TargetType="Button">
+        <Setter Property="Background"      Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="FontFamily"      Value="{StaticResource FontMono}"/>
+        <Setter Property="FontSize"        Value="{StaticResource FontSize.Small}"/>
+        <Setter Property="FontWeight"      Value="Bold"/>
+        <Setter Property="Padding"         Value="12,5"/>
+        <Setter Property="Cursor"          Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="bd"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="3"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="bd" Property="Background"
+                                    Value="{Binding BorderBrush, RelativeSource={RelativeSource TemplatedParent},
+                                            Converter={StaticResource ColorWithAlpha}, ConverterParameter=22}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground" Value="#304060"/>
+                            <Setter TargetName="bd" Property="BorderBrush" Value="#1a2840"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Accent / Danger 버튼 -->
+    <Style x:Key="AccentButton" BasedOn="{StaticResource ActionButton}" TargetType="Button">
+        <Setter Property="Foreground"  Value="{StaticResource Brush.Accent}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Brush.Accent}"/>
+    </Style>
+    <Style x:Key="DangerButton" BasedOn="{StaticResource ActionButton}" TargetType="Button">
+        <Setter Property="Foreground"  Value="{StaticResource Brush.Danger}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Brush.Danger}"/>
+    </Style>
+    <Style x:Key="PurpleButton" BasedOn="{StaticResource ActionButton}" TargetType="Button">
+        <Setter Property="Foreground"  Value="{StaticResource Brush.Purple}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Brush.Purple}"/>
+    </Style>
+
+    <!-- ── TextBox (입력 필드) ────────────────────────────────────────── -->
+    <Style x:Key="DarkTextBox" TargetType="TextBox">
+        <Setter Property="Background"      Value="{StaticResource Brush.BgDark}"/>
+        <Setter Property="BorderBrush"     Value="{StaticResource Brush.Border}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Foreground"      Value="{StaticResource Brush.TextNorm}"/>
+        <Setter Property="FontFamily"      Value="{StaticResource FontMono}"/>
+        <Setter Property="FontSize"        Value="{StaticResource FontSize.Small}"/>
+        <Setter Property="Padding"         Value="6,2"/>
+    </Style>
+
+    <!-- ── NumericUpDown / Spinner 스타일 (MahApps 또는 커스텀) ───────── -->
+    <Style x:Key="DarkSpinner" TargetType="TextBox" BasedOn="{StaticResource DarkTextBox}">
+        <Setter Property="TextAlignment" Value="Right"/>
+    </Style>
+
+    <!-- ── ComboBox ──────────────────────────────────────────────────── -->
+    <Style x:Key="DarkCombo" TargetType="ComboBox">
+        <Setter Property="Background"  Value="{StaticResource Brush.BgDark}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Brush.Border}"/>
+        <Setter Property="Foreground"  Value="{StaticResource Brush.TextNorm}"/>
+        <Setter Property="FontFamily"  Value="{StaticResource FontMono}"/>
+        <Setter Property="FontSize"    Value="{StaticResource FontSize.Small}"/>
+        <Setter Property="Padding"     Value="6,2"/>
+    </Style>
+
+    <!-- ── ProgressBar ───────────────────────────────────────────────── -->
+    <Style x:Key="ScanProgress" TargetType="ProgressBar">
+        <Setter Property="Background"  Value="#080e1e"/>
+        <Setter Property="Foreground"  Value="{StaticResource Brush.Purple}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Brush.Border}"/>
+        <Setter Property="Height"      Value="8"/>
+    </Style>
+
+    <!-- ── GroupBox (섹션 카드) ───────────────────────────────────────── -->
+    <Style x:Key="DarkGroupBox" TargetType="GroupBox">
+        <Setter Property="BorderBrush"     Value="{StaticResource Brush.Border}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Foreground"      Value="{StaticResource Brush.TextDim}"/>
+        <Setter Property="FontFamily"      Value="{StaticResource FontMono}"/>
+        <Setter Property="FontSize"        Value="{StaticResource FontSize.Small}"/>
+        <Setter Property="Padding"         Value="6,4"/>
+        <Setter Property="Margin"          Value="0,4"/>
+    </Style>
+
+    <!-- ── 로그 TextBox ───────────────────────────────────────────────── -->
+    <Style x:Key="LogBox" TargetType="TextBox">
+        <Setter Property="Background"      Value="#060c1a"/>
+        <Setter Property="BorderBrush"     Value="{StaticResource Brush.Border}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Foreground"      Value="#8090b0"/>
+        <Setter Property="FontFamily"      Value="{StaticResource FontMono}"/>
+        <Setter Property="FontSize"        Value="10"/>
+        <Setter Property="IsReadOnly"      Value="True"/>
+        <Setter Property="TextWrapping"    Value="Wrap"/>
+        <Setter Property="VerticalScrollBarVisibility" Value="Auto"/>
+    </Style>
+
+    <!-- ── 섹션 헤더 Border ───────────────────────────────────────────── -->
+    <Style x:Key="PanelHeader" TargetType="Border">
+        <Setter Property="Height"      Value="22"/>
+        <Setter Property="Background"  Value="{StaticResource Brush.BgMed}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Brush.Border}"/>
+        <Setter Property="BorderThickness" Value="0,0,0,1"/>
+        <Setter Property="Padding"     Value="8,0"/>
+    </Style>
+
+    <!-- ── GridSplitter ──────────────────────────────────────────────── -->
+    <Style x:Key="DarkSplitter" TargetType="GridSplitter">
+        <Setter Property="Background" Value="#1a3a60"/>
+        <Setter Property="ShowsPreview" Value="True"/>
+    </Style>
+
+    <!-- ── StatusBar ─────────────────────────────────────────────────── -->
+    <Style x:Key="AppStatusBar" TargetType="StatusBar">
+        <Setter Property="Background"  Value="{StaticResource Brush.BgMed}"/>
+        <Setter Property="Foreground"  Value="{StaticResource Brush.TextDim}"/>
+        <Setter Property="FontFamily"  Value="{StaticResource FontMono}"/>
+        <Setter Property="FontSize"    Value="10"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Brush.Border}"/>
+        <Setter Property="BorderThickness" Value="0,1,0,0"/>
+    </Style>
+
+</ResourceDictionary>

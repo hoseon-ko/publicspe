@@ -135,6 +135,15 @@ class AcsStageController:
         self._thread: Optional[QThread] = None
 
         self.dry_run = False
+        
+        # [Phase 6] ACS 모터 소프트 리밋 강제 적용
+        try:
+            from core.motor.kinematic_calc import DEFAULT_PLUS_LIMITS, DEFAULT_MINUS_LIMITS
+            self.plus_limits = DEFAULT_PLUS_LIMITS.copy()
+            self.minus_limits = DEFAULT_MINUS_LIMITS.copy()
+        except Exception:
+            self.plus_limits = [9999.0] * 6
+            self.minus_limits = [-9999.0] * 6
 
     # ── 속성 ─────────────────────────────────────────────────────────
 
@@ -206,6 +215,11 @@ class AcsStageController:
     def move_to(self, axis: int, target_mm: float, wait: bool = False) -> bool:
         """절대 이동. wait=True 면 완료까지 블로킹 (최대 30초)."""
         self._require_connected()
+        
+        if target_mm > self.plus_limits[axis] or target_mm < self.minus_limits[axis]:
+            log.error(f"[ACS] Soft Limit Block: Axis{axis}({AXIS_LABELS[axis]}) target {target_mm:.4f} is out of bounds [{self.minus_limits[axis]:.4f}, {self.plus_limits[axis]:.4f}]")
+            return False
+
         if self.dry_run:
             log.info(f"[ACS DRY-RUN] Axis{axis}({AXIS_LABELS[axis]}) → {target_mm:.4f} mm")
             return True

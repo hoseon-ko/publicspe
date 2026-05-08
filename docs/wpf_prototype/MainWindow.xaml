@@ -1,0 +1,176 @@
+<Window x:Class="SpeAnalyze.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:vm="clr-namespace:SpeAnalyze.UI.ViewModels"
+        Title="SpeAnalyze — Integrated Lab Control"
+        MinWidth="1300" MinHeight="850"
+        Width="1700"    Height="1000"
+        Background="#080e1e"
+        WindowStyle="SingleBorderWindow">
+
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Styles/DarkTheme.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <Window.DataContext>
+        <vm:MainViewModel/>
+    </Window.DataContext>
+
+    <DockPanel LastChildFill="True">
+
+        <!-- ══════════════════════════════════════════════════════════
+             헤더 바 (30px 고정)
+             ══════════════════════════════════════════════════════════ -->
+        <Border DockPanel.Dock="Top"
+                Height="30"
+                Background="#161b27"
+                BorderBrush="#1e2a3e"
+                BorderThickness="0,0,0,1">
+            <DockPanel LastChildFill="False">
+
+                <!-- 앱 이름 -->
+                <TextBlock DockPanel.Dock="Left"
+                           Text="SpeAnalyze"
+                           Foreground="#5a7a9a"
+                           FontFamily="{StaticResource FontMono}"
+                           FontSize="11" FontWeight="Bold"
+                           LetterSpacing="2"
+                           VerticalAlignment="Center"
+                           Padding="8,0,14,0"
+                           Margin="0,0,8,0">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="BorderBrush" Value="#1e2a3e"/>
+                            <Setter Property="BorderThickness" Value="0,0,1,0"/>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+
+                <!-- 탭 버튼 그룹 (ToggleButton — 상호 배타는 ViewModel에서 관리) -->
+                <StackPanel DockPanel.Dock="Left"
+                            Orientation="Horizontal"
+                            Margin="8,0,0,0">
+                    <ToggleButton Content="Live"
+                                  Style="{StaticResource HeaderTabButton}"
+                                  IsChecked="{Binding IsTab.Live, Mode=TwoWay}"
+                                  Command="{Binding SwitchTabCommand}"
+                                  CommandParameter="Live"/>
+                    <ToggleButton Content="Acquire"
+                                  Style="{StaticResource HeaderTabButton}"
+                                  IsChecked="{Binding IsTab.Acquire, Mode=TwoWay}"
+                                  Command="{Binding SwitchTabCommand}"
+                                  CommandParameter="Acquire"/>
+                    <ToggleButton Content="Scan"
+                                  Style="{StaticResource HeaderTabButton}"
+                                  IsChecked="{Binding IsTab.Scan, Mode=TwoWay}"
+                                  Command="{Binding SwitchTabCommand}"
+                                  CommandParameter="Scan"/>
+                    <ToggleButton Content="AutoFocus"
+                                  Style="{StaticResource HeaderTabButton}"
+                                  IsChecked="{Binding IsTab.AutoFocus, Mode=TwoWay}"
+                                  Command="{Binding SwitchTabCommand}"
+                                  CommandParameter="AutoFocus"/>
+                    <ToggleButton Content="Kinematic"
+                                  Style="{StaticResource HeaderTabButton}"
+                                  IsChecked="{Binding IsTab.Kinematic, Mode=TwoWay}"
+                                  Command="{Binding SwitchTabCommand}"
+                                  CommandParameter="Kinematic"/>
+                    <ToggleButton Content="Analysis"
+                                  Style="{StaticResource HeaderTabButton}"
+                                  IsChecked="{Binding IsTab.Analysis, Mode=TwoWay}"
+                                  Command="{Binding SwitchTabCommand}"
+                                  CommandParameter="Analysis"/>
+                </StackPanel>
+
+                <!-- 오른쪽 상태 표시 (카메라명 | 노출 | FPS) -->
+                <StackPanel DockPanel.Dock="Right"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center"
+                            Margin="0,0,8,0">
+
+                    <Rectangle Width="1" Fill="#1e2a3e" Margin="4,6"/>
+                    <TextBlock Text="{Binding HdrCamName}"
+                               Foreground="#4a5a70"
+                               FontFamily="{StaticResource FontMono}"
+                               FontSize="10" Padding="6,0"
+                               VerticalAlignment="Center"/>
+                    <Rectangle Width="1" Fill="#1e2a3e" Margin="4,6"/>
+                    <TextBlock Text="{Binding HdrExposure}"
+                               Foreground="#4a5a70"
+                               FontFamily="{StaticResource FontMono}"
+                               FontSize="10" Padding="6,0"
+                               VerticalAlignment="Center"/>
+                    <Rectangle Width="1" Fill="#1e2a3e" Margin="4,6"/>
+                    <TextBlock Text="{Binding HdrFps}"
+                               Foreground="#4a5a70"
+                               FontFamily="{StaticResource FontMono}"
+                               FontSize="10" Padding="6,0"
+                               VerticalAlignment="Center"/>
+                    <Rectangle Width="1" Fill="#1e2a3e" Margin="4,6"/>
+                </StackPanel>
+
+            </DockPanel>
+        </Border>
+
+        <!-- ══════════════════════════════════════════════════════════
+             상태바 (하단)
+             ══════════════════════════════════════════════════════════ -->
+        <StatusBar DockPanel.Dock="Bottom" Style="{StaticResource AppStatusBar}">
+            <StatusBarItem>
+                <TextBlock Text="{Binding StatusMessage}"
+                           Foreground="#a0b0d0" FontFamily="{StaticResource FontMono}" FontSize="10"/>
+            </StatusBarItem>
+            <Separator/>
+            <StatusBarItem>
+                <TextBlock Text="{Binding SbCamera}"
+                           Foreground="{StaticResource Brush.Accent}"
+                           FontFamily="{StaticResource FontMono}" FontSize="10"/>
+            </StatusBarItem>
+            <Separator/>
+            <StatusBarItem>
+                <TextBlock Text="{Binding SbExposure}"
+                           FontFamily="{StaticResource FontMono}" FontSize="10"/>
+            </StatusBarItem>
+            <Separator/>
+            <StatusBarItem>
+                <TextBlock Text="{Binding SbImageSize}"
+                           FontFamily="{StaticResource FontMono}" FontSize="10"/>
+            </StatusBarItem>
+            <Separator/>
+            <StatusBarItem>
+                <TextBlock Text="{Binding SbFps}"
+                           FontFamily="{StaticResource FontMono}" FontSize="10"/>
+            </StatusBarItem>
+        </StatusBar>
+
+        <!-- ══════════════════════════════════════════════════════════
+             콘텐츠 영역 — ContentControl이 CurrentView를 DataTemplate으로 렌더
+             ══════════════════════════════════════════════════════════ -->
+        <ContentControl Content="{Binding CurrentViewModel}">
+            <ContentControl.Resources>
+                <!-- DataTemplate → View 매핑 (View-First 아닌 ViewModel-First) -->
+                <DataTemplate DataType="{x:Type vm:LiveViewModel}">
+                    <views:LiveView xmlns:views="clr-namespace:SpeAnalyze.UI.Views.Live"/>
+                </DataTemplate>
+                <DataTemplate DataType="{x:Type vm:AcquisitionViewModel}">
+                    <views:AcquisitionView xmlns:views="clr-namespace:SpeAnalyze.UI.Views.Acquisition"/>
+                </DataTemplate>
+                <DataTemplate DataType="{x:Type vm:KinematicViewModel}">
+                    <views:KinematicView xmlns:views="clr-namespace:SpeAnalyze.UI.Views.Kinematic"/>
+                </DataTemplate>
+                <DataTemplate DataType="{x:Type vm:AutoFocusViewModel}">
+                    <views:AutoFocusView xmlns:views="clr-namespace:SpeAnalyze.UI.Views.AutoFocus"/>
+                </DataTemplate>
+                <DataTemplate DataType="{x:Type vm:AnalysisViewModel}">
+                    <views:AnalysisView xmlns:views="clr-namespace:SpeAnalyze.UI.Views.Analysis"/>
+                </DataTemplate>
+            </ContentControl.Resources>
+        </ContentControl>
+
+    </DockPanel>
+</Window>

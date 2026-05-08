@@ -1,0 +1,431 @@
+<UserControl x:Class="SpeAnalyze.UI.Views.Live.LiveView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ctrl="clr-namespace:SpeAnalyze.UI.Controls"
+             xmlns:vm="clr-namespace:SpeAnalyze.UI.ViewModels.Live"
+             Background="#080e1e">
+    <!--
+    ┌─ 사이드바(400px) ──────┬─ 이미지 뷰어(중앙) ────────────────────┐
+    │  📷 CAMERA              │                                        │
+    │  ⚙  MOTORS              │     WriteableBitmap ImageViewer        │
+    │  🎯 KIMM Z              │                                        │
+    │  ⬡  ACS 6-AXIS         ├──────────────────────────────────────  │
+    │                         │  📈 Profile Plot │ 📊 Histogram        │
+    └─────────────────────────┴─────────────────────────────────────   ┘
+    오른쪽 Dock: System Log
+    -->
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="400" MinWidth="280"/>
+            <ColumnDefinition Width="4"/>    <!-- 수직 분할바 -->
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="4"/>
+            <ColumnDefinition Width="260" MinWidth="200"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- ═══════════════════════════════════════════════════
+             Col 0: 좌측 사이드바 (스크롤 가능)
+             ═══════════════════════════════════════════════════ -->
+        <ScrollViewer Grid.Column="0"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled"
+                      Background="#080e1e">
+            <StackPanel Margin="0,4,0,4">
+
+                <!-- ── 📷 CAMERA 섹션 ──────────────────────────────── -->
+                <ctrl:CollapsibleSection Header="📷  CAMERA"
+                                         AccentColor="#4ecdc4"
+                                         IsExpanded="True">
+                    <ContentControl Content="{Binding CameraPanel}"
+                                    ContentTemplate="{StaticResource CameraPanelTemplate}"/>
+                </ctrl:CollapsibleSection>
+
+                <!-- ── ⚙ MOTORS 섹션 (Picomotor 4축) ──────────────── -->
+                <ctrl:CollapsibleSection Header="⚙  MOTORS"
+                                         AccentColor="#4a9a7a"
+                                         IsExpanded="True">
+                    <ItemsControl ItemsSource="{Binding MotorCards}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <!-- 축당 카드: 이름 | 위치 | ● | +/- | Steps -->
+                                <Border Background="#0f1729" BorderBrush="#1a4060"
+                                        BorderThickness="1" CornerRadius="4"
+                                        Margin="4,2" Padding="8,6">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="30"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="12"/>
+                                            <ColumnDefinition Width="60"/>
+                                            <ColumnDefinition Width="80"/>
+                                            <ColumnDefinition Width="30"/>
+                                            <ColumnDefinition Width="30"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="{Binding Name}"
+                                                   Foreground="#4ecdc4" FontFamily="Courier New"
+                                                   FontWeight="Bold" FontSize="12"
+                                                   VerticalAlignment="Center"/>
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding PositionText}"
+                                                   Foreground="#d8e8ff" FontFamily="Courier New"
+                                                   FontSize="12" TextAlignment="Right"
+                                                   VerticalAlignment="Center"/>
+                                        <!-- 상태 인디케이터 (●) -->
+                                        <TextBlock Grid.Column="2" Text="●"
+                                                   Foreground="{Binding StateColor}"
+                                                   FontSize="10" VerticalAlignment="Center"/>
+                                        <!-- Steps 입력 -->
+                                        <TextBox Grid.Column="3"
+                                                 Text="{Binding Steps, UpdateSourceTrigger=PropertyChanged}"
+                                                 Style="{StaticResource DarkSpinner}"/>
+                                        <!-- 퀵 스텝 버튼 (100 / 1000) -->
+                                        <StackPanel Grid.Column="4" Orientation="Horizontal">
+                                            <Button Content="100" Style="{StaticResource PurpleButton}"
+                                                    FontSize="9" Padding="4,2"
+                                                    Command="{Binding SetStepsCommand}" CommandParameter="100"/>
+                                            <Button Content="1k" Style="{StaticResource PurpleButton}"
+                                                    FontSize="9" Padding="4,2" Margin="2,0,0,0"
+                                                    Command="{Binding SetStepsCommand}" CommandParameter="1000"/>
+                                        </StackPanel>
+                                        <Button Grid.Column="5" Content="−"
+                                                Style="{StaticResource DangerButton}"
+                                                Padding="0" FontSize="14"
+                                                Command="{Binding JogCommand}" CommandParameter="-1"/>
+                                        <Button Grid.Column="6" Content="+"
+                                                Style="{StaticResource AccentButton}"
+                                                Padding="0" FontSize="14" Margin="2,0,0,0"
+                                                Command="{Binding JogCommand}" CommandParameter="1"/>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ctrl:CollapsibleSection>
+
+                <!-- ── 🎯 KIMM Z 섹션 ──────────────────────────────── -->
+                <ctrl:CollapsibleSection Header="🎯  KIMM Z"
+                                         AccentColor="#9a6a4a"
+                                         IsExpanded="False">
+                    <StackPanel DataContext="{Binding KimmPanel}" Margin="4,4">
+
+                        <!-- 연결 -->
+                        <Grid Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="35"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="50"/>
+                                <ColumnDefinition Width="50"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="IP" Style="{StaticResource DimLabel}"
+                                       VerticalAlignment="Center"/>
+                            <TextBox  Grid.Column="1" Text="{Binding IpAddress}"
+                                      Style="{StaticResource DarkTextBox}"/>
+                            <Button   Grid.Column="2" Content="CONN"
+                                      Style="{StaticResource AccentButton}"
+                                      FontSize="9" Padding="4,2" Margin="4,0,0,0"
+                                      Command="{Binding ConnectCommand}"/>
+                            <Button   Grid.Column="3" Content="DISC"
+                                      Style="{StaticResource DangerButton}"
+                                      FontSize="9" Padding="4,2" Margin="2,0,0,0"
+                                      Command="{Binding DisconnectCommand}"/>
+                        </Grid>
+
+                        <!-- 상태 -->
+                        <TextBlock Text="{Binding StatusText}"
+                                   Foreground="{Binding StatusColor}"
+                                   FontFamily="Courier New" FontSize="11"
+                                   HorizontalAlignment="Center" Margin="0,2"/>
+
+                        <!-- 현재 Z 위치 -->
+                        <TextBlock Text="{Binding CurrentZText}"
+                                   Foreground="#d8e8ff" FontFamily="Courier New"
+                                   FontSize="14" FontWeight="Bold"
+                                   HorizontalAlignment="Center" Margin="0,4"/>
+
+                        <!-- 조그 버튼 3×2 그리드 -->
+                        <UniformGrid Rows="2" Columns="3" Margin="4">
+                            <Button Content="+10"  Style="{StaticResource AccentButton}" Padding="8,4"
+                                    Command="{Binding JogCommand}" CommandParameter="10"/>
+                            <Button Content="+1"   Style="{StaticResource AccentButton}" Padding="8,4"
+                                    Command="{Binding JogCommand}" CommandParameter="1"/>
+                            <Button Content="+0.1" Style="{StaticResource AccentButton}" Padding="8,4"
+                                    Command="{Binding JogCommand}" CommandParameter="0.1"/>
+                            <Button Content="-10"  Style="{StaticResource DangerButton}" Padding="8,4"
+                                    Command="{Binding JogCommand}" CommandParameter="-10"/>
+                            <Button Content="-1"   Style="{StaticResource DangerButton}" Padding="8,4"
+                                    Command="{Binding JogCommand}" CommandParameter="-1"/>
+                            <Button Content="-0.1" Style="{StaticResource DangerButton}" Padding="8,4"
+                                    Command="{Binding JogCommand}" CommandParameter="-0.1"/>
+                        </UniformGrid>
+
+                        <!-- 리밋 + 속도 설정 -->
+                        <Grid Margin="0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="70"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition/>
+                                <RowDefinition/>
+                                <RowDefinition/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Upper Lim"
+                                       Style="{StaticResource DimLabel}" VerticalAlignment="Center"/>
+                            <TextBox   Grid.Row="0" Grid.Column="1"
+                                       Text="{Binding UpperLimit, UpdateSourceTrigger=LostFocus}"
+                                       Style="{StaticResource DarkSpinner}"/>
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Lower Lim"
+                                       Style="{StaticResource DimLabel}" VerticalAlignment="Center" Margin="0,2"/>
+                            <TextBox   Grid.Row="1" Grid.Column="1"
+                                       Text="{Binding LowerLimit, UpdateSourceTrigger=LostFocus}"
+                                       Style="{StaticResource DarkSpinner}" Margin="0,2"/>
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Velocity"
+                                       Style="{StaticResource DimLabel}" VerticalAlignment="Center"/>
+                            <TextBox   Grid.Row="2" Grid.Column="1"
+                                       Text="{Binding Velocity, UpdateSourceTrigger=LostFocus}"
+                                       Style="{StaticResource DarkSpinner}"/>
+                        </Grid>
+
+                        <CheckBox Content="DRY RUN"
+                                  IsChecked="{Binding DryRun}"
+                                  Foreground="#ffe66d" FontFamily="Courier New"
+                                  FontSize="11" FontWeight="Bold" Margin="0,4"/>
+                    </StackPanel>
+                </ctrl:CollapsibleSection>
+
+                <!-- ── ⬡ ACS 6-AXIS KINEMATIC 섹션 ─────────────────── -->
+                <ctrl:CollapsibleSection Header="⬡  ACS 6-AXIS KINEMATIC"
+                                         AccentColor="#7a6aaa"
+                                         IsExpanded="False">
+                    <StackPanel DataContext="{Binding AcsPanel}" Margin="4,4">
+
+                        <!-- 연결 영역 -->
+                        <GroupBox Header="CONNECTION" Style="{StaticResource DarkGroupBox}"
+                                  BorderBrush="#4ecdc4" Foreground="#4ecdc4">
+                            <StackPanel>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="35"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="IP" Style="{StaticResource DimLabel}"
+                                               VerticalAlignment="Center"/>
+                                    <TextBox Grid.Column="1" Text="{Binding IpAddress}"
+                                             Style="{StaticResource DarkTextBox}"/>
+                                </Grid>
+                                <Grid Margin="0,4,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="35"/>
+                                        <ColumnDefinition Width="60"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="50"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="PORT" Style="{StaticResource DimLabel}"
+                                               VerticalAlignment="Center"/>
+                                    <TextBox Grid.Column="1" Text="{Binding Port}"
+                                             Style="{StaticResource DarkTextBox}"/>
+                                    <CheckBox Grid.Column="2" Content="SIM"
+                                              IsChecked="{Binding UseSimulator}"
+                                              Foreground="#ffe66d" FontFamily="Courier New"
+                                              FontSize="11" HorizontalAlignment="Right"
+                                              VerticalAlignment="Center"/>
+                                </Grid>
+                                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                    <Button Content="CONNECT"    Style="{StaticResource AccentButton}"
+                                            Command="{Binding ConnectCommand}" Padding="8,4"/>
+                                    <Button Content="DISCONNECT" Style="{StaticResource DangerButton}"
+                                            Command="{Binding DisconnectCommand}" Padding="8,4" Margin="4,0,0,0"/>
+                                </StackPanel>
+                                <TextBlock Text="{Binding StatusText}"
+                                           Foreground="{Binding StatusColor}"
+                                           FontFamily="Courier New" FontSize="11"
+                                           HorizontalAlignment="Center" Margin="0,4"/>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <!-- 6축 위치 그리드 -->
+                        <GroupBox Header="6-AXIS POSITIONS" Style="{StaticResource DarkGroupBox}"
+                                  BorderBrush="#e94560" Foreground="#e94560">
+                            <ItemsControl ItemsSource="{Binding AxisRows}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="0,1">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="28"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="12"/>
+                                                <ColumnDefinition Width="30"/>
+                                                <ColumnDefinition Width="34"/>
+                                                <ColumnDefinition Width="72"/>
+                                                <ColumnDefinition Width="26"/>
+                                                <ColumnDefinition Width="26"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="{Binding Name}"
+                                                       Foreground="#4ecdc4" FontFamily="Courier New"
+                                                       FontSize="12" FontWeight="Bold"
+                                                       VerticalAlignment="Center"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding PositionText}"
+                                                       Foreground="#d8e8ff" FontFamily="Courier New"
+                                                       FontSize="12" TextAlignment="Right"
+                                                       VerticalAlignment="Center"/>
+                                            <TextBlock Grid.Column="2" Text="●"
+                                                       Foreground="{Binding StateColor}"
+                                                       FontSize="10" VerticalAlignment="Center"/>
+                                            <Button Grid.Column="3" Content="EN"
+                                                    Style="{StaticResource AccentButton}"
+                                                    FontSize="9" Padding="2"
+                                                    Command="{Binding EnableCommand}"/>
+                                            <Button Grid.Column="4" Content="DIS"
+                                                    Style="{StaticResource DangerButton}"
+                                                    FontSize="9" Padding="2" Margin="2,0"
+                                                    Command="{Binding DisableCommand}"/>
+                                            <TextBox Grid.Column="5" Text="{Binding JogStep}"
+                                                     Style="{StaticResource DarkSpinner}"/>
+                                            <Button Grid.Column="6" Content="−"
+                                                    Style="{StaticResource DangerButton}"
+                                                    Padding="0" FontSize="14"
+                                                    Command="{Binding JogMinusCommand}"/>
+                                            <Button Grid.Column="7" Content="+"
+                                                    Style="{StaticResource AccentButton}"
+                                                    Padding="0" FontSize="14" Margin="2,0,0,0"
+                                                    Command="{Binding JogPlusCommand}"/>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </GroupBox>
+
+                        <!-- 전체 제어 -->
+                        <StackPanel Orientation="Horizontal" Margin="0,4">
+                            <Button Content="ENABLE ALL"  Style="{StaticResource AccentButton}"
+                                    Command="{Binding EnableAllCommand}" Padding="8,4"/>
+                            <Button Content="DISABLE ALL" Style="{StaticResource PurpleButton}"
+                                    Command="{Binding DisableAllCommand}" Padding="8,4" Margin="4,0"/>
+                            <Button Content="STOP ALL"    Style="{StaticResource DangerButton}"
+                                    Command="{Binding StopAllCommand}" Padding="8,4"/>
+                        </StackPanel>
+
+                        <!-- 6DOF 키네마틱 이동 -->
+                        <GroupBox Header="6DOF  KINEMATIC  MOVE" Style="{StaticResource DarkGroupBox}"
+                                  BorderBrush="#aa7acc" Foreground="#aa7acc">
+                            <StackPanel>
+                                <UniformGrid Rows="2" Columns="3" Margin="0,0,0,6">
+                                    <!-- Tx Ty Tz Rx Ry Rz 스핀박스 -->
+                                    <StackPanel Margin="2">
+                                        <TextBlock Text="Tx (mm)" Style="{StaticResource DimLabel}"/>
+                                        <TextBox Text="{Binding Tx}" Style="{StaticResource DarkSpinner}"/>
+                                    </StackPanel>
+                                    <StackPanel Margin="2">
+                                        <TextBlock Text="Ty (mm)" Style="{StaticResource DimLabel}"/>
+                                        <TextBox Text="{Binding Ty}" Style="{StaticResource DarkSpinner}"/>
+                                    </StackPanel>
+                                    <StackPanel Margin="2">
+                                        <TextBlock Text="Tz (mm)" Style="{StaticResource DimLabel}"/>
+                                        <TextBox Text="{Binding Tz}" Style="{StaticResource DarkSpinner}"/>
+                                    </StackPanel>
+                                    <StackPanel Margin="2">
+                                        <TextBlock Text="Rx (mrad)" Style="{StaticResource DimLabel}"/>
+                                        <TextBox Text="{Binding Rx}" Style="{StaticResource DarkSpinner}"/>
+                                    </StackPanel>
+                                    <StackPanel Margin="2">
+                                        <TextBlock Text="Ry (mrad)" Style="{StaticResource DimLabel}"/>
+                                        <TextBox Text="{Binding Ry}" Style="{StaticResource DarkSpinner}"/>
+                                    </StackPanel>
+                                    <StackPanel Margin="2">
+                                        <TextBlock Text="Rz (mrad)" Style="{StaticResource DimLabel}"/>
+                                        <TextBox Text="{Binding Rz}" Style="{StaticResource DarkSpinner}"/>
+                                    </StackPanel>
+                                </UniformGrid>
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Content="CALC" Style="{StaticResource PurpleButton}"
+                                            Command="{Binding CalcCommand}" Padding="12,5"/>
+                                    <Button Content="MOVE" Style="{StaticResource AccentButton}"
+                                            Command="{Binding MoveCommand}" Padding="12,5" Margin="4,0,0,0"
+                                            IsEnabled="{Binding CanMove}"/>
+                                </StackPanel>
+                                <TextBox Text="{Binding CalcResult}" Style="{StaticResource LogBox}"
+                                         Height="100" Margin="0,6,0,0"/>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <CheckBox Content="DRY RUN (simulate — no motor movement)"
+                                  IsChecked="{Binding DryRun}"
+                                  Foreground="#ffe66d" FontFamily="Courier New"
+                                  FontSize="11" FontWeight="Bold" Margin="0,4"/>
+                    </StackPanel>
+                </ctrl:CollapsibleSection>
+
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- ═══ 수직 분할바 ═══ -->
+        <GridSplitter Grid.Column="1"
+                      Style="{StaticResource DarkSplitter}"
+                      HorizontalAlignment="Stretch" Width="4"/>
+
+        <!-- ═══════════════════════════════════════════════════
+             Col 2: 이미지 뷰어 (상) + Plot/Histogram (하)
+             ═══════════════════════════════════════════════════ -->
+        <Grid Grid.Column="2">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="4"/>
+                <RowDefinition Height="220" MinHeight="120"/>
+            </Grid.RowDefinitions>
+
+            <!-- 이미지 뷰어 (WriteableBitmap 기반 커스텀 컨트롤) -->
+            <ctrl:ImageViewerControl Grid.Row="0"
+                                     Source="{Binding LiveFrame}"
+                                     Colormap="{Binding Colormap}"
+                                     ShowCrosshair="{Binding ShowCrosshair}"
+                                     ShowRuler="{Binding ShowRuler}"/>
+
+            <GridSplitter Grid.Row="1" Style="{StaticResource DarkSplitter}"
+                          HorizontalAlignment="Stretch" Height="4"/>
+
+            <!-- 하단: 프로파일(좌) + 히스토그램(우) -->
+            <Grid Grid.Row="2">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="4"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <ctrl:ScottPlotControl Grid.Column="0"
+                                       Title="Profile"
+                                       DataSource="{Binding ProfileData}"
+                                       LineColor="#4ecdc4"/>
+                <GridSplitter Grid.Column="1" Style="{StaticResource DarkSplitter}"
+                              HorizontalAlignment="Stretch"/>
+                <ctrl:ScottPlotControl Grid.Column="2"
+                                       Title="Histogram"
+                                       DataSource="{Binding HistogramData}"
+                                       LineColor="#aa7acc"/>
+            </Grid>
+        </Grid>
+
+        <!-- ═══ 수직 분할바 ═══ -->
+        <GridSplitter Grid.Column="3"
+                      Style="{StaticResource DarkSplitter}"
+                      HorizontalAlignment="Stretch" Width="4"/>
+
+        <!-- ═══════════════════════════════════════════════════
+             Col 4: 시스템 로그
+             ═══════════════════════════════════════════════════ -->
+        <Grid Grid.Column="4">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="22"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+            <Border Grid.Row="0" Style="{StaticResource PanelHeader}">
+                <TextBlock Text="SYSTEM LOG"
+                           Foreground="#3a5878" FontFamily="Courier New"
+                           FontSize="11" FontWeight="Bold"
+                           LetterSpacing="2" VerticalAlignment="Center"/>
+            </Border>
+            <TextBox Grid.Row="1" Style="{StaticResource LogBox}"
+                     Text="{Binding SystemLog}" IsReadOnly="True"/>
+        </Grid>
+
+    </Grid>
+</UserControl>
