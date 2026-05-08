@@ -24,7 +24,7 @@ from core.motor.picomotor import PicomotorController
 from ui.widgets.collapsible_section import CollapsibleSection
 from theme.styles import (
     C_ACCENT, C_DANGER, C_WARN, C_BORDER, C_BG_DEEP, C_BG_DARK, C_TEXT, C_TEXT_DIM,
-    Fonts, Sizes, BTN_SMALL, SPIN_STYLE, grp_style
+    Fonts, Sizes, BTN_SMALL, SPIN_STYLE, grp_style, lbl
 )
 
 
@@ -297,22 +297,24 @@ class MotorPanel(QWidget):
 
     def _build_conn_group(self, lay: QVBoxLayout):
         lay.setSpacing(6)
-        self.lbl_status = QLabel("● DISCONNECTED")
-        self.lbl_status.setStyleSheet(
-            f"color: {C_DANGER}; font-family: '{Fonts.MONO}'; font-size: 14px;"
-        )
-        lay.addWidget(self.lbl_status)
+        lay.setContentsMargins(4, 4, 4, 4)
 
-        con_row = QHBoxLayout()
+        row_btn = QHBoxLayout()
         self.btn_connect = QPushButton("CONNECT")
-        self.btn_connect.setStyleSheet(BTN_SMALL.replace(Sizes.BTN, "14px"))
+        self.btn_connect.setStyleSheet(BTN_SMALL)
+        
         self.btn_disconnect = QPushButton("DISCONNECT")
         self.btn_disconnect.setEnabled(False)
-        self.btn_disconnect.setStyleSheet(BTN_SMALL.replace(C_ACCENT, C_DANGER).replace(Sizes.BTN, "14px"))
+        self.btn_disconnect.setStyleSheet(BTN_SMALL.replace(C_ACCENT, C_DANGER))
         
-        con_row.addWidget(self.btn_connect)
-        con_row.addWidget(self.btn_disconnect)
-        lay.addLayout(con_row)
+        row_btn.addWidget(self.btn_connect)
+        row_btn.addWidget(self.btn_disconnect)
+        lay.addLayout(row_btn)
+
+        self.lbl_status = QLabel("● DISCONNECTED")
+        self.lbl_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_status.setStyleSheet(lbl(C_DANGER, mono=True, bold=True))
+        lay.addWidget(self.lbl_status)
 
     def _build_axes_group(self, lay: QVBoxLayout):
         grid = QGridLayout()
@@ -444,9 +446,7 @@ class MotorPanel(QWidget):
             self._ctrl = PicomotorController()
             model = self._ctrl.connect()
             self.lbl_status.setText(f"● {model}")
-            self.lbl_status.setStyleSheet(
-                "color: #4ecdc4; font-family: 'Courier New'; font-size: 14px;"
-            )
+            self.lbl_status.setStyleSheet(lbl(C_ACCENT, mono=True, bold=True))
             self.btn_connect.setEnabled(False)
             self.btn_disconnect.setEnabled(True)
             self.btn_stop_all.setEnabled(True)
@@ -471,9 +471,7 @@ class MotorPanel(QWidget):
 
     def _reset_ui(self):
         self.lbl_status.setText("● DISCONNECTED")
-        self.lbl_status.setStyleSheet(
-            "color: #e94560; font-family: 'Courier New'; font-size: 14px;"
-        )
+        self.lbl_status.setStyleSheet(lbl(C_DANGER, mono=True, bold=True))
         self.btn_connect.setEnabled(True)
         self.btn_disconnect.setEnabled(False)
         self.btn_stop_all.setEnabled(False)

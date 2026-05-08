@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QColor, QBrush
 from typing import Optional, Union
+import numpy as np
 
 _DIALOG_QSS = """
     QDialog {
@@ -313,7 +314,6 @@ class SpeInfoDialog(QDialog):
 
     @staticmethod
     def _format_meta(spe_obj) -> str:
-        import numpy as np
         meta = getattr(spe_obj, 'meta', {})
         lines = []
         for k, v in meta.items():

@@ -1133,7 +1133,6 @@ class ImageViewer(QWidget):
         h, w = img.shape[:2]
         if 0 <= ix < w and 0 <= iy < h:
             val = img[iy, ix]
-            import numpy as np
             # 칼라(RGB) 픽셀 처리
             if isinstance(val, (np.ndarray, list, tuple)) and len(val) == 3:
                 r, g, b = val
@@ -1244,7 +1243,6 @@ class ImageViewer(QWidget):
         h, w = img.shape[:2]
         if 0 <= ix < w and 0 <= iy < h:
             val = img[iy, ix]
-            import numpy as np
             # 칼라(RGB) 픽셀 처리: 클릭 시에도 문자열로 저장
             if isinstance(val, (np.ndarray, list, tuple)) and len(val) == 3:
                 r, g, b = val

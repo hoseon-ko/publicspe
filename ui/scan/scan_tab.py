@@ -984,7 +984,7 @@ class ScanTab(QWidget):
         h, w = disp.shape[:2]
         thumb_w, thumb_h = 80, 60
         # 비율 유지 리사이즈
-        scale = min(thumb_w / w, thumb_h / h)
+        scale = min(thumb_w / max(w, 1), thumb_h / max(h, 1))
         nw, nh = max(1, int(w * scale)), max(1, int(h * scale))
         try:
             import cv2
@@ -1068,8 +1068,8 @@ class ScanTab(QWidget):
             if absolute:
                 # |A-B|: hot 컬러맵 (0=검정 → 빨강 → 노랑 → 흰색)
                 arr = np.abs(diff)
-                vmax = float(arr.max()) or 1.0
-                f = arr / vmax                
+                vmax = float(arr.max())
+                f = arr / vmax if vmax > 0 else np.zeros_like(arr)
                 r_ch = np.clip(f * 3.0,       0, 1)
                 g_ch = np.clip(f * 3.0 - 1.0, 0, 1)
                 b_ch = np.clip(f * 3.0 - 2.0, 0, 1)
@@ -1079,11 +1079,11 @@ class ScanTab(QWidget):
                      (b_ch * 255).astype(np.uint8)],
                     axis=-1
                 )
-                self._log(f"|A-B|  max={arr.max():.1f}  mean={arr.mean():.2f}")
+                self._log(f"|A-B|  max={vmax:.1f}  mean={arr.mean():.2f}")
             else:
                 # A-B: diverging — 양수(A>B)→빨강, 음수(B>A)→파랑
-                peak = float(max(abs(diff.min()), abs(diff.max()))) or 1.0
-                norm = diff / peak  # -1 ~ +1
+                peak = float(max(abs(diff.min()), abs(diff.max())))
+                norm = diff / peak if peak > 0 else np.zeros_like(diff)
                 r_ch = np.clip( norm * 255, 0, 255).astype(np.uint8)
                 b_ch = np.clip(-norm * 255, 0, 255).astype(np.uint8)
                 g_ch = np.zeros_like(r_ch)

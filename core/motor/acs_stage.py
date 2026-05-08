@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import sys
 import os
+import builtins
 import logging
 from pathlib import Path
 from typing import Optional
@@ -35,6 +36,8 @@ _ACS_IMPORT_ERROR: Optional[str] = None
 _Api = None
 _AxisEnum = None
 
+_MotionFlags = None  # ACS.SPiiPlusNET.MotionFlags — 로드되면 교체
+
 try:
     import clr
     if DLL_PATH not in sys.path:
@@ -42,6 +45,10 @@ try:
     os.add_dll_directory(DLL_PATH)
     clr.AddReference("ACS.SPiiPlusNET")
     from ACS.SPiiPlusNET import Api as _Api, Axis as _AxisEnum
+    try:
+        from ACS.SPiiPlusNET import MotionFlags as _MotionFlags
+    except Exception:
+        pass  # SDK 버전에 따라 없을 수 있음 — int 0 으로 fallback
     _ACS_OK = True
 except Exception as e:
     _ACS_IMPORT_ERROR = str(e)
@@ -226,7 +233,17 @@ class AcsStageController:
                 return
                 
             ax = _axis_enum(axis)
-            self._api.ToPoint(0, ax, float(target_mm))
+            # pythonnet 오버로드 해석:
+            # ToPoint(MotionFlags, Axis, double) 또는 ToPoint(int, Axis, double) 중
+            # SDK 버전에 따라 첫 인자 타입이 다름.
+            # _MotionFlags 로드 성공 시 enum 타입으로 전달, 아니면 int 그대로.
+            flags = _MotionFlags(0) if _MotionFlags is not None else int(0)
+            target_double = builtins.float(target_mm)  # numpy scalar → 확실한 Python float
+            log.debug(
+                f"[ACS] ToPoint args: flags={flags!r}({type(flags).__name__}), "
+                f"ax={ax!r}({type(ax).__name__}), target={target_double}({type(target_double).__name__})"
+            )
+            self._api.ToPoint(flags, ax, target_double)
             if wait:
                 self._api.WaitMotionEnd(ax, 30000)
                 log.info(f"[ACS] Move_to {target_mm:.2f} 완료")
@@ -268,6 +285,12 @@ class AcsStageController:
                 self.disable_motor(i)
             except Exception as e:
                 log.warning(f"[ACS] disable axis{i}: {e}")
+
+    def wait_in_position_all(self, timeout_ms: int = 30000) -> None:
+        """모든 축의 이동 완료(In-Position)를 순차 대기."""
+        self._require_connected()
+        for i in range(6):
+            self._api.WaitMotionEnd(_axis_enum(i), timeout_ms)
 
     # ── 정지 ─────────────────────────────────────────────────────────
 

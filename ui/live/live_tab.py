@@ -341,18 +341,17 @@ class LiveTab(QMainWindow):
         content: QWidget,
         area: Qt.DockWidgetArea,
     ) -> QDockWidget:
-        """커스텀 헤더 + 콘텐츠를 감싸서 QDockWidget 반환."""
-        wrap = QWidget()
-        vbox = QVBoxLayout(wrap)
-        vbox.setContentsMargins(0, 0, 0, 0)
-        vbox.setSpacing(0)
-        vbox.addWidget(self._make_dock_header(title))
-        vbox.addWidget(content, 1)
-
+        """커스텀 헤더를 타이틀바 위젯으로 사용하여 드래그 가능한 QDockWidget 반환."""
         dock = QDockWidget(self)
         dock.setObjectName(obj_name)
-        dock.setWidget(wrap)
-        dock.setTitleBarWidget(QWidget())
+        
+        # 커스텀 헤더를 타이틀바 위젯으로 설정 (마우스 핸들 역할)
+        hdr = self._make_dock_header(title)
+        dock.setTitleBarWidget(hdr)
+        
+        # 실제 콘텐츠 위젯
+        dock.setWidget(content)
+        
         dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
         self.addDockWidget(area, dock)
         return dock
@@ -417,8 +416,11 @@ class LiveTab(QMainWindow):
 
         self.dock_left = QDockWidget(self)
         self.dock_left.setObjectName("dock_left")
+        
+        # 드래그 가능하도록 헤더 바 추가
+        self.dock_left.setTitleBarWidget(self._make_dock_header("⬤  CONTROLS"))
         self.dock_left.setWidget(left_scroll)
-        self.dock_left.setTitleBarWidget(QWidget())   # ← 타이틀바 완전 숨김
+        
         self.dock_left.setAllowedAreas(
             Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
         )
@@ -487,11 +489,11 @@ class LiveTab(QMainWindow):
         roi_v.addWidget(self._roi_list_widget, 1)
 
         self.dock_roi = QDockWidget(self)
+        self.dock_roi.setObjectName("dock_roi")
+        self.dock_roi.setTitleBarWidget(self._make_dock_header("📐  ROI LIST"))
         self.dock_roi.setWidget(roi_container)
-        self.dock_roi.setTitleBarWidget(QWidget())   # 타이틀바 숨김 (내부 헤더 사용)
         self.dock_roi.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_roi)
-        self.dock_roi.setObjectName("dock_roi")
 
         # 좌측 패널 고정폭
         self.dock_left.setMinimumWidth(320)
@@ -606,6 +608,13 @@ class LiveTab(QMainWindow):
             f"color: #4a6a8a; font-family: '{_FC}'; font-size: {_FS_SMALL}; padding: 0 4px;"
         )
         tb.addWidget(self._lbl_roi)
+
+        tb.addSeparator()
+
+        act_reset = QAction("🔄 RESET", self)
+        act_reset.setToolTip("도킹 레이아웃 초기화 (Profile/Histogram 좌우 분할)")
+        act_reset.triggered.connect(self.reset_layout)
+        tb.addAction(act_reset)
 
     def _connect_signals(self):
         self.cam_panel.camera_scan_requested.connect(self._scan_cameras)
@@ -853,7 +862,7 @@ class LiveTab(QMainWindow):
         if self._live_elapsed >= self._live_total:
             self.cam_panel.bar_snap_progress.setValue(99)
         else:
-            pct = int(100 * self._live_elapsed / self._live_total)
+            pct = int(100 * self._live_elapsed / max(self._live_total, 1))
             self.cam_panel.bar_snap_progress.setValue(pct)
 
     def _on_new_frame(self, raw: np.ndarray):
@@ -861,7 +870,7 @@ class LiveTab(QMainWindow):
         # 라이브 프로그레스 리셋 (메인 스레드에서 UI 갱신 필요하므로 타이머 값만 리셋)
         self._live_elapsed = 0
             
-        if self._freeze_mode:
+        if self._frozen:
             return
         self._on_frame(raw)
 
@@ -914,7 +923,7 @@ class LiveTab(QMainWindow):
             self.cam_panel.bar_snap_progress.setValue(100)
             self._snap_timer_anim.stop()
         else:
-            pct = int(100 * self._snap_elapsed / self._snap_total)
+            pct = int(100 * self._snap_elapsed / max(self._snap_total, 1))
             self.cam_panel.bar_snap_progress.setValue(pct)
 
     def _on_snap_success(self, raw: np.ndarray):
@@ -938,10 +947,12 @@ class LiveTab(QMainWindow):
     def _capture_bg(self):
         from core.background_manager import BackgroundManager
         raw = self._last_raw
-        self._proc.capture_background(raw)          # 로컬 ImageProcessor BG
-        if raw is not None:
-            BackgroundManager.instance().set_frame(raw)  # 공유 BackgroundManager
-        self._log("📸 배경 캡처됨 (전체 탭 공유)", "cam")
+        if self._proc.capture_background(raw):
+            if raw is not None:
+                BackgroundManager.instance().set_frame(raw)
+            self._log("📸 배경 캡처됨 (전체 탭 공유)", "cam")
+        else:
+            self._log("⚠ 버퍼 없음 — 카메라 실행 후 배경 캡처", "cam")
 
     # ── 프레임 처리 ───────────────────────────────────────────────────
 
@@ -1231,6 +1242,29 @@ class LiveTab(QMainWindow):
         state = s.value("dockState")
         if state:
             self.restoreState(state)
+
+    def reset_layout(self):
+        """도킹 레이아웃을 초기 상태(Profile/Histogram 좌우 분할 등)로 복구합니다."""
+        s = QSettings("SpeAnalyze", "LiveTab")
+        s.remove("dockState")
+        
+        # 모든 독 보이기
+        for d in [self.dock_left, self.dock_plot, self.dock_hist, self.dock_roi]:
+            d.setVisible(True)
+            d.setFloating(False)
+            
+        # 기본 위치 재배치
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_left)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_plot)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_hist)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_roi)
+        
+        # 하단 좌우 분할 강제
+        self.splitDockWidget(self.dock_plot, self.dock_hist, Qt.Orientation.Horizontal)
+        
+        # 크기 조정
+        self.resizeDocks([self.dock_left], [400], Qt.Orientation.Horizontal)
+        self._log("🔄 도킹 레이아웃 초기화 완료", "sys")
 
     def cleanup(self):
         self._centroid_timer.stop()

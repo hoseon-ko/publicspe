@@ -20,6 +20,12 @@ from PyQt6.QtCore import QThread, pyqtSignal
 
 from core.motor.kinematic_calc import KinematicCalc
 
+try:
+    import cv2
+    _CV2_OK = True
+except ImportError:
+    _CV2_OK = False
+
 
 def _sharpness(img: np.ndarray, metric: str, roi: Optional[tuple] = None) -> float:
     if roi:
@@ -30,15 +36,17 @@ def _sharpness(img: np.ndarray, metric: str, roi: Optional[tuple] = None) -> flo
 
     f = img.astype(np.float32)
     if metric == "laplacian":
-        import cv2
-        return float(cv2.Laplacian(f, cv2.CV_64F).var())
+        if _CV2_OK:
+            return float(cv2.Laplacian(f, cv2.CV_64F).var())
+        return float(f.std())
     elif metric == "contrast":
         return float(f.std())
     elif metric == "tenengrad":
-        import cv2
-        gx = cv2.Sobel(f, cv2.CV_64F, 1, 0)
-        gy = cv2.Sobel(f, cv2.CV_64F, 0, 1)
-        return float((gx**2 + gy**2).mean())
+        if _CV2_OK:
+            gx = cv2.Sobel(f, cv2.CV_64F, 1, 0)
+            gy = cv2.Sobel(f, cv2.CV_64F, 0, 1)
+            return float((gx**2 + gy**2).mean())
+        return float(f.std())
     elif metric == "brenner":
         return float(((f[2:] - f[:-2])**2).mean())
     return float(f.std())

@@ -33,7 +33,7 @@ from PyQt6.QtWidgets import (
     QHeaderView, QSplitter,
     QListWidget, QListWidgetItem,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QSettings, QSize
+from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer, QSettings, QSize
 from PyQt6.QtGui import QIcon, QPixmap, QImage
 
 import pyqtgraph as pg
@@ -41,6 +41,13 @@ import pyqtgraph as pg
 from ui.image_viewer import ImageViewer
 from ui.widgets.collapsible_section import CollapsibleSection
 from ui.widgets.auto_splitter import AutoSplitter
+
+try:
+    import cv2
+    _CV2_OK = True
+except ImportError:
+    _CV2_OK = False
+
 from core.motor.kinematic_calc import KinematicCalc
 from theme.styles import (
     Fonts, Sizes,
@@ -110,11 +117,17 @@ class KinematicTab(QWidget):
         self._calc   = KinematicCalc()
         self._running = False
         self._worker  = None
+        self._goto_worker: QThread | None = None
 
         self._pos_pts: list[float] = []
         self._sh_pts:  list[float] = []
         self._best_pos: Optional[float] = None
         self._image_list: list = []
+
+        self._auto_disable_timer = QTimer(self)
+        self._auto_disable_timer.setSingleShot(True)
+        self._auto_disable_timer.setInterval(5 * 60 * 1000)
+        self._auto_disable_timer.timeout.connect(self._on_auto_disable)
 
         self._build_ui()
         self._restore_settings()
@@ -702,6 +715,10 @@ class KinematicTab(QWidget):
     def _on_goto(self):
         if self._best_pos is None or self._ctrl is None:
             return
+        if self._goto_worker and self._goto_worker.isRunning():
+            self._log("⚠ GOTO 진행 중 — 중복 명령 무시")
+            return
+
         axis  = self.combo_axis.currentText()
         fixed = {k: 0.0 for k in _DOF_AXES}
 
@@ -720,19 +737,35 @@ class KinematicTab(QWidget):
             return
 
         dry = getattr(self._ctrl, "dry_run", False)
-        dry_tag = "  [DRY RUN]" if dry else ""
         axis_txt = self.combo_axis.currentText()
         unit = _DOF_UNITS.get(axis_txt, "")
+        self._log(f"GOTO 시작: {axis_txt}={self._best_pos:+.4f}{unit}")
 
-        # move_to(wait=False)는 명령 송신만 하고 즉시 반환 — GUI 스레드 블로킹 무시 가능
-        try:
-            for i, target in enumerate(cal_pos):
-                self._ctrl.move_to(i, float(target), wait=False)
-            self._log(
-                f"✅ GOTO 완료: {axis_txt}={self._best_pos:+.4f}{unit}{dry_tag}"
-            )
-        except Exception as e:
-            self._log(f"❌ GOTO 오류: {e}")
+        from ui.live.acs_stage_panel import _KinematicMoveWorker
+        self._auto_disable_timer.stop()
+        self.btn_goto.setEnabled(False)
+
+        self._goto_worker = _KinematicMoveWorker(self._ctrl, cal_pos, dry)
+        self._goto_worker.log.connect(self._log)
+        self._goto_worker.finished.connect(self._on_goto_done)
+        self._goto_worker.error.connect(self._on_goto_error)
+        self._goto_worker.start()
+
+    def _on_goto_done(self):
+        axis_txt = self.combo_axis.currentText()
+        unit = _DOF_UNITS.get(axis_txt, "")
+        self._log(f"✅ GOTO 완료: {axis_txt}={self._best_pos:+.4f}{unit} — 5분 후 자동 서보 OFF 예약")
+        self.btn_goto.setEnabled(True)
+        self._auto_disable_timer.start()
+
+    def _on_goto_error(self, msg: str):
+        self._log(f"❌ GOTO 오류: {msg}")
+        self.btn_goto.setEnabled(True)
+
+    def _on_auto_disable(self):
+        if self._ctrl and self._ctrl.is_connected:
+            self._ctrl.disable_all()
+            self._log("⏱ 자동 서보 OFF (5분 대기 타임아웃)")
 
     # ── Worker 콜백 ───────────────────────────────────────────────────
 
@@ -816,9 +849,11 @@ class KinematicTab(QWidget):
         scale = min(tw / w, th / h)
         nw, nh = max(1, int(w * scale)), max(1, int(h * scale))
         try:
-            import cv2
-            small = cv2.resize(disp, (nw, nh), interpolation=cv2.INTER_AREA)
-        except ImportError:
+            if _CV2_OK:
+                small = cv2.resize(disp, (nw, nh), interpolation=cv2.INTER_AREA)
+            else:
+                raise ImportError
+        except (ImportError, NameError):
             small = disp[::max(1, h // nh), ::max(1, w // nw)][:nh, :nw]
         canvas = np.zeros((th, tw, 3), dtype=np.uint8)
         y0, x0 = (th - nh) // 2, (tw - nw) // 2

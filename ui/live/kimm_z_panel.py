@@ -8,7 +8,6 @@ KIMM Fine Stage Z축 연결 + 위치 조회 패널 — SpeAnalyze 다크 테마.
   - Servo 상태 표시
   - 수동 제어 (Jog / Absolute Move)
 """
-
 from __future__ import annotations
 import threading
 from PyQt6.QtWidgets import (
@@ -21,38 +20,12 @@ from PyQt6.QtCore import Qt, QTimer, QSettings, pyqtSignal
 from core.motor.kimm_z import KIMMZController
 from ui.widgets.collapsible_section import CollapsibleSection
 from theme.styles import (
-    C_ACCENT, C_DANGER, C_WARN, C_BORDER, C_BG_DEEP, C_BG_DARK, C_TEXT, C_TEXT_DIM,
-    Fonts, Sizes, BTN_SMALL, SPIN_STYLE, grp_style
+    C_ACCENT, C_DANGER, C_WARN, C_BORDER, C_BG_DEEP, C_BG_DARK, C_TEXT, C_TEXT_DIM, C_TEXT_DEAD,
+    Fonts, Sizes, BTN_SMALL, SPIN_STYLE, EDIT_STYLE, grp_style, lbl
 )
 
 
-# ── 스타일 토큰 ────────────────────────────────────────────────────────────────
-_FC = "Courier New"
-C_ACCENT = "#4ecdc4"
-
-_CARD_STYLE = """
-    QFrame#kimmCard {
-        background: #0f1729;
-        border: 1px solid #0f3460;
-        border-radius: 6px;
-    }
-"""
-_EDIT_STYLE = """
-    QLineEdit {
-        background: #080e1e; border: 1px solid #0f3460;
-        color: #c0d0ff; border-radius: 3px;
-        font-family: 'Courier New'; font-size: 14px; padding: 2px 6px;
-    }
-"""
-_GRP_STYLE = """
-    QGroupBox {{
-        border: 1px solid {color}; border-radius: 6px;
-        margin-top: 10px; font-family: 'Courier New';
-        font-size: 14px; color: {color};
-        letter-spacing: 2px; font-weight: bold;
-    }}
-    QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 4px; }}
-"""
+# ── 설정 키 ─────────────────────────────────────────────────────────
 
 _SETTINGS_KEY_IP     = "kimm/ip"
 _SETTINGS_KEY_PORT   = "kimm/port"
@@ -111,17 +84,17 @@ class KIMMZPanel(QWidget):
         root.addStretch()
 
     def _build_conn_group(self, lay: QVBoxLayout):
-        lay.setSpacing(4)
-
+        lay.setSpacing(6)
+        lay.setContentsMargins(4, 4, 4, 4)
 
         # IP 입력
         row_ip = QHBoxLayout()
         lbl_ip = QLabel("IP")
-        lbl_ip.setStyleSheet(f"color:#8090b0; font-family:'{_FC}'; font-size:14px;")
-        lbl_ip.setFixedWidth(40)
+        lbl_ip.setStyleSheet(lbl(C_TEXT_DIM, mono=True))
+        lbl_ip.setFixedWidth(50)
         self.edit_ip = QLineEdit()
         self.edit_ip.setPlaceholderText("192.168.1.100")
-        self.edit_ip.setStyleSheet(_EDIT_STYLE)
+        self.edit_ip.setStyleSheet(EDIT_STYLE)
         row_ip.addWidget(lbl_ip)
         row_ip.addWidget(self.edit_ip)
         lay.addLayout(row_ip)
@@ -129,11 +102,12 @@ class KIMMZPanel(QWidget):
         # Port 입력
         row_port = QHBoxLayout()
         lbl_port = QLabel("PORT")
-        lbl_port.setStyleSheet(f"color:#8090b0; font-family:'{_FC}'; font-size:14px;")
-        lbl_port.setFixedWidth(40)
+        lbl_port.setStyleSheet(lbl(C_TEXT_DIM, mono=True))
+        lbl_port.setFixedWidth(50)
         self.edit_port = QLineEdit()
         self.edit_port.setPlaceholderText("5000")
-        self.edit_port.setFixedWidth(75)
+        self.edit_port.setFixedWidth(80)
+        self.edit_port.setStyleSheet(EDIT_STYLE)
         row_port.addWidget(lbl_port)
         row_port.addWidget(self.edit_port)
         row_port.addStretch()
@@ -156,9 +130,7 @@ class KIMMZPanel(QWidget):
 
         self.lbl_status = QLabel("● DISCONNECTED")
         self.lbl_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_status.setStyleSheet(
-            f"color:{C_DANGER}; font-family:'{Fonts.MONO}'; font-size:14px; font-weight:bold;"
-        )
+        self.lbl_status.setStyleSheet(lbl(C_DANGER, mono=True, bold=True))
         lay.addWidget(self.lbl_status)
 
     def _build_status_group(self, lay: QVBoxLayout):
@@ -167,18 +139,16 @@ class KIMMZPanel(QWidget):
         self.lbl_z = QLabel("---  um")
         self.lbl_z.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_z.setStyleSheet(
-            f"color:#d8e8ff; font-family:'{_FC}'; font-size:26px; font-weight:bold;"
+            f"color:#d8e8ff; font-family:'{Fonts.MONO}'; font-size:26px; font-weight:bold;"
         )
         lay.addWidget(self.lbl_z)
 
         # Servo 상태
         row_servo = QHBoxLayout()
         lbl_s = QLabel("SERVO")
-        lbl_s.setStyleSheet(f"color:#8090b0; font-family:'{_FC}'; font-size:14px;")
+        lbl_s.setStyleSheet(lbl(C_TEXT_DIM))
         self.lbl_servo = QLabel("OFF")
-        self.lbl_servo.setStyleSheet(
-            f"color:#4a5a7a; font-family:'{_FC}'; font-size:14px; font-weight:bold;"
-        )
+        self.lbl_servo.setStyleSheet(lbl(C_TEXT_DEAD, bold=True, mono=True))
         row_servo.addWidget(lbl_s)
         row_servo.addStretch()
         row_servo.addWidget(self.lbl_servo)
@@ -228,7 +198,7 @@ class KIMMZPanel(QWidget):
         # Safety Limit
         row_lim = QHBoxLayout()
         lbl_lim = QLabel("Limit(um)")
-        lbl_lim.setStyleSheet(f"color:#8090b0; font-family:'{_FC}'; font-size:14px;")
+        lbl_lim.setStyleSheet(lbl(C_TEXT_DIM))
         self.spin_limit = QDoubleSpinBox()
         self.spin_limit.setRange(0.0, 10000.0)
         self.spin_limit.setValue(10000.0)
@@ -241,7 +211,7 @@ class KIMMZPanel(QWidget):
         # Velocity
         row_vel = QHBoxLayout()
         lbl_vel = QLabel("Vel(um/s)")
-        lbl_vel.setStyleSheet(f"color:#8090b0; font-family:'{_FC}'; font-size:14px;")
+        lbl_vel.setStyleSheet(lbl(C_TEXT_DIM))
         self.spin_vel = QDoubleSpinBox()
         self.spin_vel.setRange(0.1, 100.0)
         self.spin_vel.setValue(10.0)
@@ -284,9 +254,7 @@ class KIMMZPanel(QWidget):
             self._ctrl.connect()
             self._log(f"KIMM: 연결 성공 (Limit={self._ctrl.z_safety_limit}um, Vel={self._ctrl.default_velocity}um/s)")
             self.lbl_status.setText("● CONNECTED")
-            self.lbl_status.setStyleSheet(
-                f"color:{C_ACCENT}; font-family:'{Fonts.MONO}'; font-size:14px; font-weight:bold;"
-            )
+            self.lbl_status.setStyleSheet(lbl(C_ACCENT, mono=True, bold=True))
             self.btn_connect.setEnabled(False)
             self.btn_disconnect.setEnabled(True)
             self.edit_ip.setEnabled(False)
@@ -304,9 +272,7 @@ class KIMMZPanel(QWidget):
             self._ctrl.disconnect()
             self._ctrl = None
         self.lbl_status.setText("● DISCONNECTED")
-        self.lbl_status.setStyleSheet(
-            f"color:{C_DANGER}; font-family:'{Fonts.MONO}'; font-size:14px; font-weight:bold;"
-        )
+        self.lbl_status.setStyleSheet(lbl(C_DANGER, mono=True, bold=True))
         self.lbl_z.setText("---  um")
         self.lbl_servo.setText("OFF")
         self.lbl_servo.setStyleSheet(
@@ -336,14 +302,10 @@ class KIMMZPanel(QWidget):
 
         if self._ctrl.servo_on:
             self.lbl_servo.setText("ON")
-            self.lbl_servo.setStyleSheet(
-                f"color:#4ecdc4; font-family:'Courier New'; font-size:14px; font-weight:bold;"
-            )
+            self.lbl_servo.setStyleSheet(lbl(C_ACCENT, mono=True, bold=True))
         else:
             self.lbl_servo.setText("OFF")
-            self.lbl_servo.setStyleSheet(
-                f"color:#4a5a7a; font-family:'Courier New'; font-size:14px; font-weight:bold;"
-            )
+            self.lbl_servo.setStyleSheet(lbl(C_TEXT_DEAD, mono=True, bold=True))
 
     def _on_jog(self, delta: float):
         if not self._ctrl or not self._ctrl.is_connected: return

@@ -28,6 +28,7 @@ from ui.analysis.analysis_tab import AnalysisTab
 from ui.scan.scan_tab import ScanTab
 from ui.autofocus.autofocus_tab import AutoFocusTab
 from ui.kinematic.kinematic_tab import KinematicTab
+from ui.deepalign.deep_align_main import DeepAlignMainTab
 from theme.styles import Fonts, Sizes, C_ACCENT, C_TEXT_DIM, C_BG_MED, C_BORDER
 from core.logger import app_logger, register_ui_callback
 
@@ -159,8 +160,11 @@ class MainWindow(QMainWindow):
         self.kin_tab.kin_starting.connect(self.live_tab.stop_live)
         self.kin_tab.kin_done.connect(self.live_tab.resume_live)
 
+        self.deep_align_tab = DeepAlignMainTab()
+
         # 탭 버튼 + 스택 등록
         _modes = [
+            ("🌌 DeepAlign", self.deep_align_tab),
             ("📷 Live",      self.live_tab),
             ("📥 Acquire",   self.acq_tab),
             ("🔬 Scan",      self.scan_tab),
@@ -238,6 +242,15 @@ class MainWindow(QMainWindow):
         # ACS 스테이지 공유: Live ↔ Kinematic
         self.live_tab.acs_stage_panel.acs_connected.connect(self.kin_tab.set_acs_ctrl)
         self.live_tab.acs_stage_panel.acs_disconnected.connect(self.kin_tab.clear_acs_ctrl)
+
+        # 하드웨어 공유: Live ↔ DeepAlign
+        self.live_tab.camera_connected.connect(self.deep_align_tab.set_shared_camera)
+        self.live_tab.camera_disconnected.connect(self.deep_align_tab.clear_shared_camera)
+        self.live_tab.kimm_z_panel.kimm_connected.connect(self.deep_align_tab.set_kimm_ctrl)
+        self.live_tab.kimm_z_panel.kimm_disconnected.connect(self.deep_align_tab.clear_kimm_ctrl)
+        self.live_tab.acs_stage_panel.acs_connected.connect(self.deep_align_tab.set_acs_ctrl)
+        self.live_tab.acs_stage_panel.acs_disconnected.connect(self.deep_align_tab.clear_acs_ctrl)
+        self.live_tab.motor_panel.connected.connect(self.deep_align_tab.set_picos_ctrl)
 
         self.scan_tab.set_motor_panel(self.live_tab.motor_panel)
 

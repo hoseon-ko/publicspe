@@ -184,33 +184,44 @@ class ImageProcessor:
 
     # ── 보정 프레임 캡처 / 해제 ──────────────────────────────────────────────
 
-    def capture_background(self, frame: Optional[np.ndarray] = None) -> None:
+    def capture_background(self, frame: Optional[np.ndarray] = None) -> bool:
         """현재 버퍼 평균 또는 지정 프레임을 배경으로 저장."""
         if frame is not None:
             self.background = frame.astype(np.float32)
+            return True
         elif self._buffer:
             self.background = np.mean(list(self._buffer), axis=0)
+            return True
+        return False
 
     def clear_background(self) -> None:
         self.background = None
         self.bg_sub_enabled = False
 
-    def capture_dark_frame(self, frame: Optional[np.ndarray] = None) -> None:
+    def capture_dark_frame(self, frame: Optional[np.ndarray] = None) -> bool:
         """현재 버퍼 평균 또는 지정 프레임을 Dark frame으로 저장."""
         if frame is not None:
             self.dark_frame = frame.astype(np.float32)
+            return True
         elif self._buffer:
             self.dark_frame = np.mean(list(self._buffer), axis=0)
+            return True
+        return False
 
     def clear_dark_frame(self) -> None:
         self.dark_frame = None
         self.dark_enabled = False
 
-    def set_flat_field(self, frame: np.ndarray) -> None:
+    def set_flat_field(self, frame: np.ndarray) -> bool:
         """Flat field 프레임을 정규화하여 저장 (mean = 1.0 기준)."""
         f = frame.astype(np.float32)
         mean_val = float(f.mean())
-        self.flat_field = (f / mean_val) if mean_val > 0 else None
+        if mean_val > 0:
+            self.flat_field = f / mean_val
+            return True
+        else:
+            self.flat_field = None
+            return False
 
     def clear_flat_field(self) -> None:
         self.flat_field = None
@@ -437,18 +448,24 @@ class ImageProcessor:
 
             elif self.centroid_mode == CentroidMode.PEAK_MAX:
                 idx = int(analysis_f.argmax())
-                cy, cx = divmod(idx, w)
-                cx, cy = float(cx), float(cy)
-                has_centroid = True
+                if w > 0:
+                    cy, cx = divmod(idx, w)
+                    cx, cy = float(cx), float(cy)
+                    has_centroid = True
+                else:
+                    has_centroid = False
 
             elif self.centroid_mode == CentroidMode.GAUSSIAN_FIT:
                 cx, cy, fit_sigma_x, fit_sigma_y = self._gaussian_fit(analysis_f, h, w)
                 has_centroid = cx is not None
                 if not has_centroid:  # 피팅 실패 시 peak max fallback
                     idx = int(analysis_f.argmax())
-                    cy, cx = divmod(idx, w)
-                    cx, cy = float(cx), float(cy)
-                    has_centroid = True
+                    if w > 0:
+                        cy, cx = divmod(idx, w)
+                        cx, cy = float(cx), float(cy)
+                        has_centroid = True
+                    else:
+                        has_centroid = False
 
             if has_centroid:
                 iy = min(int(round(cy)), h - 1)

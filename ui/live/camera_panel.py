@@ -831,8 +831,10 @@ class CameraControlPanel(QWidget):
         self._proc.temporal_diff_enabled = checked
 
     def _capture_dark(self):
-        self._proc.capture_dark_frame()
-        self.log_message.emit("🌑 Dark frame 캡처됨")
+        if self._proc.capture_dark_frame():
+            self.log_message.emit("🌑 Dark frame 캡처됨")
+        else:
+            self.log_message.emit("⚠ 버퍼 없음 — 카메라 실행 후 Dark frame 캡처")
 
     def _apply_dark(self, checked: bool):
         self._proc.dark_enabled = checked and self._proc.dark_frame is not None
@@ -841,11 +843,10 @@ class CameraControlPanel(QWidget):
             self.log_message.emit("⚠ Dark frame 없음 — 먼저 CAP DARK")
 
     def _capture_flat(self):
-        if not self._proc._buffer:
+        if self._proc.set_flat_field(self._proc._buffer[-1]) if self._proc._buffer else False:
+            self.log_message.emit("⬜ Flat field 캡처됨")
+        else:
             self.log_message.emit("⚠ 버퍼 없음 — 카메라 실행 후 Flat field 캡처")
-            return
-        self._proc.set_flat_field(self._proc._buffer[-1])
-        self.log_message.emit("⬜ Flat field 캡처됨")
 
     def _apply_flat(self, checked: bool):
         self._proc.flat_enabled = checked and self._proc.flat_field is not None

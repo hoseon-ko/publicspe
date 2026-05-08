@@ -36,6 +36,12 @@ from PyQt6.QtGui import QFont, QIcon, QPixmap, QImage
 
 import pyqtgraph as pg
 
+try:
+    import cv2
+    _CV2_OK = True
+except ImportError:
+    _CV2_OK = False
+
 from ui.image_viewer import ImageViewer
 from ui.widgets.collapsible_section import CollapsibleSection
 from theme.styles import (
@@ -961,8 +967,8 @@ class AutoFocusTab(QWidget):
             k = list(d.keys())[0]
             return d[k]
         try:
-            import cv2
-            img = cv2.imread(path, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_GRAYSCALE)
+            if _CV2_OK:
+                img = cv2.imread(path, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_GRAYSCALE)
             if img is not None:
                 return img
         except ImportError:
@@ -1157,9 +1163,11 @@ class AutoFocusTab(QWidget):
         nw, nh = max(1, int(w*scale)), max(1, int(h*scale))
         
         try:
-            import cv2
-            small = cv2.resize(disp, (nw, nh), interpolation=cv2.INTER_AREA)
-        except ImportError:
+            if _CV2_OK:
+                small = cv2.resize(disp, (nw, nh), interpolation=cv2.INTER_AREA)
+            else:
+                raise ImportError
+        except (ImportError, NameError):
             small = disp[::max(1, h//nh), ::max(1, w//nw)][:nh, :nw]
             
         canvas = np.zeros((th, tw, 3), dtype=np.uint8)

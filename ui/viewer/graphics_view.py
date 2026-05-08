@@ -174,6 +174,8 @@ class ImageGraphicsView(QGraphicsView):
 
     def _calc_fit_scale(self, vw: int, vh: int) -> float:
         """뷰포트에 이미지가 딱 맞는 최소 스케일 계산"""
+        if self._img_w <= 0 or self._img_h <= 0 or vw <= 0 or vh <= 0:
+            return 0.1
         img_ratio  = self._img_w / self._img_h
         view_ratio = vw / vh
         if img_ratio > view_ratio:
