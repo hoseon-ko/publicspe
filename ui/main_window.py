@@ -73,7 +73,7 @@ class MainWindow(QMainWindow):
         # ── 헤더 바 (LightField 스타일) ──────────────────────────────
         header = QWidget()
         header.setObjectName("header")
-        header.setFixedHeight(30)
+        header.setFixedHeight(46)
         header.setStyleSheet(f"""
             QWidget#header {{
                 background: {_HDR_BG};
@@ -87,9 +87,9 @@ class MainWindow(QMainWindow):
         # 앱 이름 레이블
         lbl_app = QLabel("SpeAnalyze")
         lbl_app.setStyleSheet(
-            f"color: #5a7a9a; font-family: '{_FC}'; font-size: 11px;"
+            f"color: #4ecdc4; font-family: '{_FC}', 'Segoe UI'; font-size: 15px;"
             " font-weight: bold; letter-spacing: 2px;"
-            " padding: 0 14px 0 4px;"
+            " padding: 0 20px 0 10px;"
             f" border-right: 1px solid {_HDR_BORDER};"
         )
         hdr_h.addWidget(lbl_app)
@@ -103,21 +103,22 @@ class MainWindow(QMainWindow):
                 background: transparent;
                 color: {_TAB_NORMAL};
                 border: none;
-                border-bottom: 2px solid transparent;
-                font-family: '{_FC}';
-                font-size: 11px;
+                border-bottom: 3px solid transparent;
+                font-family: 'Segoe UI', '{_FC}';
+                font-size: 13px;
                 font-weight: bold;
                 letter-spacing: 1px;
-                padding: 0 16px;
-                height: 30px;
+                padding: 0 20px;
+                height: 46px;
             }}
             QPushButton:hover {{
-                color: {_TAB_HOVER};
-                background: rgba(255,255,255,0.03);
+                color: #ffffff;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(255,255,255,0.06), stop:1 transparent);
             }}
             QPushButton:checked {{
-                color: {_TAB_ACTIVE};
-                border-bottom: 2px solid {_TAB_LINE};
+                color: #ffffff;
+                border-bottom: 3px solid {_TAB_LINE};
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(78, 205, 196, 0.15), stop:1 transparent);
             }}
         """
 
@@ -157,18 +158,18 @@ class MainWindow(QMainWindow):
 
         # 탭 버튼 + 스택 등록
         _modes = [
-            ("Live",      self.live_tab),
-            ("Acquire",   self.acq_tab),
-            ("Scan",      self.scan_tab),
-            ("AutoFocus", self.af_tab),
-            ("Kinematic", self.kin_tab),
-            ("Analysis",  self.analysis_tab),
+            ("📷 Live",      self.live_tab),
+            ("📥 Acquire",   self.acq_tab),
+            ("🔬 Scan",      self.scan_tab),
+            ("🎯 AutoFocus", self.af_tab),
+            ("📐 Kinematic", self.kin_tab),
+            ("📊 Analysis",  self.analysis_tab),
         ]
         for idx, (label, widget) in enumerate(_modes):
             btn = QPushButton(label)
             btn.setCheckable(True)
             btn.setFlat(True)
-            btn.setFixedHeight(30)
+            btn.setFixedHeight(46)
             btn.setStyleSheet(_tab_qss)
             btn.clicked.connect(lambda checked, i=idx: self._switch_mode(i))
             hdr_h.addWidget(btn)

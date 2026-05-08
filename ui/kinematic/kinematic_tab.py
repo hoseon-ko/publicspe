@@ -245,12 +245,12 @@ class KinematicTab(QWidget):
             r, c = divmod(i, 3)
             lbl_name = QLabel(name)
             lbl_name.setStyleSheet(
-                f"color:#aa7acc; font-family:'Courier New'; font-size:10px; font-weight:bold;"
+                f"color:#aa7acc; font-family:'Courier New'; font-size:13px; font-weight:bold;"
             )
             pg_lay.addWidget(lbl_name, r * 2, c)
             lbl_val = QLabel("—")
             lbl_val.setStyleSheet(
-                f"color:#c0d0ff; font-family:'Courier New'; font-size:10px;"
+                f"color:#c0d0ff; font-family:'Courier New'; font-size:13px;"
             )
             pg_lay.addWidget(lbl_val, r * 2 + 1, c)
             self._pos_labels.append(lbl_val)

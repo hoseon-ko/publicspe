@@ -95,7 +95,7 @@ class ImageViewer(QWidget):
 
         # ROI 콤보
         roi_label = QLabel("ROI:")
-        roi_label.setStyleSheet("color: #a0a0b0; font-size: 11px;")
+        roi_label.setStyleSheet("color: #a0a0b0; font-size: 14px;")
         toolbar.addWidget(roi_label)
 
         self.roi_combo = QComboBox()
@@ -107,7 +107,7 @@ class ImageViewer(QWidget):
 
         # 컬러맵
         cmap_label = QLabel("  Colormap:")
-        cmap_label.setStyleSheet("color: #a0a0b0; font-size: 11px;")
+        cmap_label.setStyleSheet("color: #a0a0b0; font-size: 14px;")
         toolbar.addWidget(cmap_label)
 
         self.cmap_combo = QComboBox()
@@ -124,7 +124,7 @@ class ImageViewer(QWidget):
             QToolButton {
                 background: transparent; color: #a0a0b0;
                 border: 1px solid #0f3460; border-radius: 3px;
-                padding: 2px 6px; font-size: 11px;
+                padding: 2px 6px; font-size: 14px;
             }
             QToolButton:checked {
                 background: #e94560; color: #fff; border-color: #e94560;
@@ -158,7 +158,7 @@ class ImageViewer(QWidget):
             QToolButton {
                 background: transparent; color: #a0a0b0;
                 border: 1px solid #0f3460; border-radius: 3px;
-                padding: 2px 6px; font-size: 11px;
+                padding: 2px 6px; font-size: 14px;
             }
             QToolButton:hover { border-color: #4ecdc4; color: #4ecdc4; }
         """)
@@ -174,7 +174,7 @@ class ImageViewer(QWidget):
             QToolButton {
                 background: transparent; color: #a0a0b0;
                 border: 1px solid #0f3460; border-radius: 3px;
-                padding: 2px 6px; font-size: 11px;
+                padding: 2px 6px; font-size: 14px;
             }
             QToolButton:checked {
                 background: #1a3a20; color: #4ecdc4; border-color: #4ecdc4;
@@ -196,7 +196,7 @@ class ImageViewer(QWidget):
             QToolButton {
                 background: transparent; color: #a0a0b0;
                 border: 1px solid #0f3460; border-radius: 3px;
-                padding: 2px 6px; font-size: 11px;
+                padding: 2px 6px; font-size: 14px;
             }
             QToolButton:checked {
                 background: #1a2a10; color: #ffe66d; border-color: #ffe66d;
@@ -215,7 +215,7 @@ class ImageViewer(QWidget):
             QToolButton {
                 background: transparent; color: #a0a0b0;
                 border: 1px solid #0f3460; border-radius: 3px;
-                padding: 2px 6px; font-size: 11px;
+                padding: 2px 6px; font-size: 14px;
             }
             QToolButton:checked { background: #1a2840; color: #ffe66d; border-color: #ffe66d; }
             QToolButton:hover { border-color: #ffe66d; }
@@ -227,7 +227,7 @@ class ImageViewer(QWidget):
 
         # 회전
         rotate_label = QLabel("↻")
-        rotate_label.setStyleSheet("color: #a0a0b0; font-size: 13px; margin-right:0px;")
+        rotate_label.setStyleSheet("color: #a0a0b0; font-size: 16px; margin-right:0px;")
         toolbar.addWidget(rotate_label)
         self.rotate_combo = QComboBox()
         self.rotate_combo.addItems(["0°", "90°", "180°", "270°"])
@@ -235,7 +235,7 @@ class ImageViewer(QWidget):
         self.rotate_combo.setStyleSheet("""
             QComboBox {
                 background:#080e1e; border:1px solid #1a3a60; color:#d0deff;
-                border-radius:3px; font-size:11px; padding:1px 4px; min-height:20px;
+                border-radius:3px; font-size:14px; padding:1px 4px; min-height:20px;
             }
             QComboBox::drop-down { border:none; width:14px; }
             QComboBox QAbstractItemView {
@@ -249,7 +249,7 @@ class ImageViewer(QWidget):
         # 포화 경고 레이블 (P3-3)
         self.lbl_saturated = QLabel("⚠ SATURATED")
         self.lbl_saturated.setStyleSheet(
-            "color: #e94560; font-size: 11px; font-weight: bold; "
+            "color: #e94560; font-size: 14px; font-weight: bold; "
             "background: #3a0010; border-radius: 3px; padding: 1px 6px;"
         )
         self.lbl_saturated.setVisible(False)
@@ -272,16 +272,16 @@ class ImageViewer(QWidget):
 
         _ib = (
             "color: #4a7a9a; font-family: 'Courier New';"
-            " font-size: 10px; padding: 0 6px;"
+            " font-size: 13px; padding: 0 6px;"
         )
         _ib_val = (
             "color: #a0c8e0; font-family: 'Courier New';"
-            " font-size: 10px; padding: 0 6px;"
+            " font-size: 13px; padding: 0 6px;"
         )
         _btn_zoom = (
             "QPushButton { background: transparent; color: #3a6a8a;"
             " border: 1px solid #1a3a55; border-radius: 2px;"
-            " font-family: 'Courier New'; font-size: 10px; padding: 0 5px; }"
+            " font-family: 'Courier New'; font-size: 13px; padding: 0 5px; }"
             "QPushButton:hover { color: #4ecdc4; border-color: #4ecdc4; }"
         )
 
@@ -377,7 +377,7 @@ class ImageViewer(QWidget):
         self._roi_list_widget.setStyleSheet("""
             QListWidget {
                 background:#080e1e; color:#c0d0ff;
-                border:1px solid #0f3460; font-family:'Courier New'; font-size:11px;
+                border:1px solid #0f3460; font-family:'Courier New'; font-size:14px;
             }
             QListWidget::item { padding:2px 4px; }
             QListWidget::item:selected { background:#1a3a60; color:#ffe66d; }
@@ -387,7 +387,7 @@ class ImageViewer(QWidget):
         _roi_del_btn = (
             "QPushButton { background:#0d1a28; color:#e94560;"
             "border:1px solid #e94560; border-radius:3px;"
-            "font-size:11px; padding:3px 8px; }"
+            "font-size:14px; padding:3px 8px; }"
             "QPushButton:hover { background:#2a1020; }"
         )
         roi_btn_col = QVBoxLayout()
@@ -1268,7 +1268,7 @@ class ImageViewer(QWidget):
                 border: 1px solid #1a3a60;
                 color: #c0d0e0;
                 font-family: 'Courier New';
-                font-size: 11px;
+                font-size: 14px;
                 padding: 4px 0;
             }
             QMenu::item {

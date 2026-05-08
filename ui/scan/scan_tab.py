@@ -228,7 +228,7 @@ class ScanTab(QWidget):
         self.chk_bg_active = QCheckBox("BG 차감")
         self.chk_bg_active.setStyleSheet(f"QCheckBox {{ color:{_C_VAL}; font-family:'{_F}'; font-size:{_FS_LBL}; }}")
         self._lbl_bg_status = QLabel("없음")
-        self._lbl_bg_status.setStyleSheet(f"color:{_C_DIM}; font-family:'{_FC}'; font-size:13px;")
+        self._lbl_bg_status.setStyleSheet(f"color:{_C_DIM}; font-family:'{_FC}'; font-size:16px;")
         bg_row.addWidget(self.btn_capture_bg)
         bg_row.addWidget(self.chk_bg_active)
         bg_row.addWidget(self._lbl_bg_status)
@@ -308,7 +308,7 @@ class ScanTab(QWidget):
         btn_browse.setFixedWidth(28)
         btn_browse.setStyleSheet(
             "QPushButton { background:#0d1e38; color:#a0b0d0; border:1px solid #1a3060;"
-            "border-radius:3px; font-size:12px; } QPushButton:hover { color:#4ecdc4; }"
+            "border-radius:3px; font-size:15px; } QPushButton:hover { color:#4ecdc4; }"
         )
         btn_browse.clicked.connect(self._browse_dir)
         dir_row.addWidget(self.edit_save_dir)
@@ -358,7 +358,7 @@ class ScanTab(QWidget):
         self._lbl_progress = QLabel("—")
         self._lbl_progress.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._lbl_progress.setStyleSheet(
-            "color: #4a6a8a; font-family: 'Courier New'; font-size: 10px;"
+            "color: #4a6a8a; font-family: 'Courier New'; font-size: 13px;"
         )
         ctrl_layout.addWidget(self._lbl_progress)
 
@@ -443,7 +443,7 @@ class ScanTab(QWidget):
 
         self._lbl_mask_count = QLabel("비활성")
         self._lbl_mask_count.setStyleSheet(
-            f"color:#4a6a8a; font-family:'{_FC}'; font-size:13px;"
+            f"color:#4a6a8a; font-family:'{_FC}'; font-size:16px;"
         )
         gm.addWidget(self._lbl_mask_count)
 
@@ -523,7 +523,7 @@ class ScanTab(QWidget):
             QPushButton {{
                 background:#0f1729; color:{_C_LBL};
                 border:1px solid #1a3a60; border-radius:3px;
-                font-family:'{_F}'; font-size:13px; font-weight:bold;
+                font-family:'{_F}'; font-size:16px; font-weight:bold;
                 padding:2px 10px; min-width:52px;
             }}
             QPushButton:checked {{
@@ -544,7 +544,7 @@ class ScanTab(QWidget):
 
         # 임계값 스핀박스 (raw 픽셀값 기준 0~65535)
         lbl_t = QLabel("임계값:")
-        lbl_t.setStyleSheet(f"color:{_C_LBL}; font-family:'{_F}'; font-size:13px;")
+        lbl_t.setStyleSheet(f"color:{_C_LBL}; font-family:'{_F}'; font-size:16px;")
         self.slider_thresh = QSpinBox()
         self.slider_thresh.setRange(0, 65535)
         self.slider_thresh.setValue(1000)
@@ -553,7 +553,7 @@ class ScanTab(QWidget):
         self.slider_thresh.setStyleSheet(f"""
             QSpinBox {{ background:#0f1e38; color:{_C_VAL}; border:1px solid #1a3460;
                 border-radius:3px; padding:1px 4px;
-                font-family:'{_FC}'; font-size:12px; }}
+                font-family:'{_FC}'; font-size:15px; }}
             QSpinBox::up-button, QSpinBox::down-button {{ width:14px; background:#1a3060; }}
         """)
         self.slider_thresh.valueChanged.connect(self._on_thresh_changed)
@@ -566,7 +566,7 @@ class ScanTab(QWidget):
         self.chk_centroid_marker = QCheckBox("중심점 표시")
         self.chk_centroid_marker.setChecked(True)
         self.chk_centroid_marker.setStyleSheet(
-            f"QCheckBox {{ color:{_C_VAL}; font-family:'{_F}'; font-size:13px; }}"
+            f"QCheckBox {{ color:{_C_VAL}; font-family:'{_F}'; font-size:16px; }}"
         )
         opt_layout.addWidget(self.chk_centroid_marker)
 
@@ -597,7 +597,7 @@ class ScanTab(QWidget):
 
         lbl_frames = QLabel("CAPTURED FRAMES")
         lbl_frames.setStyleSheet(
-            f"color:#4ecdc4; font-family:'{_F}'; font-size:16px; "
+            f"color:#4ecdc4; font-family:'{_F}'; font-size:19px; "
             "font-weight:bold; letter-spacing:2px; padding:0;"
         )
         frames_layout.addWidget(lbl_frames)
@@ -693,14 +693,14 @@ class ScanTab(QWidget):
         if has_bg:
             self._lbl_bg_status.setText(self._bm.status_text())
             self._lbl_bg_status.setStyleSheet(
-                f"color: #4ecdc4; font-family: '{_FC}'; font-size: 13px;"
+                f"color: #4ecdc4; font-family: '{_FC}'; font-size: 16px;"
             )
             self.chk_bg_active.setEnabled(True)
             self.chk_bg_active.setChecked(True)
         else:
             self._lbl_bg_status.setText("없음")
             self._lbl_bg_status.setStyleSheet(
-                f"color: {C_TEXT_DIM}; font-family: '{_FC}'; font-size: 13px;"
+                f"color: {C_TEXT_DIM}; font-family: '{_FC}'; font-size: 16px;"
             )
             self.chk_bg_active.setEnabled(False)
             self.chk_bg_active.setChecked(False)
@@ -1132,12 +1132,12 @@ class ScanTab(QWidget):
         if n > 0:
             self._lbl_mask_count.setText(f"{n}개 영역 활성")
             self._lbl_mask_count.setStyleSheet(
-                f"color:#ff7675; font-family:'{_FC}'; font-size:13px; font-weight:bold;"
+                f"color:#ff7675; font-family:'{_FC}'; font-size:16px; font-weight:bold;"
             )
         else:
             self._lbl_mask_count.setText("비활성")
             self._lbl_mask_count.setStyleSheet(
-                f"color:#4a6a8a; font-family:'{_FC}'; font-size:13px;"
+                f"color:#4a6a8a; font-family:'{_FC}'; font-size:16px;"
             )
 
     # ── 캘리브레이션 ──────────────────────────────────────────────────

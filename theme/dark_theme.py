@@ -6,7 +6,7 @@ QWidget {
     background-color: #1a1a2e;
     color: #e0e0e0;
     font-family: 'Segoe UI', sans-serif;
-    font-size: 13px;
+    font-size: 16px;
 }
 
 /* 도킹 인디케이터 - QSS 간섭 방지 */
@@ -70,7 +70,7 @@ QDockWidget::title {
     font-weight: bold;
     letter-spacing: 1px;
     text-transform: uppercase;
-    font-size: 11px;
+    font-size: 14px;
 }
 QDockWidget::close-button, QDockWidget::float-button {
     background-color: transparent;
@@ -122,7 +122,7 @@ QLabel {
 }
 QLabel#status_label {
     color: #a0a0b0;
-    font-size: 11px;
+    font-size: 14px;
 }
 QLabel#frame_label {
     color: #e94560;
@@ -133,7 +133,7 @@ QStatusBar {
     background-color: #16213e;
     color: #a0a0b0;
     border-top: 1px solid #0f3460;
-    font-size: 11px;
+    font-size: 14px;
 }
 
 QScrollBar:vertical {

@@ -243,7 +243,7 @@ class AutoFocusPanel(QWidget):
 
         self.lbl_best_z = QLabel("—  µm")
         self.lbl_best_z.setStyleSheet(
-            f"color: #e94560; font-family: '{_FC}'; font-size: 15px;"
+            f"color: #e94560; font-family: '{_FC}'; font-size: 18px;"
             " font-weight: bold;"
         )
         self.lbl_best_z.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)

@@ -473,14 +473,14 @@ class AutoFocusTab(QWidget):
         self.edit_save_dir.setStyleSheet(f"""
             QLineEdit {{
                 background: #081220; border: 1px solid #1a3060;
-                color: #a0b0d0; font-family: '{_FC}'; font-size: 11px; padding: 3px 6px;
+                color: #a0b0d0; font-family: '{_FC}'; font-size: 14px; padding: 3px 6px;
             }}
         """)
         self.btn_save_dir = QPushButton("📂")
         self.btn_save_dir.setFixedWidth(28)
         self.btn_save_dir.setStyleSheet(f"""
             QPushButton {{
-                background: #1a3060; color: white; border-radius: 3px; font-size: 10px;
+                background: #1a3060; color: white; border-radius: 3px; font-size: 13px;
             }}
             QPushButton:hover {{ background: #2a4a8a; }}
         """)
@@ -611,7 +611,7 @@ class AutoFocusTab(QWidget):
         self._btn_roi_range.setCheckable(True)
         self._btn_roi_range.setStyleSheet("""
             QToolButton { background: transparent; color: #a0a0b0; border: 1px solid #1a3a60;
-                border-radius: 3px; font-size: 10px; padding: 1px 4px; }
+                border-radius: 3px; font-size: 13px; padding: 1px 4px; }
             QToolButton:checked { background: #1a2a10; color: #ffe66d; border-color: #ffe66d; }
         """)
         self._btn_roi_range.toggled.connect(self._on_roi_range_toggled)

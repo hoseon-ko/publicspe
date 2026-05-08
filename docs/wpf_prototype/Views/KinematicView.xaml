@@ -1,0 +1,650 @@
+<UserControl x:Class="SpeAnalyze.UI.Views.Kinematic.KinematicView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:vm="clr-namespace:SpeAnalyze.UI.ViewModels"
+             xmlns:ctrl="clr-namespace:SpeAnalyze.UI.Controls"
+             xmlns:sp="clr-namespace:ScottPlot.WPF;assembly=ScottPlot.WPF"
+             d:DataContext="{d:DesignInstance vm:KinematicViewModel}"
+             Background="#080e1e">
+
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="../../Styles/DarkTheme.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+            <!-- Bool → Visibility -->
+            <BooleanToVisibilityConverter x:Key="BoolVis"/>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         루트: 좌측 설정 패널  |  우측 뷰 영역
+         ══════════════════════════════════════════════════════════════════ -->
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="320" MinWidth="260"/>
+            <ColumnDefinition Width="3"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- ══════ 좌측 설정 패널 ══════ -->
+        <ScrollViewer Grid.Column="0"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled"
+                      Background="#0a0f1e"
+                      PanningMode="VerticalOnly">
+            <StackPanel Margin="8,8,8,16" Background="#0a0f1e">
+
+                <!-- ── 1. 카메라 상태 ───────────────────────────────── -->
+                <Expander Header="📷  CAMERA"
+                          IsExpanded="True"
+                          Foreground="{StaticResource Brush.Accent}"
+                          FontFamily="{StaticResource FontMono}"
+                          FontSize="11" FontWeight="Bold"
+                          BorderBrush="{StaticResource Brush.Border}"
+                          BorderThickness="0,0,0,1"
+                          Margin="0,0,0,4">
+                    <StackPanel Margin="8,4,8,8">
+                        <!-- 연결 상태 표시 -->
+                        <TextBlock Text="{Binding CameraStatusText}"
+                                   Foreground="{Binding CameraStatusBrush}"
+                                   FontFamily="{StaticResource FontMono}"
+                                   FontSize="11"/>
+                        <!-- 현재 노출 / FPS -->
+                        <Grid Margin="0,4,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="80"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition/>
+                                <RowDefinition/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Exposure"
+                                       Style="{StaticResource DimLabel}"/>
+                            <TextBlock Grid.Row="0" Grid.Column="1"
+                                       Text="{Binding CamExposureText}"
+                                       Style="{StaticResource MonoText}"/>
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Frame Rate"
+                                       Style="{StaticResource DimLabel}"/>
+                            <TextBlock Grid.Row="1" Grid.Column="1"
+                                       Text="{Binding CamFpsText}"
+                                       Style="{StaticResource MonoText}"/>
+                        </Grid>
+                    </StackPanel>
+                </Expander>
+
+                <!-- ── 2. ACS 스테이지 상태 + 6축 위치 ─────────────── -->
+                <Expander Header="⬡  ACS STAGE"
+                          IsExpanded="True"
+                          Foreground="{StaticResource Brush.Accent}"
+                          FontFamily="{StaticResource FontMono}"
+                          FontSize="11" FontWeight="Bold"
+                          BorderBrush="{StaticResource Brush.Border}"
+                          BorderThickness="0,0,0,1"
+                          Margin="0,0,0,4">
+                    <StackPanel Margin="8,4,8,8">
+                        <!-- 연결 상태 -->
+                        <TextBlock Text="{Binding StageStatusText}"
+                                   Foreground="{Binding StageStatusBrush}"
+                                   FontFamily="{StaticResource FontMono}"
+                                   FontSize="11"
+                                   Margin="0,0,0,6"/>
+
+                        <!-- 6축 위치 그리드 (읽기 전용 표시) -->
+                        <Border BorderBrush="{StaticResource Brush.Border}"
+                                BorderThickness="1" Padding="6,4">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="30"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="14"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="20"/>
+                                    <RowDefinition Height="20"/>
+                                    <RowDefinition Height="20"/>
+                                    <RowDefinition Height="20"/>
+                                    <RowDefinition Height="20"/>
+                                    <RowDefinition Height="20"/>
+                                </Grid.RowDefinitions>
+
+                                <!-- 헤더 행 (컬럼 제목은 스타일로 표시) -->
+                                <!-- Y1 -->
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="Y1"
+                                           Style="{StaticResource DimLabel}" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Row="0" Grid.Column="1"
+                                           Text="{Binding AxisPos[0], StringFormat='{}{0:+0.0000} mm'}"
+                                           Style="{StaticResource MonoText}" TextAlignment="Right"
+                                           VerticalAlignment="Center"/>
+                                <Ellipse Grid.Row="0" Grid.Column="2" Width="8" Height="8"
+                                         VerticalAlignment="Center" HorizontalAlignment="Center"
+                                         Fill="{Binding AxisEnabled[0], Converter={StaticResource BoolToMotorBrush}}"/>
+                                <!-- Z1 -->
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="Z1"
+                                           Style="{StaticResource DimLabel}" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Row="1" Grid.Column="1"
+                                           Text="{Binding AxisPos[1], StringFormat='{}{0:+0.0000} mm'}"
+                                           Style="{StaticResource MonoText}" TextAlignment="Right"
+                                           VerticalAlignment="Center"/>
+                                <Ellipse Grid.Row="1" Grid.Column="2" Width="8" Height="8"
+                                         VerticalAlignment="Center" HorizontalAlignment="Center"
+                                         Fill="{Binding AxisEnabled[1], Converter={StaticResource BoolToMotorBrush}}"/>
+                                <!-- X1 -->
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="X1"
+                                           Style="{StaticResource DimLabel}" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Row="2" Grid.Column="1"
+                                           Text="{Binding AxisPos[2], StringFormat='{}{0:+0.0000} mm'}"
+                                           Style="{StaticResource MonoText}" TextAlignment="Right"
+                                           VerticalAlignment="Center"/>
+                                <Ellipse Grid.Row="2" Grid.Column="2" Width="8" Height="8"
+                                         VerticalAlignment="Center" HorizontalAlignment="Center"
+                                         Fill="{Binding AxisEnabled[2], Converter={StaticResource BoolToMotorBrush}}"/>
+                                <!-- Z2 -->
+                                <TextBlock Grid.Row="3" Grid.Column="0" Text="Z2"
+                                           Style="{StaticResource DimLabel}" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Row="3" Grid.Column="1"
+                                           Text="{Binding AxisPos[3], StringFormat='{}{0:+0.0000} mm'}"
+                                           Style="{StaticResource MonoText}" TextAlignment="Right"
+                                           VerticalAlignment="Center"/>
+                                <Ellipse Grid.Row="3" Grid.Column="2" Width="8" Height="8"
+                                         VerticalAlignment="Center" HorizontalAlignment="Center"
+                                         Fill="{Binding AxisEnabled[3], Converter={StaticResource BoolToMotorBrush}}"/>
+                                <!-- Y2 -->
+                                <TextBlock Grid.Row="4" Grid.Column="0" Text="Y2"
+                                           Style="{StaticResource DimLabel}" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Row="4" Grid.Column="1"
+                                           Text="{Binding AxisPos[4], StringFormat='{}{0:+0.0000} mm'}"
+                                           Style="{StaticResource MonoText}" TextAlignment="Right"
+                                           VerticalAlignment="Center"/>
+                                <Ellipse Grid.Row="4" Grid.Column="2" Width="8" Height="8"
+                                         VerticalAlignment="Center" HorizontalAlignment="Center"
+                                         Fill="{Binding AxisEnabled[4], Converter={StaticResource BoolToMotorBrush}}"/>
+                                <!-- Z3 -->
+                                <TextBlock Grid.Row="5" Grid.Column="0" Text="Z3"
+                                           Style="{StaticResource DimLabel}" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Row="5" Grid.Column="1"
+                                           Text="{Binding AxisPos[5], StringFormat='{}{0:+0.0000} mm'}"
+                                           Style="{StaticResource MonoText}" TextAlignment="Right"
+                                           VerticalAlignment="Center"/>
+                                <Ellipse Grid.Row="5" Grid.Column="2" Width="8" Height="8"
+                                         VerticalAlignment="Center" HorizontalAlignment="Center"
+                                         Fill="{Binding AxisEnabled[5], Converter={StaticResource BoolToMotorBrush}}"/>
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+                </Expander>
+
+                <!-- ── 3. 스캔 축 / 범위 설정 ─────────────────────── -->
+                <Expander Header="📐  SCAN AXIS / RANGE"
+                          IsExpanded="True"
+                          Foreground="{StaticResource Brush.Accent}"
+                          FontFamily="{StaticResource FontMono}"
+                          FontSize="11" FontWeight="Bold"
+                          BorderBrush="{StaticResource Brush.Border}"
+                          BorderThickness="0,0,0,1"
+                          Margin="0,0,0,4">
+                    <Grid Margin="8,6,8,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="90"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="28"/>
+                            <RowDefinition Height="28"/>
+                            <RowDefinition Height="28"/>
+                            <RowDefinition Height="28"/>
+                            <RowDefinition Height="28"/>
+                            <RowDefinition Height="28"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- DOF 축 선택 -->
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="DOF Axis"
+                                   Style="{StaticResource DimLabel}"
+                                   VerticalAlignment="Center" HorizontalAlignment="Right"
+                                   Margin="0,0,8,0"/>
+                        <ComboBox Grid.Row="0" Grid.Column="1"
+                                  Style="{StaticResource DarkCombo}"
+                                  ItemsSource="{Binding DofAxes}"
+                                  SelectedItem="{Binding SelectedAxis}"
+                                  VerticalAlignment="Center"/>
+
+                        <!-- 시작 위치 -->
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Start"
+                                   Style="{StaticResource DimLabel}"
+                                   VerticalAlignment="Center" HorizontalAlignment="Right"
+                                   Margin="0,0,8,0"/>
+                        <TextBox Grid.Row="1" Grid.Column="1"
+                                 Style="{StaticResource DarkSpinner}"
+                                 Text="{Binding ScanStart, StringFormat='{}{0:F4}'}"
+                                 VerticalAlignment="Center"/>
+
+                        <!-- 종료 위치 -->
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="End"
+                                   Style="{StaticResource DimLabel}"
+                                   VerticalAlignment="Center" HorizontalAlignment="Right"
+                                   Margin="0,0,8,0"/>
+                        <TextBox Grid.Row="2" Grid.Column="1"
+                                 Style="{StaticResource DarkSpinner}"
+                                 Text="{Binding ScanEnd, StringFormat='{}{0:F4}'}"
+                                 VerticalAlignment="Center"/>
+
+                        <!-- 스텝 수 -->
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="Steps"
+                                   Style="{StaticResource DimLabel}"
+                                   VerticalAlignment="Center" HorizontalAlignment="Right"
+                                   Margin="0,0,8,0"/>
+                        <TextBox Grid.Row="3" Grid.Column="1"
+                                 Style="{StaticResource DarkSpinner}"
+                                 Text="{Binding ScanSteps}"
+                                 VerticalAlignment="Center"/>
+
+                        <!-- 안정화 대기 -->
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="Settle (ms)"
+                                   Style="{StaticResource DimLabel}"
+                                   VerticalAlignment="Center" HorizontalAlignment="Right"
+                                   Margin="0,0,8,0"/>
+                        <TextBox Grid.Row="4" Grid.Column="1"
+                                 Style="{StaticResource DarkSpinner}"
+                                 Text="{Binding SettleMs}"
+                                 VerticalAlignment="Center"/>
+
+                        <!-- 스텝 크기 (계산된 값, 읽기전용) -->
+                        <TextBlock Grid.Row="5" Grid.Column="0" Text="Step Size"
+                                   Style="{StaticResource DimLabel}"
+                                   VerticalAlignment="Center" HorizontalAlignment="Right"
+                                   Margin="0,0,8,0"/>
+                        <TextBlock Grid.Row="5" Grid.Column="1"
+                                   Text="{Binding StepSizeText}"
+                                   Style="{StaticResource AccentLabel}"
+                                   VerticalAlignment="Center"/>
+                    </Grid>
+                </Expander>
+
+                <!-- ── 4. 선명도 메트릭 ─────────────────────────────── -->
+                <Expander Header="📊  METRIC"
+                          IsExpanded="True"
+                          Foreground="{StaticResource Brush.Accent}"
+                          FontFamily="{StaticResource FontMono}"
+                          FontSize="11" FontWeight="Bold"
+                          BorderBrush="{StaticResource Brush.Border}"
+                          BorderThickness="0,0,0,1"
+                          Margin="0,0,0,4">
+                    <Grid Margin="8,6,8,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="90"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="28"/>
+                            <RowDefinition Height="28"/>
+                            <RowDefinition Height="28"/>
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Method"
+                                   Style="{StaticResource DimLabel}"
+                                   VerticalAlignment="Center" HorizontalAlignment="Right"
+                                   Margin="0,0,8,0"/>
+                        <ComboBox Grid.Row="0" Grid.Column="1"
+                                  Style="{StaticResource DarkCombo}"
+                                  ItemsSource="{Binding SharpnessMethods}"
+                                  SelectedItem="{Binding SelectedMethod}"
+                                  VerticalAlignment="Center"/>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="ROI"
+                                   Style="{StaticResource DimLabel}"
+                                   VerticalAlignment="Center" HorizontalAlignment="Right"
+                                   Margin="0,0,8,0"/>
+                        <CheckBox Grid.Row="1" Grid.Column="1"
+                                  IsChecked="{Binding UseRoi}"
+                                  Content="Use ROI"
+                                  Foreground="{StaticResource Brush.TextDim}"
+                                  FontFamily="{StaticResource FontMono}"
+                                  FontSize="11"
+                                  VerticalAlignment="Center"/>
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Fit Curve"
+                                   Style="{StaticResource DimLabel}"
+                                   VerticalAlignment="Center" HorizontalAlignment="Right"
+                                   Margin="0,0,8,0"/>
+                        <CheckBox Grid.Row="2" Grid.Column="1"
+                                  IsChecked="{Binding FitCurve}"
+                                  Content="Gaussian Fit"
+                                  Foreground="{StaticResource Brush.TextDim}"
+                                  FontFamily="{StaticResource FontMono}"
+                                  FontSize="11"
+                                  VerticalAlignment="Center"/>
+                    </Grid>
+                </Expander>
+
+                <!-- ── 5. 옵션 ──────────────────────────────────────── -->
+                <Expander Header="⚙  OPTIONS"
+                          IsExpanded="False"
+                          Foreground="{StaticResource Brush.TextDim}"
+                          FontFamily="{StaticResource FontMono}"
+                          FontSize="11" FontWeight="Bold"
+                          BorderBrush="{StaticResource Brush.Border}"
+                          BorderThickness="0,0,0,1"
+                          Margin="0,0,0,4">
+                    <StackPanel Margin="8,6,8,8">
+                        <CheckBox IsChecked="{Binding SaveFrames}"
+                                  Content="프레임 저장 (캡처마다)"
+                                  Foreground="{StaticResource Brush.TextDim}"
+                                  FontFamily="{StaticResource FontMono}"
+                                  FontSize="11"
+                                  Margin="0,2"/>
+                        <CheckBox IsChecked="{Binding AutoGoto}"
+                                  Content="스캔 완료 후 최적 위치로 이동"
+                                  Foreground="{StaticResource Brush.TextDim}"
+                                  FontFamily="{StaticResource FontMono}"
+                                  FontSize="11"
+                                  Margin="0,2"/>
+                        <CheckBox IsChecked="{Binding DryRun}"
+                                  Content="Dry Run (모터 이동 없음)"
+                                  Foreground="#ffe66d"
+                                  FontFamily="{StaticResource FontMono}"
+                                  FontSize="11"
+                                  Margin="0,2"/>
+                    </StackPanel>
+                </Expander>
+
+                <!-- ── 6. RUN / STOP ────────────────────────────────── -->
+                <Separator Style="{StaticResource HSep}" Margin="0,8"/>
+
+                <Grid Margin="0,4">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="8"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Button Grid.Column="0"
+                            Content="▶  RUN"
+                            Style="{StaticResource AccentButton}"
+                            Command="{Binding RunCommand}"
+                            IsEnabled="{Binding CanRun}"
+                            Height="32"/>
+                    <Button Grid.Column="2"
+                            Content="■  STOP"
+                            Style="{StaticResource DangerButton}"
+                            Command="{Binding StopCommand}"
+                            IsEnabled="{Binding IsRunning}"
+                            Height="32"/>
+                </Grid>
+
+                <!-- 진행률 바 -->
+                <ProgressBar Style="{StaticResource ScanProgress}"
+                             Value="{Binding ProgressPct}"
+                             Maximum="100"
+                             Margin="0,6"/>
+                <TextBlock Text="{Binding ProgressText}"
+                           Style="{StaticResource DimLabel}"
+                           HorizontalAlignment="Center"
+                           Margin="0,2,0,8"/>
+
+                <!-- ── 7. 결과 + GOTO ────────────────────────────────── -->
+                <Border BorderBrush="{StaticResource Brush.Border}"
+                        BorderThickness="1"
+                        Background="#0f1729"
+                        Padding="8,6"
+                        Margin="0,4,0,0">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition/>
+                            <RowDefinition Height="8"/>
+                            <RowDefinition/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Best position 표시 -->
+                        <StackPanel Grid.Row="0" Orientation="Horizontal">
+                            <TextBlock Text="Best : "
+                                       Style="{StaticResource DimLabel}"
+                                       VerticalAlignment="Center"/>
+                            <TextBlock Text="{Binding BestPosText}"
+                                       Foreground="{StaticResource Brush.Accent}"
+                                       FontFamily="{StaticResource FontMono}"
+                                       FontSize="13" FontWeight="Bold"
+                                       VerticalAlignment="Center"/>
+                        </StackPanel>
+
+                        <!-- GOTO 버튼 -->
+                        <Button Grid.Row="2"
+                                Content="➜  GOTO BEST"
+                                Style="{StaticResource PurpleButton}"
+                                Command="{Binding GotoCommand}"
+                                IsEnabled="{Binding HasBestPos}"
+                                Height="26"/>
+                    </Grid>
+                </Border>
+
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- GridSplitter -->
+        <GridSplitter Grid.Column="1"
+                      Style="{StaticResource DarkSplitter}"
+                      HorizontalAlignment="Stretch"/>
+
+        <!-- ══════ 우측 뷰 영역 ══════ -->
+        <Grid Grid.Column="2">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" MinHeight="200"/>
+                <RowDefinition Height="3"/>
+                <RowDefinition Height="*" MinHeight="200"/>
+            </Grid.RowDefinitions>
+
+            <!-- 상단: 스캔 프리뷰 이미지 뷰어 -->
+            <Border Grid.Row="0"
+                    BorderBrush="{StaticResource Brush.Border}"
+                    BorderThickness="0,0,0,0">
+                <Grid>
+                    <!-- 이미지 뷰어 영역 -->
+                    <ctrl:ImageViewerControl
+                        ImageSource="{Binding PreviewBitmap}"
+                        Colormap="{Binding Colormap}"
+                        Background="#030608"/>
+
+                    <!-- 스캔 중 오버레이: 현재 스텝 표시 -->
+                    <Border HorizontalAlignment="Left"
+                            VerticalAlignment="Top"
+                            Background="#aa080e1e"
+                            Padding="6,3"
+                            Margin="4"
+                            Visibility="{Binding IsRunning, Converter={StaticResource BoolVis}}">
+                        <TextBlock Text="{Binding StepOverlayText}"
+                                   Foreground="{StaticResource Brush.Accent}"
+                                   FontFamily="{StaticResource FontMono}"
+                                   FontSize="11"/>
+                    </Border>
+
+                    <!-- DRY RUN 워터마크 -->
+                    <TextBlock Text="DRY RUN"
+                               Foreground="#33ffe66d"
+                               FontFamily="{StaticResource FontMono}"
+                               FontSize="48" FontWeight="Bold"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               RenderTransformOrigin="0.5,0.5"
+                               Visibility="{Binding DryRun, Converter={StaticResource BoolVis}}">
+                        <TextBlock.RenderTransform>
+                            <RotateTransform Angle="-30"/>
+                        </TextBlock.RenderTransform>
+                    </TextBlock>
+                </Grid>
+            </Border>
+
+            <!-- 수평 GridSplitter -->
+            <GridSplitter Grid.Row="1"
+                          Style="{StaticResource DarkSplitter}"
+                          HorizontalAlignment="Stretch"
+                          VerticalAlignment="Stretch"/>
+
+            <!-- 하단: Sharpness 플롯 + 결과 DataGrid + 캡처 프레임 리스트 -->
+            <Grid Grid.Row="2">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" MinWidth="200"/>
+                    <ColumnDefinition Width="3"/>
+                    <ColumnDefinition Width="220" MinWidth="160"/>
+                    <ColumnDefinition Width="3"/>
+                    <ColumnDefinition Width="160" MinWidth="120"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Sharpness vs Position 플롯 -->
+                <Border Grid.Column="0"
+                        BorderBrush="{StaticResource Brush.Border}"
+                        BorderThickness="0,0,1,0">
+                    <Grid>
+                        <!-- ScottPlot 실시간 플롯 -->
+                        <sp:WpfPlot x:Name="SharpnessPlot"
+                                    Background="#080e1e"/>
+
+                        <!-- 플롯 레이블 (데이터 없을 때 오버레이) -->
+                        <TextBlock Text="Sharpness vs Position — 스캔 후 표시됩니다"
+                                   Style="{StaticResource DimLabel}"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   Visibility="{Binding HasPlotData, Converter={StaticResource BoolVis}}"/>
+
+                        <!-- 플롯 타이틀 오버레이 -->
+                        <Border HorizontalAlignment="Left"
+                                VerticalAlignment="Top"
+                                Background="#aa080e1e"
+                                Padding="6,2"
+                                Margin="2">
+                            <TextBlock Text="Sharpness vs Position"
+                                       Style="{StaticResource DimLabel}"
+                                       FontSize="10"/>
+                        </Border>
+                    </Grid>
+                </Border>
+
+                <!-- 수직 GridSplitter -->
+                <GridSplitter Grid.Column="1"
+                              Style="{StaticResource DarkSplitter}"
+                              HorizontalAlignment="Stretch"/>
+
+                <!-- 결과 DataGrid -->
+                <Border Grid.Column="2"
+                        BorderBrush="{StaticResource Brush.Border}"
+                        BorderThickness="0,0,1,0">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="22"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- 섹션 헤더 -->
+                        <Border Grid.Row="0" Style="{StaticResource PanelHeader}">
+                            <TextBlock Text="결과 테이블"
+                                       Style="{StaticResource DimLabel}"
+                                       VerticalAlignment="Center"/>
+                        </Border>
+
+                        <!-- DataGrid -->
+                        <DataGrid Grid.Row="1"
+                                  ItemsSource="{Binding ScanResults}"
+                                  AutoGenerateColumns="False"
+                                  IsReadOnly="True"
+                                  CanUserSortColumns="True"
+                                  Background="#060c1a"
+                                  Foreground="{StaticResource Brush.TextDim}"
+                                  BorderBrush="{StaticResource Brush.Border}"
+                                  GridLinesVisibility="Horizontal"
+                                  HorizontalGridLinesBrush="#1a2840"
+                                  FontFamily="{StaticResource FontMono}"
+                                  FontSize="11"
+                                  RowBackground="#060c1a"
+                                  AlternatingRowBackground="#080f1e"
+                                  SelectionMode="Single">
+                            <DataGrid.Columns>
+                                <!-- 스텝 번호 -->
+                                <DataGridTextColumn Header="#"
+                                                    Binding="{Binding Step}"
+                                                    Width="30">
+                                    <DataGridTextColumn.HeaderStyle>
+                                        <Style TargetType="DataGridColumnHeader">
+                                            <Setter Property="Background" Value="#0f1729"/>
+                                            <Setter Property="Foreground" Value="#6080a0"/>
+                                            <Setter Property="FontFamily" Value="Courier New"/>
+                                            <Setter Property="FontSize" Value="10"/>
+                                        </Style>
+                                    </DataGridTextColumn.HeaderStyle>
+                                </DataGridTextColumn>
+                                <!-- 위치 -->
+                                <DataGridTextColumn Header="Position"
+                                                    Binding="{Binding Position, StringFormat='{}{0:+0.0000}'}"
+                                                    Width="*"/>
+                                <!-- 선명도 -->
+                                <DataGridTextColumn Header="Sharpness"
+                                                    Binding="{Binding Sharpness, StringFormat='{}{0:F2}'}"
+                                                    Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Grid>
+                </Border>
+
+                <!-- 수직 GridSplitter -->
+                <GridSplitter Grid.Column="3"
+                              Style="{StaticResource DarkSplitter}"
+                              HorizontalAlignment="Stretch"/>
+
+                <!-- 캡처 프레임 리스트 (썸네일) -->
+                <Grid Grid.Column="4">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="22"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- 섹션 헤더 -->
+                    <Border Grid.Row="0" Style="{StaticResource PanelHeader}">
+                        <TextBlock Text="캡처 프레임"
+                                   Style="{StaticResource DimLabel}"
+                                   VerticalAlignment="Center"/>
+                    </Border>
+
+                    <!-- 프레임 썸네일 ListBox -->
+                    <ListBox Grid.Row="1"
+                             ItemsSource="{Binding CapturedFrames}"
+                             SelectedItem="{Binding SelectedFrame}"
+                             Background="#060c1a"
+                             BorderThickness="0"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Margin="2">
+                                    <!-- 프레임 썸네일 이미지 -->
+                                    <Image Source="{Binding Thumbnail}"
+                                           Width="140" Height="80"
+                                           Stretch="Uniform"/>
+                                    <!-- 스텝 정보 레이블 -->
+                                    <TextBlock Text="{Binding Label}"
+                                               FontFamily="Courier New"
+                                               FontSize="10"
+                                               Foreground="#6080a0"
+                                               TextAlignment="Center"
+                                               Margin="0,2,0,0"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="Background" Value="Transparent"/>
+                                <Setter Property="Padding" Value="2"/>
+                                <Style.Triggers>
+                                    <Trigger Property="IsSelected" Value="True">
+                                        <Setter Property="Background" Value="#1a3a60"/>
+                                    </Trigger>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter Property="Background" Value="#0f2040"/>
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                    </ListBox>
+                </Grid>
+
+            </Grid>
+        </Grid>
+
+    </Grid>
+</UserControl>

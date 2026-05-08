@@ -106,7 +106,7 @@ class CameraControlPanel(QWidget):
         self.combo_cam_type.setStyleSheet("""
             QComboBox { background: #080e1e; border: 1px solid #0f3460;
                 color: #c0d0ff; border-radius: 3px;
-                font-family: 'Courier New'; font-size: 11px; padding: 2px 6px; }
+                font-family: 'Courier New'; font-size: 14px; padding: 2px 6px; }
             QComboBox::drop-down { border: none; }
             QComboBox QAbstractItemView { background: #0f1729; color: #c0d0ff; }
         """)
@@ -119,7 +119,7 @@ class CameraControlPanel(QWidget):
         self.camera_list.setFixedHeight(64)
         self.camera_list.setStyleSheet("""
             QListWidget { background: #080e1e; border: 1px solid #0f3460;
-                color: #8090a8; font-family: 'Courier New'; font-size: 11px; }
+                color: #8090a8; font-family: 'Courier New'; font-size: 14px; }
             QListWidget::item:selected { background: #0f3460; color: #e94560; }
         """)
         gd.addWidget(self.camera_list)
@@ -234,7 +234,7 @@ class CameraControlPanel(QWidget):
         self.combo_temporal.setStyleSheet("""
             QComboBox { background: #080e1e; border: 1px solid #0f3460;
                 color: #c0d0ff; border-radius: 3px;
-                font-family: 'Courier New'; font-size: 11px; padding: 2px 4px; }
+                font-family: 'Courier New'; font-size: 14px; padding: 2px 4px; }
             QComboBox::drop-down { border: none; }
             QComboBox QAbstractItemView { background: #0f1729; color: #c0d0ff; }
         """)
@@ -269,7 +269,7 @@ class CameraControlPanel(QWidget):
         self.spin_bin_thresh.setStyleSheet("""
             QSpinBox { background: #0f1e38; color: #c0d0ff; border: 1px solid #1a3460;
                 border-radius: 3px; padding: 1px 4px;
-                font-family: 'Consolas'; font-size: 11px; }
+                font-family: 'Consolas'; font-size: 14px; }
             QSpinBox::up-button, QSpinBox::down-button { width: 14px; background: #1a3060; }
         """)
         lbl_thresh_row.addWidget(self.spin_bin_thresh)
@@ -391,7 +391,7 @@ class CameraControlPanel(QWidget):
         self.lbl_sat    = QLabel("")          # 포화 경고
         _stat_style = (
             "color: #ffe66d; font-family: 'Courier New'; "
-            "font-size: 12px; font-weight: bold;"
+            "font-size: 15px; font-weight: bold;"
         )
         for lbl in (self.lbl_cx, self.lbl_cy, self.lbl_bright,
                     self.lbl_fps, self.lbl_snr, self.lbl_mean):
@@ -399,7 +399,7 @@ class CameraControlPanel(QWidget):
             gc2.addWidget(lbl)
         self.lbl_sat.setStyleSheet(
             "color: #e94560; font-family: 'Courier New'; "
-            "font-size: 11px; font-weight: bold;"
+            "font-size: 14px; font-weight: bold;"
         )
         gc2.addWidget(self.lbl_sat)
         layout.addWidget(self.grp_centroid)
@@ -444,7 +444,7 @@ class CameraControlPanel(QWidget):
             cb.setStyleSheet("""
                 QComboBox { background: #080e1e; border: 1px solid #0f3460;
                     color: #c0d0ff; border-radius: 3px;
-                    font-family: 'Courier New'; font-size: 11px; padding: 2px 4px; }
+                    font-family: 'Courier New'; font-size: 14px; padding: 2px 4px; }
                 QComboBox QAbstractItemView { background: #0f1729; color: #c0d0ff; }
             """)
             row.addWidget(lbl)
@@ -509,7 +509,7 @@ class CameraControlPanel(QWidget):
         self.combo_stretch.setStyleSheet("""
             QComboBox { background: #080e1e; border: 1px solid #0f3460;
                 color: #c0d0ff; border-radius: 3px;
-                font-family: 'Courier New'; font-size: 11px; padding: 2px 4px; }
+                font-family: 'Courier New'; font-size: 14px; padding: 2px 4px; }
             QComboBox::drop-down { border: none; }
             QComboBox QAbstractItemView { background: #0f1729; color: #c0d0ff; }
         """)

@@ -37,7 +37,7 @@ _GRP = """
     QGroupBox {{
         border: 1px solid {color}; border-radius: 6px;
         margin-top: 10px; font-family: 'Courier New';
-        font-size: 11px; color: {color};
+        font-size: 14px; color: {color};
         letter-spacing: 2px; font-weight: bold;
     }}
     QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 4px; }}
@@ -46,7 +46,7 @@ _EDIT = f"""
     QLineEdit {{
         background: {C_BG}; border: 1px solid {C_BORDER};
         color: #c0d0ff; border-radius: 3px;
-        font-family: '{_FC}'; font-size: 11px; padding: 2px 6px;
+        font-family: '{_FC}'; font-size: 14px; padding: 2px 6px;
     }}
 """
 
@@ -60,7 +60,7 @@ def _btn(color: str) -> str:
         QPushButton {{
             background: transparent; color: {color};
             border: 1px solid {color}; border-radius: 3px;
-            font-family: '{_FC}'; font-size: 11px;
+            font-family: '{_FC}'; font-size: 14px;
             font-weight: bold; padding: 2px 6px;
         }}
         QPushButton:hover {{ background: {color}22; }}
@@ -73,7 +73,7 @@ def _spin_style() -> str:
         QDoubleSpinBox {{
             background: {C_BG}; border: 1px solid {C_BORDER};
             color: #c0d0ff; border-radius: 3px;
-            font-family: '{_FC}'; font-size: 11px; padding: 1px 4px;
+            font-family: '{_FC}'; font-size: 14px; padding: 1px 4px;
         }}
         QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{ width: 0px; }}
     """
@@ -95,21 +95,21 @@ class _AxisRow:
 
         # 레이블
         lbl = QLabel(AXIS_LABELS[idx])
-        lbl.setStyleSheet(f"color:{C_CYAN}; font-family:'{_FC}'; font-size:12px; font-weight:bold;")
+        lbl.setStyleSheet(f"color:{C_CYAN}; font-family:'{_FC}'; font-size:15px; font-weight:bold;")
         lbl.setFixedWidth(28)
         grid.addWidget(lbl, row, 0)
 
         # 위치 표시
         self.lbl_pos = QLabel("---")
         self.lbl_pos.setStyleSheet(
-            f"color:#d8e8ff; font-family:'{_FC}'; font-size:12px; min-width:100px;"
+            f"color:#d8e8ff; font-family:'{_FC}'; font-size:15px; min-width:100px;"
         )
         self.lbl_pos.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         grid.addWidget(self.lbl_pos, row, 1)
 
         # 모터 상태 인디케이터
         self.lbl_state = QLabel("●")
-        self.lbl_state.setStyleSheet(f"color:#304060; font-size:10px;")
+        self.lbl_state.setStyleSheet(f"color:#304060; font-size:13px;")
         self.lbl_state.setFixedWidth(14)
         grid.addWidget(self.lbl_state, row, 2)
 
@@ -163,9 +163,9 @@ class _AxisRow:
 
     def update_state(self, enabled: bool):
         if enabled:
-            self.lbl_state.setStyleSheet(f"color:{C_CYAN}; font-size:10px;")
+            self.lbl_state.setStyleSheet(f"color:{C_CYAN}; font-size:13px;")
         else:
-            self.lbl_state.setStyleSheet("color:#304060; font-size:10px;")
+            self.lbl_state.setStyleSheet("color:#304060; font-size:13px;")
 
     def _ctrl(self) -> AcsStageController | None:
         return self._ctrl_ref[0]
@@ -236,7 +236,7 @@ class AcsStagePanel(QWidget):
         # IP
         row_ip = QHBoxLayout()
         lbl = QLabel("IP")
-        lbl.setStyleSheet(f"color:{C_DIM}; font-family:'{_FC}'; font-size:11px;")
+        lbl.setStyleSheet(f"color:{C_DIM}; font-family:'{_FC}'; font-size:14px;")
         lbl.setFixedWidth(30)
         self.edit_ip = QLineEdit()
         self.edit_ip.setPlaceholderText("10.0.0.100")
@@ -248,13 +248,13 @@ class AcsStagePanel(QWidget):
         # Port
         row_port = QHBoxLayout()
         lbl_p = QLabel("PORT")
-        lbl_p.setStyleSheet(f"color:{C_DIM}; font-family:'{_FC}'; font-size:11px;")
+        lbl_p.setStyleSheet(f"color:{C_DIM}; font-family:'{_FC}'; font-size:14px;")
         lbl_p.setFixedWidth(30)
         self.edit_port = QLineEdit(str(DEFAULT_PORT))
         self.edit_port.setFixedWidth(56)
         self.edit_port.setStyleSheet(_EDIT)
         self.check_sim = QCheckBox("SIM")
-        self.check_sim.setStyleSheet(f"color:{C_AMBER}; font-family:'{_FC}'; font-size:11px;")
+        self.check_sim.setStyleSheet(f"color:{C_AMBER}; font-family:'{_FC}'; font-size:14px;")
         row_port.addWidget(lbl_p)
         row_port.addWidget(self.edit_port)
         row_port.addStretch()
@@ -280,7 +280,7 @@ class AcsStagePanel(QWidget):
         self.lbl_status = QLabel("● DISCONNECTED")
         self.lbl_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_status.setStyleSheet(
-            f"color:{C_RED}; font-family:'{_FC}'; font-size:11px; font-weight:bold;"
+            f"color:{C_RED}; font-family:'{_FC}'; font-size:14px; font-weight:bold;"
         )
         lay.addWidget(self.lbl_status)
         return grp
@@ -297,7 +297,7 @@ class AcsStagePanel(QWidget):
         for txt, width in [("Axis", 28), ("Position", 100), ("", 14),
                            ("", 32), ("", 34), ("Step(mm)", 72), ("", 26), ("", 26)]:
             lbl = QLabel(txt)
-            lbl.setStyleSheet(f"color:{C_DIM}; font-family:'{_FC}'; font-size:9px;")
+            lbl.setStyleSheet(f"color:{C_DIM}; font-family:'{_FC}'; font-size:12px;")
             lbl.setFixedWidth(width)
             hdr.addWidget(lbl)
         lay.addLayout(hdr)
@@ -364,7 +364,7 @@ class AcsStagePanel(QWidget):
         for i, lbl_txt in enumerate(labels):
             row, col_base = divmod(i, 3)
             lbl = QLabel(lbl_txt)
-            lbl.setStyleSheet(f"color:{C_DIM}; font-family:'{_FC}'; font-size:10px;")
+            lbl.setStyleSheet(f"color:{C_DIM}; font-family:'{_FC}'; font-size:13px;")
             grid.addWidget(lbl, row * 2, col_base)
             spin = QDoubleSpinBox()
             spin.setRange(-500.0, 500.0)
@@ -400,7 +400,7 @@ class AcsStagePanel(QWidget):
         self.kin_result.setStyleSheet(f"""
             QTextEdit {{
                 background:{C_BG}; border:1px solid {C_BORDER};
-                color:#c0d0ff; font-family:'{_FC}'; font-size:10px;
+                color:#c0d0ff; font-family:'{_FC}'; font-size:13px;
             }}
         """)
         if unavail:
@@ -419,7 +419,7 @@ class AcsStagePanel(QWidget):
 
         self.check_dry = QCheckBox("DRY RUN (simulate — no motor movement)")
         self.check_dry.setStyleSheet(
-            f"QCheckBox {{ color:{C_AMBER}; font-family:'{_FC}'; font-size:11px; font-weight:bold; }}"
+            f"QCheckBox {{ color:{C_AMBER}; font-family:'{_FC}'; font-size:14px; font-weight:bold; }}"
         )
         self.check_dry.toggled.connect(self._on_dry_run)
         lay.addWidget(self.check_dry)
@@ -457,7 +457,7 @@ class AcsStagePanel(QWidget):
             label = "SIMULATOR" if use_sim else f"{ip}:{port_str}"
             self.lbl_status.setText(f"● CONNECTED  [{label}]")
             self.lbl_status.setStyleSheet(
-                f"color:{C_CYAN}; font-family:'{_FC}'; font-size:11px; font-weight:bold;"
+                f"color:{C_CYAN}; font-family:'{_FC}'; font-size:14px; font-weight:bold;"
             )
             self.btn_connect.setEnabled(False)
             self.btn_disconnect.setEnabled(True)
@@ -484,7 +484,7 @@ class AcsStagePanel(QWidget):
     def _set_disconnected_ui(self):
         self.lbl_status.setText("● DISCONNECTED")
         self.lbl_status.setStyleSheet(
-            f"color:{C_RED}; font-family:'{_FC}'; font-size:11px; font-weight:bold;"
+            f"color:{C_RED}; font-family:'{_FC}'; font-size:14px; font-weight:bold;"
         )
         self.btn_connect.setEnabled(True)
         self.btn_disconnect.setEnabled(False)

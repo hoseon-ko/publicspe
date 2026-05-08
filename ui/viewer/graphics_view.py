@@ -906,13 +906,13 @@ class _RangePopup(QWidget):
         tb_row.setContentsMargins(10, 0, 4, 0)
         lbl = QLabel("📊  COLOR RANGE")
         lbl.setStyleSheet(
-            "color:#4a6a8a; font-family:'Courier New'; font-size:10px;"
+            "color:#4a6a8a; font-family:'Courier New'; font-size:13px;"
             " font-weight:bold; letter-spacing:2px; background:transparent;"
         )
         btn_close = QPushButton("✕")
         btn_close.setFixedSize(20, 20)
         btn_close.setStyleSheet(
-            "QPushButton{background:transparent;color:#506080;border:none;font-size:13px;}"
+            "QPushButton{background:transparent;color:#506080;border:none;font-size:16px;}"
             "QPushButton:hover{color:#e94560;}"
         )
         tb_row.addWidget(lbl, 1)

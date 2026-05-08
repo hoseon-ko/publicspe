@@ -471,7 +471,7 @@ class AcquisitionTab(QWidget):
         self.btn_roi_range.setCheckable(True)
         self.btn_roi_range.setStyleSheet(f"""
             QToolButton {{ background: transparent; color: #a0a0b0; border: 1px solid #1a3a60;
-                border-radius: 3px; font-family: '{_FC}'; font-size: 10px; padding: 1px 4px; }}
+                border-radius: 3px; font-family: '{_FC}'; font-size: 13px; padding: 1px 4px; }}
             QToolButton:checked {{ background: #1a2a10; color: #ffe66d; border-color: #ffe66d; }}
         """)
         self.btn_roi_range.toggled.connect(self._on_roi_range_toggled)

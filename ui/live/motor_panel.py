@@ -33,14 +33,14 @@ _SPIN_STYLE = """
     QSpinBox, QDoubleSpinBox {
         background: #080e1e; border: 1px solid #0f3460;
         color: #c0d0ff; border-radius: 3px;
-        font-family: 'Courier New'; font-size: 11px; padding: 2px 4px;
+        font-family: 'Courier New'; font-size: 14px; padding: 2px 4px;
     }
 """
 _GRP_STYLE = """
     QGroupBox {{
         border: 1px solid {color}; border-radius: 6px;
         margin-top: 10px; font-family: 'Courier New';
-        font-size: 11px; color: {color};
+        font-size: 14px; color: {color};
         letter-spacing: 2px; font-weight: bold;
     }}
     QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 4px; }}
@@ -73,10 +73,10 @@ class MotorCard(QFrame):
         top = QHBoxLayout()
         lbl_num = QLabel(f"M{self.motor_num}")
         lbl_num.setStyleSheet(
-            "color: #4ecdc4; font-family: 'Courier New'; font-weight: bold; font-size: 12px;"
+            "color: #4ecdc4; font-family: 'Courier New'; font-weight: bold; font-size: 15px;"
         )
         self.lbl_dot = QLabel("●")
-        self.lbl_dot.setStyleSheet("color: #2a3a6a; font-family: 'Courier New'; font-size: 10px;")
+        self.lbl_dot.setStyleSheet("color: #2a3a6a; font-family: 'Courier New'; font-size: 13px;")
         top.addWidget(lbl_num)
         top.addStretch()
         top.addWidget(self.lbl_dot)
@@ -86,7 +86,7 @@ class MotorCard(QFrame):
         self.lbl_pos = QLabel("—")
         self.lbl_pos.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_pos.setStyleSheet("""
-            color: #e0e8ff; font-family: 'Courier New'; font-size: 18px; font-weight: bold;
+            color: #e0e8ff; font-family: 'Courier New'; font-size: 21px; font-weight: bold;
             background: #080e1e; border: 1px solid #0f3460; border-radius: 4px; padding: 3px;
         """)
         layout.addWidget(self.lbl_pos)
@@ -94,7 +94,7 @@ class MotorCard(QFrame):
         # 스텝 입력
         step_row = QHBoxLayout()
         lbl_s = QLabel("Steps")
-        lbl_s.setStyleSheet("color: #3a5080; font-size: 10px; font-family: 'Courier New';")
+        lbl_s.setStyleSheet("color: #3a5080; font-size: 13px; font-family: 'Courier New';")
         self.spin = QSpinBox()
         self.spin.setRange(-999999, 999999)
         self.spin.setValue(100)
@@ -114,7 +114,7 @@ class MotorCard(QFrame):
                 QPushButton {
                     background: #111a30; color: #3a5080;
                     border: 1px solid #0f3460; border-radius: 3px;
-                    font-size: 10px; font-family: 'Courier New'; padding: 0;
+                    font-size: 13px; font-family: 'Courier New'; padding: 0;
                 }
                 QPushButton:hover { color: #4ecdc4; border-color: #4ecdc4; }
             """)
@@ -142,7 +142,7 @@ class MotorCard(QFrame):
         self.btn_zero = QPushButton("ZERO")
         self.btn_zero.setStyleSheet("""
             QPushButton { background: #281020; color: #e94560; border: 1px solid #5a2040;
-                border-radius: 4px; font-family: 'Courier New'; font-size: 10px; font-weight: bold; }
+                border-radius: 4px; font-family: 'Courier New'; font-size: 13px; font-weight: bold; }
             QPushButton:hover { background: #3a1830; }
             QPushButton:disabled { color: #1a2840; background: #080e1e; border-color: #0a1828; }
         """)
@@ -159,23 +159,23 @@ class MotorCard(QFrame):
         if pos is None:
             self.lbl_pos.setText("ERR")
             self.lbl_dot.setText("●")
-            self.lbl_dot.setStyleSheet("color: #e94560; font-family: 'Courier New'; font-size: 10px;")
+            self.lbl_dot.setStyleSheet("color: #e94560; font-family: 'Courier New'; font-size: 13px;")
         else:
             self.lbl_pos.setText(f"{pos:,}")
             self.lbl_dot.setText("●")   # flash_moving 후 텍스트 복원
-            self.lbl_dot.setStyleSheet("color: #4ecdc4; font-family: 'Courier New'; font-size: 10px;")
+            self.lbl_dot.setStyleSheet("color: #4ecdc4; font-family: 'Courier New'; font-size: 13px;")
 
     def flash_moving(self, steps: int):
         """#11 이동 명령 시 상태 인디케이터를 노란색으로 잠깐 점등."""
         dir_str = "→" if steps > 0 else ("←" if steps < 0 else "⊙")
         self.lbl_dot.setText(f"{dir_str}")
-        self.lbl_dot.setStyleSheet("color: #ffe66d; font-family: 'Courier New'; font-size: 10px;")
+        self.lbl_dot.setStyleSheet("color: #ffe66d; font-family: 'Courier New'; font-size: 13px;")
         # 1.5초 후 복원 (폴링으로 위치 갱신되면 자동으로 teal 복구)
         QTimer.singleShot(1500, self._reset_dot)
 
     def _reset_dot(self):
         self.lbl_dot.setText("●")
-        self.lbl_dot.setStyleSheet("color: #4ecdc4; font-family: 'Courier New'; font-size: 10px;")
+        self.lbl_dot.setStyleSheet("color: #4ecdc4; font-family: 'Courier New'; font-size: 13px;")
 
     def set_enabled(self, en: bool):
         for w in (self.btn_neg, self.btn_pos, self.btn_zero, self.spin):
@@ -183,7 +183,7 @@ class MotorCard(QFrame):
         if not en:
             self.lbl_pos.setText("—")
             self.lbl_dot.setText("●")
-            self.lbl_dot.setStyleSheet("color: #2a3a6a; font-family: 'Courier New'; font-size: 10px;")
+            self.lbl_dot.setStyleSheet("color: #2a3a6a; font-family: 'Courier New'; font-size: 13px;")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -231,7 +231,7 @@ class MotorPanel(QWidget):
 
         self.lbl_status = QLabel("● DISCONNECTED")
         self.lbl_status.setStyleSheet(
-            "color: #e94560; font-family: 'Courier New'; font-size: 11px;"
+            "color: #e94560; font-family: 'Courier New'; font-size: 14px;"
         )
         gc.addWidget(self.lbl_status)
 
@@ -281,7 +281,7 @@ class MotorPanel(QWidget):
             lbl.setFixedWidth(width)
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl.setStyleSheet(
-                "color: #ffe66d; font-family: 'Courier New'; font-size: 10px; font-weight: bold;"
+                "color: #ffe66d; font-family: 'Courier New'; font-size: 13px; font-weight: bold;"
             )
             hdr.addWidget(lbl)
         hdr.addStretch()
@@ -296,7 +296,7 @@ class MotorPanel(QWidget):
             lbl_m.setFixedWidth(55)
             lbl_m.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl_m.setStyleSheet(
-                "color: #4ecdc4; font-family: 'Courier New'; font-weight: bold; font-size: 12px;"
+                "color: #4ecdc4; font-family: 'Courier New'; font-weight: bold; font-size: 15px;"
             )
 
             spin_fwd = QDoubleSpinBox()
@@ -320,7 +320,7 @@ class MotorPanel(QWidget):
             # 미리보기 라벨 (입력 100 기준)
             lbl_preview = QLabel("→100")
             lbl_preview.setStyleSheet(
-                "color: #4a5a7a; font-family: 'Courier New'; font-size: 10px;"
+                "color: #4a5a7a; font-family: 'Courier New'; font-size: 13px;"
             )
 
             # 가중치 변경 시 미리보기 갱신
@@ -344,7 +344,7 @@ class MotorPanel(QWidget):
         btn_reset_w = QPushButton("Reset all weights → 1.0")
         btn_reset_w.setStyleSheet("""
             QPushButton { background: #111a30; color: #ffe66d; border: 1px solid #3a3010;
-                border-radius: 3px; font-family: 'Courier New'; font-size: 10px; padding: 3px 6px; }
+                border-radius: 3px; font-family: 'Courier New'; font-size: 13px; padding: 3px 6px; }
             QPushButton:hover { background: #1e2a10; }
         """)
         btn_reset_w.clicked.connect(self._reset_weights)
@@ -356,7 +356,7 @@ class MotorPanel(QWidget):
         self.lbl_snapshot = QLabel("M1:—  M2:—  M3:—  M4:—")
         self.lbl_snapshot.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_snapshot.setStyleSheet("""
-            color: #ffe66d; font-family: 'Courier New'; font-size: 11px;
+            color: #ffe66d; font-family: 'Courier New'; font-size: 14px;
             background: #080e1e; border: 1px solid #0f3460;
             border-radius: 4px; padding: 4px;
         """)
@@ -371,7 +371,7 @@ class MotorPanel(QWidget):
         self.btn_zero_all.setFixedHeight(36)
         self.btn_zero_all.setStyleSheet("""
             QPushButton { background: #1a1020; color: #ffe66d; border: 1px solid #6a5010;
-                font-family: 'Courier New'; font-weight: bold; font-size: 11px;
+                font-family: 'Courier New'; font-weight: bold; font-size: 14px;
                 letter-spacing: 1px; border-radius: 4px; }
             QPushButton:hover { background: #2a2030; }
             QPushButton:disabled { color: #2a2010; background: #100808; border-color: #1a1008; }
@@ -383,7 +383,7 @@ class MotorPanel(QWidget):
         self.btn_stop_all.setFixedHeight(36)
         self.btn_stop_all.setStyleSheet("""
             QPushButton { background: #200808; color: #ff3322; border: 2px solid #aa2211;
-                font-family: 'Courier New'; font-weight: bold; font-size: 11px;
+                font-family: 'Courier New'; font-weight: bold; font-size: 14px;
                 letter-spacing: 1px; border-radius: 4px; }
             QPushButton:hover { background: #380e0e; }
             QPushButton:disabled { color: #2a1010; background: #100404; border-color: #200808; }
@@ -446,7 +446,7 @@ class MotorPanel(QWidget):
             model = self._ctrl.connect()
             self.lbl_status.setText(f"● {model}")
             self.lbl_status.setStyleSheet(
-                "color: #4ecdc4; font-family: 'Courier New'; font-size: 11px;"
+                "color: #4ecdc4; font-family: 'Courier New'; font-size: 14px;"
             )
             self.btn_connect.setEnabled(False)
             self.btn_disconnect.setEnabled(True)
@@ -473,7 +473,7 @@ class MotorPanel(QWidget):
     def _reset_ui(self):
         self.lbl_status.setText("● DISCONNECTED")
         self.lbl_status.setStyleSheet(
-            "color: #e94560; font-family: 'Courier New'; font-size: 11px;"
+            "color: #e94560; font-family: 'Courier New'; font-size: 14px;"
         )
         self.btn_connect.setEnabled(True)
         self.btn_disconnect.setEnabled(False)

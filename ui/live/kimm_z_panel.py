@@ -35,14 +35,14 @@ _EDIT_STYLE = """
     QLineEdit {
         background: #080e1e; border: 1px solid #0f3460;
         color: #c0d0ff; border-radius: 3px;
-        font-family: 'Courier New'; font-size: 11px; padding: 2px 6px;
+        font-family: 'Courier New'; font-size: 14px; padding: 2px 6px;
     }
 """
 _GRP_STYLE = """
     QGroupBox {{
         border: 1px solid {color}; border-radius: 6px;
         margin-top: 10px; font-family: 'Courier New';
-        font-size: 11px; color: {color};
+        font-size: 14px; color: {color};
         letter-spacing: 2px; font-weight: bold;
     }}
     QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 4px; }}
@@ -91,7 +91,7 @@ class KIMMZPanel(QWidget):
         # IP 입력
         row_ip = QHBoxLayout()
         lbl_ip = QLabel("IP")
-        lbl_ip.setStyleSheet(f"color:#8090b0; font-family:'{_FC}'; font-size:11px;")
+        lbl_ip.setStyleSheet(f"color:#8090b0; font-family:'{_FC}'; font-size:14px;")
         lbl_ip.setFixedWidth(28)
         self.edit_ip = QLineEdit()
         self.edit_ip.setPlaceholderText("192.168.1.100")
@@ -103,7 +103,7 @@ class KIMMZPanel(QWidget):
         # Port 입력
         row_port = QHBoxLayout()
         lbl_port = QLabel("PORT")
-        lbl_port.setStyleSheet(f"color:#8090b0; font-family:'{_FC}'; font-size:11px;")
+        lbl_port.setStyleSheet(f"color:#8090b0; font-family:'{_FC}'; font-size:14px;")
         lbl_port.setFixedWidth(28)
         self.edit_port = QLineEdit()
         self.edit_port.setPlaceholderText("5000")
@@ -133,7 +133,7 @@ class KIMMZPanel(QWidget):
         self.lbl_conn_status = QLabel("● DISCONNECTED")
         self.lbl_conn_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_conn_status.setStyleSheet(
-            f"color:#e94560; font-family:'{_FC}'; font-size:11px; font-weight:bold;"
+            f"color:#e94560; font-family:'{_FC}'; font-size:14px; font-weight:bold;"
         )
         conn_layout.addWidget(self.lbl_conn_status)
         root.addWidget(grp_conn)
@@ -148,17 +148,17 @@ class KIMMZPanel(QWidget):
         self.lbl_z = QLabel("---  um")
         self.lbl_z.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_z.setStyleSheet(
-            f"color:#d8e8ff; font-family:'{_FC}'; font-size:22px; font-weight:bold;"
+            f"color:#d8e8ff; font-family:'{_FC}'; font-size:26px; font-weight:bold;"
         )
         pos_layout.addWidget(self.lbl_z)
 
         # Servo 상태
         row_servo = QHBoxLayout()
         lbl_s = QLabel("SERVO")
-        lbl_s.setStyleSheet(f"color:#8090b0; font-family:'{_FC}'; font-size:11px;")
+        lbl_s.setStyleSheet(f"color:#8090b0; font-family:'{_FC}'; font-size:14px;")
         self.lbl_servo = QLabel("OFF")
         self.lbl_servo.setStyleSheet(
-            f"color:#4a5a7a; font-family:'{_FC}'; font-size:11px; font-weight:bold;"
+            f"color:#4a5a7a; font-family:'{_FC}'; font-size:14px; font-weight:bold;"
         )
         row_servo.addWidget(lbl_s)
         row_servo.addStretch()
@@ -202,7 +202,7 @@ class KIMMZPanel(QWidget):
         row_abs = QHBoxLayout()
         row_abs.setSpacing(4)
         lbl_target = QLabel("ABS")
-        lbl_target.setStyleSheet(f"color:#8090b0; font-family:'{_FC}'; font-size:10px;")
+        lbl_target.setStyleSheet(f"color:#8090b0; font-family:'{_FC}'; font-size:13px;")
         
         self.spin_abs = QDoubleSpinBox()
         self.spin_abs.setRange(-10000.0, 10000.0)
@@ -233,7 +233,7 @@ class KIMMZPanel(QWidget):
         # Safety Limit
         row_lim = QHBoxLayout()
         lbl_lim = QLabel("Limit(um)")
-        lbl_lim.setStyleSheet(f"color:#8090b0; font-family:'{_FC}'; font-size:11px;")
+        lbl_lim.setStyleSheet(f"color:#8090b0; font-family:'{_FC}'; font-size:14px;")
         lbl_lim.setFixedWidth(65)
         self.spin_limit = QDoubleSpinBox()
         self.spin_limit.setRange(0.0, 10000.0)
@@ -248,7 +248,7 @@ class KIMMZPanel(QWidget):
         # Velocity
         row_vel = QHBoxLayout()
         lbl_vel = QLabel("Vel(um/s)")
-        lbl_vel.setStyleSheet(f"color:#8090b0; font-family:'{_FC}'; font-size:11px;")
+        lbl_vel.setStyleSheet(f"color:#8090b0; font-family:'{_FC}'; font-size:14px;")
         lbl_vel.setFixedWidth(65)
         self.spin_vel = QDoubleSpinBox()
         self.spin_vel.setRange(0.1, 100.0)
@@ -263,7 +263,7 @@ class KIMMZPanel(QWidget):
         # Dry Run
         self.check_dry = QCheckBox("DRY RUN (Simulate Move)")
         self.check_dry.setStyleSheet("""
-            QCheckBox { color: #ffe66d; font-family: 'Courier New'; font-size: 11px; font-weight: bold; }
+            QCheckBox { color: #ffe66d; font-family: 'Courier New'; font-size: 14px; font-weight: bold; }
         """)
         self.check_dry.toggled.connect(self._on_dry_run_changed)
         set_layout.addWidget(self.check_dry)
@@ -279,7 +279,7 @@ class KIMMZPanel(QWidget):
             QDoubleSpinBox {
                 background: #080e1e; border: 1px solid #0f3460;
                 color: #c0d0ff; border-radius: 3px;
-                font-family: 'Courier New'; font-size: 11px; padding: 1px 4px;
+                font-family: 'Courier New'; font-size: 14px; padding: 1px 4px;
             }
             QDoubleSpinBox::up-button, QDoubleSpinBox::down-button { width: 0px; }
         """
@@ -290,7 +290,7 @@ class KIMMZPanel(QWidget):
             QPushButton {{
                 background: transparent; color: {color};
                 border: 1px solid {color}; border-radius: 3px;
-                font-family: 'Courier New'; font-size: 11px;
+                font-family: 'Courier New'; font-size: 14px;
                 font-weight: bold; padding: 3px 8px;
             }}
             QPushButton:hover {{ background: {color}22; }}
@@ -324,7 +324,7 @@ class KIMMZPanel(QWidget):
             self._log(f"KIMM: 연결 성공 (Limit={self._ctrl.z_safety_limit}um, Vel={self._ctrl.default_velocity}um/s)")
             self.lbl_conn_status.setText("● CONNECTED")
             self.lbl_conn_status.setStyleSheet(
-                f"color:#4ecdc4; font-family:'Courier New'; font-size:11px; font-weight:bold;"
+                f"color:#4ecdc4; font-family:'Courier New'; font-size:14px; font-weight:bold;"
             )
             self.btn_connect.setEnabled(False)
             self.btn_disconnect.setEnabled(True)
@@ -344,12 +344,12 @@ class KIMMZPanel(QWidget):
             self._ctrl = None
         self.lbl_conn_status.setText("● DISCONNECTED")
         self.lbl_conn_status.setStyleSheet(
-            f"color:#e94560; font-family:'Courier New'; font-size:11px; font-weight:bold;"
+            f"color:#e94560; font-family:'Courier New'; font-size:14px; font-weight:bold;"
         )
         self.lbl_z.setText("---  um")
         self.lbl_servo.setText("OFF")
         self.lbl_servo.setStyleSheet(
-            f"color:#4a5a7a; font-family:'Courier New'; font-size:11px; font-weight:bold;"
+            f"color:#4a5a7a; font-family:'Courier New'; font-size:14px; font-weight:bold;"
         )
         self.btn_connect.setEnabled(True)
         self.btn_disconnect.setEnabled(False)
@@ -375,12 +375,12 @@ class KIMMZPanel(QWidget):
         if self._ctrl.servo_on:
             self.lbl_servo.setText("ON")
             self.lbl_servo.setStyleSheet(
-                f"color:#4ecdc4; font-family:'Courier New'; font-size:11px; font-weight:bold;"
+                f"color:#4ecdc4; font-family:'Courier New'; font-size:14px; font-weight:bold;"
             )
         else:
             self.lbl_servo.setText("OFF")
             self.lbl_servo.setStyleSheet(
-                f"color:#4a5a7a; font-family:'Courier New'; font-size:11px; font-weight:bold;"
+                f"color:#4a5a7a; font-family:'Courier New'; font-size:14px; font-weight:bold;"
             )
 
     def _on_jog(self, delta: float):

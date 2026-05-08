@@ -190,7 +190,7 @@ class _MaskView(QGraphicsView):
 
 _BTN = lambda c: (
     f"QPushButton {{ background:#0d1a2e; color:{c}; border:1px solid {c};"
-    f"border-radius:3px; font-family:'Segoe UI'; font-size:13px; padding:5px 12px; }}"
+    f"border-radius:3px; font-family:'Segoe UI'; font-size:16px; padding:5px 12px; }}"
     f"QPushButton:hover {{ background:#1a3048; }}"
     f"QPushButton:disabled {{ color:#2a3a50; border-color:#1a2a40; }}"
 )
@@ -215,7 +215,7 @@ class MaskEditorDialog(QDialog):
             "드래그: 새 영역 추가  ·  클릭: 선택  ·  Delete / Backspace: 선택 삭제"
         )
         lbl_info.setStyleSheet(
-            "color:#8090b0; font-family:'Segoe UI'; font-size:12px; padding:2px 0;"
+            "color:#8090b0; font-family:'Segoe UI'; font-size:15px; padding:2px 0;"
         )
         layout.addWidget(lbl_info)
 
@@ -230,7 +230,7 @@ class MaskEditorDialog(QDialog):
 
         self._lbl_count = QLabel("0 영역")
         self._lbl_count.setStyleSheet(
-            "color:#4ecdc4; font-family:'Courier New'; font-size:14px; min-width:60px;"
+            "color:#4ecdc4; font-family:'Courier New'; font-size:17px; min-width:60px;"
         )
 
         self._btn_del   = QPushButton("선택 삭제")
