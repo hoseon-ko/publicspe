@@ -159,6 +159,7 @@ class AnalysisTab(QMainWindow):
 
     def _setup_toolbar(self):
         toolbar = QToolBar("Analysis Toolbar")
+        toolbar.setObjectName("analysis_toolbar")
         toolbar.setMovable(False)
         toolbar.setIconSize(QSize(16, 16))
         self.addToolBar(toolbar)
