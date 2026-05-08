@@ -246,7 +246,54 @@ class MotorPanel(QWidget):
         self._build_weight_group(self.sec_weight.content_layout())
         layout.addWidget(self.sec_weight)
 
+        # ── 포지션 스냅샷 라벨 ────────────────────────────────────────
+        self.lbl_snapshot = QLabel("M1:—  M2:—  M3:—  M4:—")
+        self.lbl_snapshot.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_snapshot.setStyleSheet("""
+            color: #ffe66d; font-family: 'Courier New'; font-size: 14px;
+            background: #080e1e; border: 1px solid #0f3460;
+            border-radius: 4px; padding: 4px;
+        """)
+        layout.addWidget(self.lbl_snapshot)
+
+        # ── ZERO ALL + STOP ALL ───────────────────────────────────────
+        action_row = QHBoxLayout()
+
+        # #17 ZERO ALL
+        self.btn_zero_all = QPushButton("⊙  ZERO ALL")
+        self.btn_zero_all.setEnabled(False)
+        self.btn_zero_all.setFixedHeight(36)
+        self.btn_zero_all.setStyleSheet("""
+            QPushButton { background: #1a1020; color: #ffe66d; border: 1px solid #6a5010;
+                font-family: 'Courier New'; font-weight: bold; font-size: 14px;
+                letter-spacing: 1px; border-radius: 4px; }
+            QPushButton:hover { background: #2a2030; }
+            QPushButton:disabled { color: #2a2010; background: #100808; border-color: #1a1008; }
+        """)
+        action_row.addWidget(self.btn_zero_all)
+
+        self.btn_stop_all = QPushButton("⛔  STOP ALL")
+        self.btn_stop_all.setEnabled(False)
+        self.btn_stop_all.setFixedHeight(36)
+        self.btn_stop_all.setStyleSheet("""
+            QPushButton { background: #200808; color: #ff3322; border: 2px solid #aa2211;
+                font-family: 'Courier New'; font-weight: bold; font-size: 14px;
+                letter-spacing: 1px; border-radius: 4px; }
+            QPushButton:hover { background: #380e0e; }
+            QPushButton:disabled { color: #2a1010; background: #100404; border-color: #200808; }
+        """)
+        action_row.addWidget(self.btn_stop_all)
+        layout.addLayout(action_row)
         layout.addStretch()
+
+        # 시그널 연결
+        self.btn_connect.clicked.connect(self._on_connect)
+        self.btn_disconnect.clicked.connect(self._on_disconnect)
+        self.btn_zero_all.clicked.connect(self._on_zero_all)
+        self.btn_stop_all.clicked.connect(self._on_stop_all)
+
+        # #18 저장된 스텝 값 복원
+        self._restore_step_settings()
 
     def _build_conn_group(self, lay: QVBoxLayout):
         lay.setSpacing(6)
@@ -351,58 +398,7 @@ class MotorPanel(QWidget):
             QPushButton:hover { background: #1e2a10; }
         """)
         btn_reset_w.clicked.connect(self._reset_weights)
-        gw.addWidget(btn_reset_w)
-
-        layout.addWidget(grp_w)
-
-        # ── 포지션 스냅샷 라벨 ────────────────────────────────────────
-        self.lbl_snapshot = QLabel("M1:—  M2:—  M3:—  M4:—")
-        self.lbl_snapshot.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_snapshot.setStyleSheet("""
-            color: #ffe66d; font-family: 'Courier New'; font-size: 14px;
-            background: #080e1e; border: 1px solid #0f3460;
-            border-radius: 4px; padding: 4px;
-        """)
-        layout.addWidget(self.lbl_snapshot)
-
-        # ── ZERO ALL + STOP ALL ───────────────────────────────────────
-        action_row = QHBoxLayout()
-
-        # #17 ZERO ALL
-        self.btn_zero_all = QPushButton("⊙  ZERO ALL")
-        self.btn_zero_all.setEnabled(False)
-        self.btn_zero_all.setFixedHeight(36)
-        self.btn_zero_all.setStyleSheet("""
-            QPushButton { background: #1a1020; color: #ffe66d; border: 1px solid #6a5010;
-                font-family: 'Courier New'; font-weight: bold; font-size: 14px;
-                letter-spacing: 1px; border-radius: 4px; }
-            QPushButton:hover { background: #2a2030; }
-            QPushButton:disabled { color: #2a2010; background: #100808; border-color: #1a1008; }
-        """)
-        action_row.addWidget(self.btn_zero_all)
-
-        self.btn_stop_all = QPushButton("⛔  STOP ALL")
-        self.btn_stop_all.setEnabled(False)
-        self.btn_stop_all.setFixedHeight(36)
-        self.btn_stop_all.setStyleSheet("""
-            QPushButton { background: #200808; color: #ff3322; border: 2px solid #aa2211;
-                font-family: 'Courier New'; font-weight: bold; font-size: 14px;
-                letter-spacing: 1px; border-radius: 4px; }
-            QPushButton:hover { background: #380e0e; }
-            QPushButton:disabled { color: #2a1010; background: #100404; border-color: #200808; }
-        """)
-        action_row.addWidget(self.btn_stop_all)
-        layout.addLayout(action_row)
-        layout.addStretch()
-
-        # 시그널 연결
-        self.btn_connect.clicked.connect(self._on_connect)
-        self.btn_disconnect.clicked.connect(self._on_disconnect)
-        self.btn_zero_all.clicked.connect(self._on_zero_all)
-        self.btn_stop_all.clicked.connect(self._on_stop_all)
-
-        # #18 저장된 스텝 값 복원
-        self._restore_step_settings()
+        lay.addWidget(btn_reset_w)
 
     # ── 가중치 헬퍼 ───────────────────────────────────────────────────
 
