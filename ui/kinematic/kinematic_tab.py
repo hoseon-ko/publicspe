@@ -57,14 +57,16 @@ class WorkspaceMapWidget(QWidget):
         self.range_y = (-15, 15)
         self.current_pos = (0, 0)
         self.axis_name = "XY"
+        self.axis_labels = ("Tx", "Ty") # 가로축, 세로축 라벨 추가
         self.margin = 30
         
-    def set_data(self, matrix, rx, ry, cx, cy, axis_name="XY"):
+    def set_data(self, matrix, rx, ry, cx, cy, axis_name="XY", labels=("Tx", "Ty")):
         self.matrix = matrix
         self.range_x = rx if rx[0] != rx[1] else (rx[0]-1, rx[1]+1)
         self.range_y = ry if ry[0] != ry[1] else (ry[0]-1, ry[1]+1)
         self.current_pos = (cx, cy)
         self.axis_name = axis_name
+        self.axis_labels = labels
         self.update()
 
     def paintEvent(self, event):
@@ -79,11 +81,21 @@ class WorkspaceMapWidget(QWidget):
 
         m = self.margin
         drawable_w = w - 2*m; drawable_h = h - 2*m
+        painter.setFont(QFont("Inter", 10, QFont.Weight.Bold)); painter.setPen(QColor("#64748b"))
+        
+        # Axis Labels
+        painter.drawText(w//2 - 20, h - 5, f"Axis: {self.axis_labels[0]}")
+        painter.save()
+        painter.translate(15, h//2 + 20)
+        painter.rotate(-90)
+        painter.drawText(0, 0, f"Axis: {self.axis_labels[1]}")
+        painter.restore()
+
         painter.setFont(QFont("Inter", 11, QFont.Weight.Bold)); painter.setPen(QColor("#ffffff"))
         painter.drawText(m, h - 10, f"{self.range_x[0]:.1f}")
         painter.drawText(w - m - 40, h - 10, f"{self.range_x[1]:.1f}")
-        painter.drawText(10, m, f"{self.range_y[1]:.1f}")
-        painter.drawText(10, h - m, f"{self.range_y[0]:.1f}")
+        painter.drawText(25, m + 15, f"{self.range_y[1]:.1f}")
+        painter.drawText(25, h - m, f"{self.range_y[0]:.1f}")
 
         if self.matrix is not None:
             res_y, res_x = self.matrix.shape; dx, dy = drawable_w / res_x, drawable_h / res_y
@@ -135,14 +147,10 @@ class KinematicTab(QWidget):
         if self.acs_panel: self.acs_panel.set_controller(ctrl); self.update_analysis()
     def clear_acs_ctrl(self):
         if self.acs_panel: self.acs_panel.set_controller(None)
-    def set_shared_camera(self, cam):
-        pass # 현재는 기구학 탭에서 카메라를 직접 쓰지는 않으나 연결 유지용
-    def clear_shared_camera(self):
-        pass
+    def set_shared_camera(self, cam): pass
+    def clear_shared_camera(self): pass
     def stop_polling(self):
-        """종료 시 내부 패널 정지."""
-        if self.acs_panel:
-            self.acs_panel.stop_polling()
+        if self.acs_panel: self.acs_panel.stop_polling()
 
     def _setup_ui(self):
         main_layout = QVBoxLayout(self); main_layout.setContentsMargins(5, 5, 5, 5)
@@ -177,9 +185,7 @@ class KinematicTab(QWidget):
     def _on_sync_params(self):
         spins = self.acs_panel._dof_spins
         for i, name in enumerate(["Tx", "Ty", "Tz", "Rx", "Ry", "Rz"]):
-            val = spins[i].value()
-            # !!! 수정: SYNC 시에 중복 변환을 하지 않고 ACS 패널의 수치 단위를 그대로 가져옴 !!!
-            self.fixed_inputs[name].setValue(val)
+            self.fixed_inputs[name].setValue(spins[i].value())
         self.update_analysis()
 
     def _on_slider_moved_internal(self, val):
@@ -187,12 +193,12 @@ class KinematicTab(QWidget):
         mapped_val = min_v + (max_v - min_v) * (val / 1000.0)
         self.fixed_inputs[axis_name].blockSignals(True); self.fixed_inputs[axis_name].setValue(mapped_val); self.fixed_inputs[axis_name].blockSignals(False)
         self._update_motor_stress_from_fixed()
-        self.map_widget.set_data(None, self.current_1d_range, (0, 1), mapped_val, 0.5, mode)
+        self.map_widget.set_data(None, self.current_1d_range, (0, 1), mapped_val, 0.5, mode, labels=(axis_name, "-"))
 
     def _update_motor_stress_from_fixed(self):
         f = {k: v.value() for k, v in self.fixed_inputs.items()}
-        self.view_3d.set_geometry(self.calc.stage_setup, self.calc.calculate([f['Tx'], f['Ty'], f['Tz']], [f['Rx'], f['Ry'], f['Rz']])[1])
-        cal_pos, _, _, _ = self.calc.calculate([f['Tx'], f['Ty'], f['Tz']], [f['Rx'], f['Ry'], f['Rz']])
+        cal_pos, ball_pos, ok, violations = self.calc.calculate([f['Tx'], f['Ty'], f['Tz']], [f['Rx'], f['Ry'], f['Rz']])
+        if ball_pos is not None: self.view_3d.set_geometry(self.calc.stage_setup, ball_pos)
         if cal_pos is not None:
             for i in range(6): self.motor_bars[i].set_value(cal_pos[i], self.calc.minus_limits[i], self.calc.plus_limits[i])
 
@@ -207,22 +213,23 @@ class KinematicTab(QWidget):
     def update_analysis(self):
         try:
             f = {k: v.value() for k, v in self.fixed_inputs.items()}; t_fixed, r_fixed = [f['Tx'], f['Ty'], f['Tz']], [f['Rx'], f['Ry'], f['Rz']]
+            spins = self.acs_panel._dof_spins; t_curr = [spins[0].value(), spins[1].value(), spins[2].value()]; r_curr = [spins[3].value()*1000.0, spins[4].value()*1000.0, spins[5].value()*1000.0]
             mode = self.combo_plane.currentText(); is_1d = "1D Search" in mode; self.slider_1d.setVisible(is_1d); res = self.spin_res.value(); step_v = self.spin_prec.value()
             if "XY" in mode:
                 matrix = self.calc.get_reachability_matrix('XY', {'tz':f['Tz'], 'rx':f['Rx'], 'ry':f['Ry'], 'rz':f['Rz']}, (-15, 15), (-15, 15), resolution=res)
-                self.map_widget.set_data(matrix, (-15, 15), (-15, 15), t_fixed[0], t_fixed[1], mode)
+                self.map_widget.set_data(matrix, (-15, 15), (-15, 15), t_curr[0], t_curr[1], mode, labels=("Tx", "Ty"))
             elif "XZ" in mode:
                 matrix = self.calc.get_reachability_matrix('XZ', {'ty':f['Ty'], 'rx':f['Rx'], 'ry':f['Ry'], 'rz':f['Rz']}, (-15, 15), (-15, 15), resolution=res)
-                self.map_widget.set_data(matrix, (-15, 15), (-15, 15), t_fixed[0], t_fixed[2], mode)
+                self.map_widget.set_data(matrix, (-15, 15), (-15, 15), t_curr[0], t_curr[2], mode, labels=("Tx", "Tz"))
             elif "RxRy" in mode:
                 matrix = self.calc.get_reachability_matrix('RxRy', {'tx':f['Tx'], 'ty':f['Ty'], 'tz':f['Tz'], 'rz':f['Rz']}, (-50, 50), (-50, 50), resolution=res)
-                self.map_widget.set_data(matrix, (-50, 50), (-50, 50), r_fixed[0], r_fixed[1], mode)
+                self.map_widget.set_data(matrix, (-50, 50), (-50, 50), r_curr[0], r_curr[1], mode, labels=("Rx", "Ry"))
             elif is_1d:
                 axis_name = mode.split(" ")[0]; axis_idx = {"Tx":0, "Ty":1, "Tz":2, "Rx":3, "Ry":4, "Rz":5}[axis_name]
                 min_v, max_v = self.calc.get_axis_limits(axis_idx, t_fixed, r_fixed, step=step_v); self.current_1d_range = (min_v, max_v)
                 curr_val = f[axis_name]
                 if max_v != min_v:
                     ratio = (curr_val - min_v) / (max_v - min_v); self.slider_1d.blockSignals(True); self.slider_1d.setValue(int(np.clip(ratio, 0, 1) * 1000)); self.slider_1d.blockSignals(False)
-                self.map_widget.set_data(None, self.current_1d_range, (0, 1), curr_val, 0.5, mode)
+                self.map_widget.set_data(None, self.current_1d_range, (0, 1), curr_val, 0.5, mode, labels=(axis_name, "-"))
             self._update_motor_stress_from_fixed()
         except Exception as e: log.error(f"Analysis Error: {e}")

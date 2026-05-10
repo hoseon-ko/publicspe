@@ -340,7 +340,7 @@ class KinematicCalc:
             for j, x in enumerate(xs):
                 if plane == 'XY': t[0], t[1] = x, y
                 elif plane == 'XZ': t[0], t[2] = x, y
-                elif plane == 'RxRy': r[0], r[1] = x/1000.0, y/1000.0 # mrad -> rad
+                elif plane == 'RxRy': r[0], r[1] = x, y
                 matrix[i, j] = self.is_reachable(t, r)
         
         return matrix

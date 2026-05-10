@@ -90,11 +90,18 @@ class AcsWorker(QObject):
         try:
             self._api = _Api()
             conn_type, ip, port = self._conn_params
-            if conn_type == "ethernet":
-                self._api.OpenCommEthernetTCP(ip, port)
-            elif conn_type == "simulator":
-                self._api.OpenCommSimulator()
+            self._api.OpenCommSimulator() if conn_type == "simulator" else self._api.OpenCommEthernetTCP(ip, port)
             log.info(f"[ACS Worker] Connected via {conn_type}")
+            
+            # [Safety] 연결 직후 모든 축 초기화 (잔여 모션 종료 + 에러 클리어)
+            try:
+                for i in range(6):
+                    ax = _axis_enum(i)
+                    self._api.Kill(ax)
+                    self._api.FaultAck(ax)
+                log.info("[ACS Worker] Initial hardware reset done (Kill/FaultAck all axes)")
+            except:
+                pass
         except Exception as e:
             log.error(f"[ACS Worker] Connection failed: {e}")
             self.connection_lost.emit()
@@ -133,21 +140,53 @@ class AcsWorker(QObject):
             mstate = int(self._api.GetMotorState(ax))
             is_enabled = bool(mstate & _MST_ENABLE)
 
-            # 이미 원하는 상태라면 중복 명령 방지
             if is_enabled == enable:
                 return
 
-            if enable: 
-                self._api.Enable(ax)
+            was_polling = self._is_polling
+            self._is_polling = False
+
+            if enable:
+                # 1. 에러 상태 초기화 (FaultAck)
+                try:
+                    self._api.FaultAck(ax)
+                except:
+                    pass
+
+                # 2. Enable 시도 (최대 2회)
+                success = False
+                for attempt in range(2):
+                    try:
+                        self._api.Enable(ax)
+                        success = True
+                        break
+                    except Exception as e:
+                        err_msg = str(e)
+                        if "motion is in progress" in err_msg.lower():
+                            log.warning(f"[ACS Worker] Axis {axis} busy, killing motion and retrying... ({attempt+1}/2)")
+                            try:
+                                self._api.Kill(ax)
+                                time.sleep(0.1)
+                            except:
+                                pass
+                        else:
+                            raise e # 다른 에러는 즉시 보고
+                
+                if not success:
+                    log.error(f"[ACS Worker] Axis {axis} Enable failed after retries.")
             else: 
                 self._api.Disable(ax)
+                
+            self._is_polling = was_polling
         except Exception as e:
             log.error(f"[ACS Worker] Enable error (Axis {axis}): {e}")
+            self._is_polling = True
 
     @pyqtSlot()
     def set_enable_all(self):
         for i in range(6): 
             self.set_enable(i, True)
+            time.sleep(0.05) # 지연 시간 확대 (10ms -> 50ms)
 
     @pyqtSlot()
     def set_disable_all(self):
@@ -204,6 +243,7 @@ class AcsStageController(QObject):
 
     def connect(self, ip: str, port: int = DEFAULT_PORT):
         if not _ACS_OK: raise RuntimeError(f"DLL Load Failed: {_ACS_IMPORT_ERROR}")
+        self.stop_polling() # 기존 세션 강제 종료
         self._connected = True
         self._simulator = False
         self._conn_info = ("ethernet", ip, port)
@@ -324,6 +364,9 @@ class AcsStageController(QObject):
             self._worker.deleteLater()
         if self._thread:
             self._thread.quit()
-            self._thread.wait(2000)
+            if not self._thread.wait(2000):
+                log.warning("[ACS Stage] Thread didn't stop gracefully, terminating...")
+                self._thread.terminate()
+                self._thread.wait(500)
         self._worker = None
         self._thread = None
