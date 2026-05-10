@@ -244,9 +244,10 @@ class AcsStageController(QObject):
 
     # ── 상태 조회 (캐시 데이터 사용 - 하드웨어 직접 접근 금지) ────────────────
     
-    def _update_cache(self, positions, states):
-        """워커에서 온 데이터를 내부 캐시에 저장."""
+    def _update_positions(self, positions):
         self._last_positions = positions
+
+    def _update_states(self, states):
         self._last_states = states
 
     def get_position(self, axis: int) -> float:
@@ -293,8 +294,8 @@ class AcsStageController(QObject):
         self._thread.started.connect(self._worker.setup)
         
         # 내부 캐시 업데이트 연결
-        self._worker.positions_updated.connect(self._update_cache)
-        self._worker.states_updated.connect(self._update_cache)
+        self._worker.positions_updated.connect(self._update_positions)
+        self._worker.states_updated.connect(self._update_states)
         
         # 외부 콜백 연결
         self._worker.positions_updated.connect(on_positions)
