@@ -283,8 +283,6 @@ class LiveTab(QMainWindow):
         self._setup_toolbar()
         self._connect_signals()
 
-
-        
         self._log("Live Tab Initialized", "sys")
 
         # #21 독 레이아웃 복원
@@ -297,6 +295,22 @@ class LiveTab(QMainWindow):
         self._centroid_timer.setInterval(200)
         self._centroid_timer.timeout.connect(self._refresh_centroid_labels)
         self._centroid_timer.start()
+
+    def stop_polling(self):
+        """프로그램 종료 시 모든 타이머와 백그라운드 워커를 안전하게 정지."""
+        if hasattr(self, "_centroid_timer") and self._centroid_timer.isActive():
+            self._centroid_timer.stop()
+        
+        if hasattr(self, "_proc_worker"):
+            self._proc_worker.stop()
+            
+        # 자식 패널들 정지
+        for panel in [self.cam_panel, self.motor_panel, self.kimm_z_panel, self.acs_stage_panel]:
+            if hasattr(panel, "stop_polling"):
+                try:
+                    panel.stop_polling()
+                except Exception as e:
+                    print(f"Error stopping panel {type(panel).__name__}: {e}")
 
     # ── 이벤트 필터 (사이드바 더블클릭 → auto-fit) ───────────────────
 

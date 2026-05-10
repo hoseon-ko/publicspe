@@ -135,6 +135,15 @@ class KinematicTab(QWidget):
         if self.acs_panel: self.acs_panel.set_controller(ctrl); self.update_analysis()
     def clear_acs_ctrl(self):
         if self.acs_panel: self.acs_panel.set_controller(None)
+    def set_shared_camera(self, cam):
+        pass # 현재는 기구학 탭에서 카메라를 직접 쓰지는 않으나 연결 유지용
+    def clear_shared_camera(self):
+        pass
+    def stop_polling(self):
+        """종료 시 내부 패널 정지."""
+        if self.acs_panel:
+            self.acs_panel.stop_polling()
+
     def _setup_ui(self):
         main_layout = QVBoxLayout(self); main_layout.setContentsMargins(5, 5, 5, 5)
         self.splitter = QSplitter(Qt.Orientation.Horizontal); self.splitter.setStyleSheet("QSplitter::handle { background-color: #1e293b; width: 2px; }")

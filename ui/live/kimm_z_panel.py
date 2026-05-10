@@ -54,6 +54,13 @@ class KIMMZPanel(QWidget):
         self._build_ui()
         self._load_settings()
 
+    def stop_polling(self):
+        """종료 시 폴링 타이머 정지."""
+        if hasattr(self, "_poll_timer") and self._poll_timer.isActive():
+            self._poll_timer.stop()
+        if self._ctrl:
+            self._ctrl.disconnect()
+
     # ── UI 구성 ───────────────────────────────────────────────────────
 
     def _build_ui(self):

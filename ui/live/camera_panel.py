@@ -92,6 +92,15 @@ class CameraControlPanel(QWidget):
         self._load_settings()
         self._set_connected(False)
 
+    def stop_polling(self):
+        """종료 시 온도 폴링 스레드 및 워커 중지."""
+        if self._temp_thread and self._temp_thread.isRunning():
+            self._temp_thread.stop()
+            self._temp_thread.wait()
+        if self._cmd_thread and self._cmd_thread.isRunning():
+            self._cmd_thread.quit()
+            self._cmd_thread.wait()
+
     # ── UI 빌드 ───────────────────────────────────────────────────────
 
     def _build_ui(self):

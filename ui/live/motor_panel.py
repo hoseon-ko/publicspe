@@ -578,6 +578,15 @@ class MotorPanel(QWidget):
             except Exception as e:
                 self.log_message.emit(f"정지 오류: {e}")
 
+    def stop_polling(self):
+        """종료 시 컨트롤러 폴링 및 연결 정지."""
+        if self._ctrl:
+            try:
+                self._ctrl.stop_polling()
+                self._ctrl.disconnect()
+            except Exception:
+                pass
+
     # ── #18 스텝 값 영속화 ────────────────────────────────────────────
 
     def _restore_step_settings(self):

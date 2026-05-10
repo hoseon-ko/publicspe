@@ -553,12 +553,19 @@ class MainWindow(QMainWindow):
                     print(f"Error restoring settings for {type(tab).__name__}: {e}")
 
     def closeEvent(self, event):
-        """프로그램 종료 시 폴링 스레드 및 타이머 안전 종료"""
+        """프로그램 종료 시 모든 탭의 폴링/타이머/워커를 안전하게 정지"""
         try:
-            if hasattr(self.live_tab, "stop_polling"):
-                self.live_tab.stop_polling()
-            if hasattr(self.kin_tab, "acs_panel") and self.kin_tab.acs_panel:
-                self.kin_tab.acs_panel.stop_polling()
+            # 주요 탭들 순회하며 정리 (Live, Kinematic 등)
+            all_tabs = [
+                self.live_tab, self.acq_tab, self.scan_tab, 
+                self.af_tab, self.kin_tab, self.analysis_tab, self.deep_align_tab
+            ]
+            for tab in all_tabs:
+                if hasattr(tab, "stop_polling"):
+                    try:
+                        tab.stop_polling()
+                    except Exception as e:
+                        print(f"Error stopping polling for {type(tab).__name__}: {e}")
         except Exception as e:
             print(f"Close cleanup error: {e}")
             

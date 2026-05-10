@@ -14,7 +14,7 @@ import signal
 import traceback
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtGui import QFont
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QTimer, Qt, QMetaObject
 
 from theme.dark_theme import DARK_THEME_QSS
 from ui.main_window import MainWindow
@@ -62,11 +62,11 @@ def main():
     window.show()
 
     # ── Ctrl+C (SIGINT) 처리 ─────────────────────────────────────────
-    # Python SIGINT가 Qt 이벤트 루프를 우회하므로, 주기적으로 Python 체크포인트를
-    # 강제 실행해서 KeyboardInterrupt → window.close() 흐름으로 연결
+    # signal 핸들러는 별도 스레드에서 실행될 수 있으므로, 
+    # 직접 UI를 건드리지 않고 플래그만 세우거나 가벼운 quit 요청만 합니다.
     def _sigint_handler(*_):
-        window.close()
-        app.quit()
+        # app.quit()은 Thread-Safe 하므로 안전하게 호출 가능
+        QMetaObject.invokeMethod(app, "quit", Qt.ConnectionType.QueuedConnection)
 
     signal.signal(signal.SIGINT, _sigint_handler)
 
@@ -80,6 +80,12 @@ def main():
     app.aboutToQuit.connect(window.save_all_settings)
 
     exit_code = app.exec()
+    
+    # ── 종료 시 리소스 명시적 해제 (Thread-Safe Shutdown) ─────────────────
+    window.hide()
+    window.deleteLater()
+    app.processEvents() # deleteLater 처리를 위한 이벤트 루프 한 번 더 실행
+    
     app_logger.info(f"SpeAnalyze Application Exited with code {exit_code}.")
     sys.exit(exit_code)
 
