@@ -108,7 +108,7 @@ class AcsWorker(QObject):
             return
 
         # 2. 타이머 시작
-        self._timer = QTimer()
+        self._timer = QTimer(self)
         self._timer.timeout.connect(self._poll)
         self._timer.setInterval(200)
         self._timer.start()
@@ -211,13 +211,20 @@ class AcsWorker(QObject):
     def stop_all(self):
         for i in range(6): self.stop_axis(i)
 
+    @pyqtSlot()
     def stop(self):
         self._is_polling = False
-        if self._timer: self._timer.stop()
+        if self._timer:
+            self._timer.stop()
+            self._timer.deleteLater()
+            self._timer = None
 
 
 class AcsStageController(QObject):
     """ACS SPiiPlus 제어용 상위 인터페이스 (Thread-Safe)"""
+    positions_updated = pyqtSignal(list)
+    states_updated    = pyqtSignal(list)
+    connection_lost   = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -339,34 +346,38 @@ class AcsStageController(QObject):
 
     # ── 워커 생명주기 ────────────────────────────────────────────────
 
-    def start_polling(self, on_positions, on_states, on_lost):
+    def start_polling(self, on_positions=None, on_states=None, on_lost=None):
         if not self._connected: return
-        self.stop_polling()
+        
+        if on_positions: self.positions_updated.connect(on_positions)
+        if on_states: self.states_updated.connect(on_states)
+        if on_lost: self.connection_lost.connect(on_lost)
+
+        if self._thread and self._thread.isRunning():
+            return
+
         self._thread = QThread()
         self._worker = AcsWorker()
         self._worker.set_connection_params(*self._conn_info)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.setup)
         
-        # 내부 캐시 업데이트 연결
         self._worker.positions_updated.connect(self._update_positions)
         self._worker.states_updated.connect(self._update_states)
         
-        # 외부 콜백 연결
-        self._worker.positions_updated.connect(on_positions)
-        self._worker.states_updated.connect(on_states)
-        self._worker.connection_lost.connect(on_lost)
+        self._worker.positions_updated.connect(self.positions_updated.emit)
+        self._worker.states_updated.connect(self.states_updated.emit)
+        self._worker.connection_lost.connect(self.connection_lost.emit)
         self._thread.start()
 
     def stop_polling(self):
         if self._worker:
-            self._worker.stop()
-            self._worker.deleteLater()
+            from PyQt6.QtCore import QMetaObject, Qt
+            QMetaObject.invokeMethod(self._worker, "stop", Qt.ConnectionType.BlockingQueuedConnection)
         if self._thread:
             self._thread.quit()
-            if not self._thread.wait(2000):
-                log.warning("[ACS Stage] Thread didn't stop gracefully, terminating...")
-                self._thread.terminate()
-                self._thread.wait(500)
+            self._thread.wait()
+        self._thread = None
+        self._worker = None
         self._worker = None
         self._thread = None

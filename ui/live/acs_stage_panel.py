@@ -283,25 +283,26 @@ class AcsStagePanel(QWidget):
         self._ctrl_ref: list[AcsStageController | None] = [ctrl]
         self._move_btns: list[QPushButton] = []
         self._axis_rows: list[_AxisRow] = []
-        self._motion_widgets: list[QWidget] = [] # 잠금 대상 위젯 리스트
+        self._motion_widgets: list[QWidget] = [] 
         self._settings = QSettings("SpeAnalyze", "MainWindow")
         self._calc = KinematicCalc()
         self._lbl_cur_dof: dict[str, QLabel] = {}
 
         self._kin_worker: _KinematicMoveWorker | None = None
 
-        # 5분 자동 서보 OFF 타이머 (마지막 이동 완료 후 대기 중 안전 해제)
         self._auto_disable_timer = QTimer(self)
         self._auto_disable_timer.setSingleShot(True)
         self._auto_disable_timer.setInterval(5 * 60 * 1000)
         self._auto_disable_timer.timeout.connect(self._on_auto_disable)
 
-        # 실시간 포즈 계산용 (마지막 계산된 결과 저장)
-        self._last_actual_dof: Optional[np.ndarray] = None
-        self._is_fwd_calculating = False  # 쓰레드 중첩 방지 플래그
+        self._last_actual_dof = None
+        self._is_fwd_calculating = False
 
         self._build_ui()
         self._load_settings()
+
+        if ctrl:
+            QTimer.singleShot(100, lambda: self.set_controller(ctrl))
 
     # ── UI 구성 ───────────────────────────────────────────────────────
 

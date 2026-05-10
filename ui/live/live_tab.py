@@ -20,6 +20,7 @@ from datetime import datetime
 from typing import Optional
 
 import numpy as np
+from core.motor.acs_stage import AcsStageController
 from PyQt6.QtWidgets import (
     QMainWindow, QDockWidget, QToolBar,
     QScrollArea, QWidget, QVBoxLayout, QHBoxLayout,

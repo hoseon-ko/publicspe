@@ -241,7 +241,7 @@ class KinematicTab(QWidget):
     def update_analysis(self):
         try:
             f = {k: v.value() for k, v in self.fixed_inputs.items()}; t_fixed, r_fixed = [f['Tx'], f['Ty'], f['Tz']], [f['Rx'], f['Ry'], f['Rz']]
-            spins = self.acs_panel._dof_spins; t_curr = [spins[0].value(), spins[1].value(), spins[2].value()]; r_curr = [spins[3].value()*1000.0, spins[4].value()*1000.0, spins[5].value()*1000.0]
+            spins = self.acs_panel._dof_spins; t_curr = [spins[0].value(), spins[1].value(), spins[2].value()]; r_curr = [spins[3].value(), spins[4].value(), spins[5].value()]
             mode = self.combo_plane.currentText(); is_1d = "1D Search" in mode; self.container_1d.setVisible(is_1d); self.container_2d.setVisible(not is_1d); res = self.spin_res.value(); step_v = self.spin_prec.value()
             if "XY" in mode:
                 matrix = self.calc.get_reachability_matrix('XY', {'tz':f['Tz'], 'rx':f['Rx'], 'ry':f['Ry'], 'rz':f['Rz']}, (-15, 15), (-15, 15), resolution=res)
