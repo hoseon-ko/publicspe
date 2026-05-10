@@ -58,7 +58,9 @@ DEFAULT_PORT = 700
 
 # GetMotorState() 결과의 LSB가 ACSC_MST_ENABLE(모터 활성화) 비트.
 # ACS SDK 헤더의 ACSC_MST_ENABLE = 0x00000001 정의를 그대로 사용.
-_MST_ENABLE = 0x1
+# GetMotorState() 결과 비트 정의
+_MST_ENABLE = 0x01  # 모터 활성화 (Servo ON)
+_MST_INPOS  = 0x10  # In-Position (이동 완료)
 
 
 def is_available() -> bool:
@@ -100,7 +102,13 @@ class _PollingWorker(QObject):
                 for i in range(6):
                     ax = _axis_enum(i)
                     positions.append(float(self._api.GetFPosition(ax)))
-                    states.append(bool(int(self._api.GetMotorState(ax)) & _MST_ENABLE))
+                    
+                    # 상세 상태 비트 체크
+                    mstate = int(self._api.GetMotorState(ax))
+                    states.append({
+                        "enabled": bool(mstate & _MST_ENABLE),
+                        "in_pos":  bool(mstate & _MST_INPOS)
+                    })
                 fail = 0
                 self.positions_updated.emit(positions)
                 self.states_updated.emit(states)

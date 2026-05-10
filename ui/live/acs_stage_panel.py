@@ -158,12 +158,19 @@ class _AxisRow:
     def update_position(self, pos: float):
         self.lbl_pos.setText(f"{pos:+.4f} mm")
 
-    def update_state(self, state: dict):
-        """서보 상태 및 In-Position 상태 업데이트 (state: {'enabled': bool, 'in_pos': bool})"""
-        enabled = state.get("enabled", False)
-        in_pos  = state.get("in_pos", False)
-
-        # Servo Status
+    def update_state(self, state: dict | bool):
+        """서보 상태 및 In-Position 상태 업데이트.
+        state 가 dict 일 경우 {'enabled': bool, 'in_pos': bool} 정보를 사용.
+        bool 일 경우 enabled 상태로만 간주 (하위 호환).
+        """
+        if isinstance(state, dict):
+            enabled = state.get("enabled", False)
+            in_pos  = state.get("in_pos", False)
+        else:
+            enabled = bool(state)
+            in_pos  = False
+            
+        # Servo Status 표시
         if enabled:
             self.lbl_servo.setText("ENABLED")
             self.lbl_servo.setStyleSheet("color: #14b8a6; font-size: 11px; font-weight: bold; border: 1px solid #14b8a6; border-radius: 4px; background: rgba(20,184,166,0.1);")
@@ -171,7 +178,7 @@ class _AxisRow:
             self.lbl_servo.setText("OFF")
             self.lbl_servo.setStyleSheet("color: #64748b; font-size: 11px; font-weight: bold; border: 1px solid #334155; border-radius: 4px;")
 
-        # Move Done (In-Position)
+        # Move Done (In-Position) LED 표시
         color = "#10b981" if in_pos else "#304060" # 완료 시 녹색, 이동 중 어두운 색
         self.lbl_done.setStyleSheet(f"color:{color}; font-size:16px;")
 
