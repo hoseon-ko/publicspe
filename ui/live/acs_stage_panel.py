@@ -181,10 +181,14 @@ class _AxisRow:
             self.lbl_servo.setStyleSheet("color: #64748b; font-size: 11px; font-weight: bold; border: 1px solid #334155; border-radius: 4px;")
 
         # Move Done (Not Moving) LED 표시
-        done_color = "#10b981" if (not moving) else "#304060"
+        # - 이동 중(moving): 주황색 (#f59e0b) -> "작업 중"
+        # - 정지(not moving): 초록색 (#10b981) -> "완료"
+        done_color = "#10b981" if (not moving) else "#f59e0b"
         self.lbl_done.setStyleSheet(f"color:{done_color}; font-size:16px;")
 
         # In-Position LED 표시
+        # - 안착 완료: 초록색
+        # - 안착 전/범위 밖: 어두운 색
         inpos_color = "#10b981" if in_pos else "#304060"
         self.lbl_inpos.setStyleSheet(f"color:{inpos_color}; font-size:16px;")
 
@@ -713,7 +717,7 @@ class AcsStagePanel(QWidget):
     def _on_states(self, states: list):
         for i, row in enumerate(self._axis_rows):
             if i < len(states):
-                # states[i] 는 {'enabled': bool, 'in_pos': bool} 형태의 dict
+                # states[i] 는 {'enabled': bool, 'moving': bool, 'in_pos': bool} 형태의 dict
                 row.update_state(states[i])
 
     def _on_lost(self):

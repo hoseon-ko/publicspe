@@ -8,6 +8,7 @@ main.py
   Tab 3 — SPE Analysis  : SpeAnalyze 전체 기능 (ROI / Profile / Histogram)
 """
 
+import os
 import sys
 import signal
 import traceback
@@ -43,6 +44,9 @@ sys.excepthook = _global_exception_handler
 
 
 def main():
+    # DirectWrite 폰트 관련 무해한 경고 로그 숨기기
+    os.environ["QT_LOGGING_RULES"] = "qt.qpa.fonts=false"
+    
     from core.logger import clear_ui_callbacks
     clear_ui_callbacks()
     sys_logger.info("SpeAnalyze Application Started.")

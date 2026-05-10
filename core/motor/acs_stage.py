@@ -126,7 +126,7 @@ class _PollingWorker(QObject):
                 if fail >= 5:
                     self.connection_lost.emit()
                     break
-            QThread.msleep(300)
+            QThread.msleep(200)
 
     def stop(self):
         self._running = False
