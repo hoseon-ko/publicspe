@@ -120,54 +120,56 @@ class _AxisRow:
         self._ctrl_ref = ctrl_ref
         self._log = log_cb
 
-        row = idx + 1
+        # 1. Axis Name
+        self.lbl_name = QLabel(f"{AXIS_LABELS[idx]}")
+        self.lbl_name.setStyleSheet(lbl(C_ACCENT, bold=True, mono=True))
+        grid.addWidget(self.lbl_name, idx + 1, 0)
 
-        # 레이블
-        lbl_obj = QLabel(AXIS_LABELS[idx])
-        lbl_obj.setStyleSheet(lbl(C_ACCENT, bold=True))
-        lbl_obj.setFixedWidth(40)
-        grid.addWidget(lbl_obj, row, 0)
-
-        # 위치 표시
+        # 2. Position
         self.lbl_pos = QLabel("---")
-        self.lbl_pos.setStyleSheet(lbl(C_TEXT, mono=True))
         self.lbl_pos.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        grid.addWidget(self.lbl_pos, row, 1)
+        self.lbl_pos.setStyleSheet(lbl(C_TEXT, mono=True))
+        grid.addWidget(self.lbl_pos, idx + 1, 1)
 
-        # 모터 상태 인디케이터
-        self.lbl_state = QLabel("●")
-        self.lbl_state.setStyleSheet("color:#304060; font-size:13px;")
-        self.lbl_state.setFixedWidth(26)
-        grid.addWidget(self.lbl_state, row, 2)
+        unit = QLabel("mm")
+        unit.setStyleSheet(lbl(C_TEXT_DEAD, size="10px"))
+        grid.addWidget(unit, idx + 1, 2)
 
-        # 1. 서보 상태 (Servo Status)
+        # 3. Servo Status
         self.lbl_servo = QLabel("OFF")
-        self.lbl_servo.setFixedWidth(50)
+        self.lbl_servo.setFixedWidth(60)
         self.lbl_servo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_servo.setStyleSheet("color: #64748b; font-size: 11px; font-weight: bold; border: 1px solid #334155; border-radius: 4px;")
-        grid.addWidget(self.lbl_servo, row, 3)
+        grid.addWidget(self.lbl_servo, idx + 1, 3)
 
-        # 2. 이동 완료 상태 (Move Done / In-Position LED)
+        # 4. Done (Not Moving) LED
         self.lbl_done = QLabel("●")
         self.lbl_done.setFixedWidth(40)
         self.lbl_done.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_done.setStyleSheet("color:#1e293b; font-size:16px;")
-        self.lbl_done.setToolTip("MOVE DONE (In-Position)")
-        grid.addWidget(self.lbl_done, row, 4)
+        self.lbl_done.setStyleSheet("color:#304060; font-size:16px;")
+        self.lbl_done.setToolTip("Move Done (Not In-Motion)")
+        grid.addWidget(self.lbl_done, idx + 1, 4)
+
+        # 5. In-Position LED
+        self.lbl_inpos = QLabel("●")
+        self.lbl_inpos.setFixedWidth(40)
+        self.lbl_inpos.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_inpos.setStyleSheet("color:#304060; font-size:16px;")
+        self.lbl_inpos.setToolTip("In-Position (Settled)")
+        grid.addWidget(self.lbl_inpos, idx + 1, 5)
 
     def update_position(self, pos: float):
         self.lbl_pos.setText(f"{pos:+.4f} mm")
 
     def update_state(self, state: dict | bool):
-        """서보 상태 및 In-Position 상태 업데이트.
-        state 가 dict 일 경우 {'enabled': bool, 'in_pos': bool} 정보를 사용.
-        bool 일 경우 enabled 상태로만 간주 (하위 호환).
-        """
+        """서보 상태 및 Done/In-Pos 상태 업데이트."""
         if isinstance(state, dict):
             enabled = state.get("enabled", False)
-            in_pos  = state.get("in_pos", False)
+            moving  = state.get("moving",  False)
+            in_pos  = state.get("in_pos",  False)
         else:
             enabled = bool(state)
+            moving  = False
             in_pos  = False
             
         # Servo Status 표시
@@ -178,9 +180,13 @@ class _AxisRow:
             self.lbl_servo.setText("OFF")
             self.lbl_servo.setStyleSheet("color: #64748b; font-size: 11px; font-weight: bold; border: 1px solid #334155; border-radius: 4px;")
 
-        # Move Done (In-Position) LED 표시
-        color = "#10b981" if in_pos else "#304060" # 완료 시 녹색, 이동 중 어두운 색
-        self.lbl_done.setStyleSheet(f"color:{color}; font-size:16px;")
+        # Move Done (Not Moving) LED 표시
+        done_color = "#10b981" if (not moving) else "#304060"
+        self.lbl_done.setStyleSheet(f"color:{done_color}; font-size:16px;")
+
+        # In-Position LED 표시
+        inpos_color = "#10b981" if in_pos else "#304060"
+        self.lbl_inpos.setStyleSheet(f"color:{inpos_color}; font-size:16px;")
 
     def _ctrl(self) -> AcsStageController | None:
         return self._ctrl_ref[0]
@@ -378,7 +384,7 @@ class AcsStagePanel(QWidget):
         grid.setContentsMargins(0, 0, 0, 0)
 
         # 헤더 (조작 버튼 제거 반영)
-        headers = ["Axis", "Position", "", "Servo", "Done"]
+        headers = ["Axis", "Position", "", "Servo", "Done", "InPos"]
         for col, txt in enumerate(headers):
             lbl_hdr = QLabel(txt)
             lbl_hdr.setStyleSheet(lbl(C_TEXT_DIM, size="12px", mono=True))

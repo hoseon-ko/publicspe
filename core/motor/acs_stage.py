@@ -111,10 +111,11 @@ class _PollingWorker(QObject):
                     is_inpos   = bool(mstate & _MST_INPOS)
                     is_moving  = bool(mstate & _MST_INMOTION)
                     
-                    # 최종 '이동 완료' 판정: 움직이지 않고(Move Done) AND 인포지션(In-Position)인 경우
+                    # 최종 상태 분리 전송
                     states.append({
                         "enabled": is_enabled,
-                        "in_pos":  (not is_moving) and is_inpos
+                        "moving":  is_moving,
+                        "in_pos":  is_inpos
                     })
                 fail = 0
                 self.positions_updated.emit(positions)
