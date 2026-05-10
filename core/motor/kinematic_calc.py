@@ -55,9 +55,9 @@ DEFAULT_STAGE_SETUP_POS = np.array([
 ], dtype=float)
 
 DEFAULT_STAGE_ENCODER_POS = np.array([
-    [   0.0,   1277.5,  -1513.68 ], # Stage 1 (X, Y, Z)
-    [ 804.45,     0.0,  -1592.31 ], # Stage 2 (X, Y, Z)
-    [   0.0,   1052.41, -1433.52 ], # Stage 3 (X, Y, Z)
+    [ 1277.5,  -1513.68, 0], # Stage 1 (X, Y, Z)
+    [ 0.0,  -1592.31, 804.45], # Stage 2 (X, Y, Z)
+    [ 1052.41, -1433.52, 0], # Stage 3 (X, Y, Z)
 ], dtype=float)
  
 DEFAULT_DIRECTION = np.array([
@@ -162,7 +162,8 @@ class KinematicCalc:
             ])
 
             ok, violations = self.check_interlock(cal_pos)
-            return cal_pos, ball, ok, violations
+            
+            return np.round(cal_pos, 4), ball, ok, violations
 
         except Exception as e:
             log.error(f"[Kinematic] calculate error: {e}")
@@ -184,28 +185,32 @@ class KinematicCalc:
         if not _ALGO_OK: return None
         
         try:
+            motor_positions = np.round(motor_positions, 4)
             enc = self.encoder_pos
             ssp3 = self.stage_setup.reshape(3, 3)
             d = self.direction
             piv = pivot_override if pivot_override is not None else self.pivot
-            
+            mapping = self._mapping.reshape(3, 3)
             # 1. 모터 위치 → 볼 위치 (b1, b2, b3) 역산
             # b = [X1, Y1, Z1, X2, Y2, Z2, X3, Y3, Z3]
             b = np.zeros(9)
-            # Stage 1: Y1(0), Z1(1)
-            b[0] = ssp3[0, 0] # X 고정
-            b[1] = (motor_positions[0] - enc[0, 1]) / d[0, 1] + ssp3[0, 1] # Y
-            b[2] = (motor_positions[1] - enc[0, 2]) / d[0, 2] + ssp3[0, 2] # Z
-            
+            # Stage 1: Y1(0), Z1(1) 
+            # 0 0 1
+            b[0] = (motor_positions[0] - enc[0, 0]) * d[0, 0] + ssp3[0, 0] if mapping[0,0] == 0 else ssp3[0, 0] # X
+            b[1] = (motor_positions[1] - enc[0, 1]) * d[0, 1] + ssp3[0, 1] if mapping[0,1] == 0 else ssp3[0, 1] # Y
+            b[2] = (motor_positions[0] - enc[0, 2]) * d[0, 2] + ssp3[0, 2] if mapping[0,2] == 0 else ssp3[0, 2] # Z
+        
+            # 1 0 0
             # Stage 2: X1(2), Z2(3)
-            b[3] = (motor_positions[2] - enc[1, 0]) / d[1, 0] + ssp3[1, 0] # X
-            b[4] = ssp3[1, 1] # Y 고정
-            b[5] = (motor_positions[3] - enc[1, 2]) / d[1, 2] + ssp3[1, 2] # Z
+            b[3] = (motor_positions[2] - enc[1, 0]) * d[1, 0] + ssp3[1, 0] if mapping[1,0] == 0 else ssp3[1, 0] # X
+            b[4] = (motor_positions[3] - enc[1, 1]) * d[1, 1] + ssp3[1, 1] if mapping[1,1] == 0 else ssp3[1, 1] # Y
+            b[5] = (motor_positions[2] - enc[1, 2]) * d[1, 2] + ssp3[1, 2] if mapping[1,2] == 0 else ssp3[1, 2] # Z
             
+            # 0 0 1
             # Stage 3: Y2(4), Z3(5)
-            b[6] = ssp3[2, 0] # X 고정
-            b[7] = (motor_positions[4] - enc[2, 1]) / d[2, 1] + ssp3[2, 1] # Y
-            b[8] = (motor_positions[5] - enc[2, 2]) / d[2, 2] + ssp3[2, 2] # Z
+            b[6] = (motor_positions[4] - enc[2, 0]) * d[2, 0] + ssp3[2, 0] if mapping[2,0] == 0 else ssp3[2, 0] # X
+            b[7] = (motor_positions[5] - enc[2, 1]) * d[2, 1] + ssp3[2, 1] if mapping[2,1] == 0 else ssp3[2, 1] # Y
+            b[8] = (motor_positions[4] - enc[2, 2]) * d[2, 2] + ssp3[2, 2] if mapping[2,2] == 0 else ssp3[2, 2] # Z
             
             if x0 is None:
                 x0 = np.zeros(6)

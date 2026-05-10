@@ -27,7 +27,7 @@ from core.motor.acs_stage import AcsStageController, AXIS_LABELS, DEFAULT_PORT
 from core.motor.kinematic_calc import KinematicCalc, is_available as kinematic_available
 from ui.widgets.collapsible_section import CollapsibleSection
 from theme.styles import (
-    C_ACCENT, C_DANGER, C_WARN, C_BORDER, C_BG_DEEP, C_BG_DARK, C_TEXT, C_TEXT_DIM,
+    C_ACCENT, C_DANGER, C_WARN, C_BORDER, C_BG_DEEP, C_BG_DARK, C_TEXT, C_TEXT_DIM, C_TEXT_DEAD,
     Fonts, Sizes, BTN_SMALL, SPIN_STYLE, EDIT_STYLE, CHECKBOX_STYLE, grp_style, lbl
 )
 
@@ -51,11 +51,14 @@ _C_DANGER = C_DANGER
 _C_BORDER = C_BORDER
 
 
-# ── 설정 키 ──────────────────────────────────────────────────────────
-
-_SETTINGS_KEY_IP  = "acs/ip"
-_SETTINGS_KEY_PORT = "acs/port"
-_SETTINGS_KEY_DRY  = "acs/dry_run"
+_SETTINGS_KEY_IP          = "acs/ip"
+_SETTINGS_KEY_PORT        = "acs/port"
+_SETTINGS_KEY_DRY         = "acs/dry_run"
+_SETTINGS_KEY_KIN_JOG_T   = "acs/kin_jog_tra"   # DOF별 Jog Step (mm)
+_SETTINGS_KEY_KIN_JOG_R   = "acs/kin_jog_rot"   # DOF별 Jog Step (mrad)
+_SETTINGS_SEC_CONN_COL    = "acs/sec_conn_collapsed"
+_SETTINGS_SEC_AXIS_COL    = "acs/sec_axis_collapsed"
+_SETTINGS_SEC_KIN_COL     = "acs/sec_kin_collapsed"
 
 
 def _btn(color: str) -> str:
@@ -812,7 +815,7 @@ class AcsStagePanel(QWidget):
                 return
 
 
-        step = self.kin_jog_step.value()
+        step = self._dof_step_spins[index].value()
         delta = sign * step
         spin = self._dof_spins[index]
         
@@ -908,6 +911,12 @@ class AcsStagePanel(QWidget):
     def _save_settings(self):
         self._settings.setValue(_SETTINGS_KEY_IP,   self.edit_ip.text().strip())
         self._settings.setValue(_SETTINGS_KEY_PORT,  self.edit_port.text().strip())
+        
+        # 섹션 접힘 상태 저장
+        self._settings.setValue(_SETTINGS_SEC_CONN_COL, self.sec_conn.is_collapsed())
+        self._settings.setValue(_SETTINGS_SEC_AXIS_COL, self.sec_axis.is_collapsed())
+        self._settings.setValue(_SETTINGS_SEC_KIN_COL,  self.sec_kin.is_collapsed())
+
         self._settings.setValue(_SETTINGS_KEY_DRY,   self.check_dry.isChecked())
         self._settings.setValue("acs/settle_ms",    self.spin_settle.value())
         
@@ -918,6 +927,12 @@ class AcsStagePanel(QWidget):
     def _load_settings(self):
         self.edit_ip.setText(self._settings.value(_SETTINGS_KEY_IP,   "10.0.0.100"))
         self.edit_port.setText(self._settings.value(_SETTINGS_KEY_PORT, str(DEFAULT_PORT)))
+        
+        # 섹션 접힘 상태 복원
+        self.sec_conn.set_collapsed(str(self._settings.value(_SETTINGS_SEC_CONN_COL, "false")).lower() == "true")
+        self.sec_axis.set_collapsed(str(self._settings.value(_SETTINGS_SEC_AXIS_COL, "false")).lower() == "true")
+        self.sec_kin.set_collapsed(str(self._settings.value(_SETTINGS_SEC_KIN_COL, "false")).lower() == "true")
+
         self.check_dry.setChecked(self._settings.value(_SETTINGS_KEY_DRY, False, type=bool))
         self.spin_settle.setValue(self._settings.value("acs/settle_ms", 500, type=int))
         
