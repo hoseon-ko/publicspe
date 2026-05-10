@@ -17,7 +17,6 @@ from PyQt6.QtGui import QFont
 from PyQt6.QtCore import QTimer
 
 from theme.dark_theme import DARK_THEME_QSS
-#from ui.histogram_range_widget import HistogramRangeWidget
 from ui.main_window import MainWindow
 from core.spe_reader import SpeFile
 from core.logger import app_logger, sys_logger

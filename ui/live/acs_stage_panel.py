@@ -311,9 +311,9 @@ class AcsStagePanel(QWidget):
         root.addWidget(self.sec_conn)
 
         # 2. Axes Status
-        self.sec_axes = CollapsibleSection("6-AXIS POSITIONS", accent=C_DANGER)
-        self._build_axis_group(self.sec_axes.content_layout())
-        root.addWidget(self.sec_axes)
+        self.sec_axis = CollapsibleSection("6-AXIS POSITIONS", accent=C_DANGER)
+        self._build_axis_group(self.sec_axis.content_layout())
+        root.addWidget(self.sec_axis)
 
         # 3. Global Control
         self.sec_global = CollapsibleSection("GLOBAL CONTROL", accent=C_ACCENT)
