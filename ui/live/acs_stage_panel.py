@@ -58,6 +58,7 @@ _SETTINGS_KEY_KIN_JOG_T   = "acs/kin_jog_tra"   # DOF별 Jog Step (mm)
 _SETTINGS_KEY_KIN_JOG_R   = "acs/kin_jog_rot"   # DOF별 Jog Step (mrad)
 _SETTINGS_SEC_CONN_COL    = "acs/sec_conn_collapsed"
 _SETTINGS_SEC_AXIS_COL    = "acs/sec_axis_collapsed"
+_SETTINGS_SEC_GLOBAL_COL  = "acs/sec_global_collapsed"
 _SETTINGS_SEC_KIN_COL     = "acs/sec_kin_collapsed"
 
 
@@ -280,6 +281,7 @@ class AcsStagePanel(QWidget):
         self._ctrl_ref: list[AcsStageController | None] = [None]
         self._move_btns: list[QPushButton] = []
         self._axis_rows: list[_AxisRow] = []
+        self._motion_widgets: list[QWidget] = [] # 잠금 대상 위젯 리스트
         self._settings = QSettings("SpeAnalyze", "MainWindow")
         self._calc = KinematicCalc()
         self._lbl_cur_dof: dict[str, QLabel] = {}
@@ -294,6 +296,7 @@ class AcsStagePanel(QWidget):
 
         # 실시간 포즈 계산용 (마지막 계산된 결과 저장)
         self._last_actual_dof: Optional[np.ndarray] = None
+        self._is_fwd_calculating = False  # 쓰레드 중첩 방지 플래그
 
         self._build_ui()
         self._load_settings()
@@ -438,10 +441,6 @@ class AcsStagePanel(QWidget):
 
         unavail = not kinematic_available()
 
-
-        # 상단 공통 Step 제거 (각 행으로 분산)
-        # ─────────────────────────────────────────────────────────────
-        
         # Trans / Rotate 입력 그리드 + Jog 버튼
         grid = QGridLayout()
         grid.setSpacing(6)
@@ -507,6 +506,7 @@ class AcsStagePanel(QWidget):
             btn_m.setEnabled(not unavail)
             btn_m.clicked.connect(lambda _, idx=i: self._on_kin_jog(idx, -1))
             self._move_btns.append(btn_m)
+            self._motion_widgets.append(btn_m) # 잠금 리스트 추가
             grid.addWidget(btn_m, grid_row, 4)
 
             # 6. Plus Button
@@ -516,6 +516,7 @@ class AcsStagePanel(QWidget):
             btn_p.setEnabled(not unavail)
             btn_p.clicked.connect(lambda _, idx=i: self._on_kin_jog(idx, 1))
             self._move_btns.append(btn_p)
+            self._motion_widgets.append(btn_p) # 잠금 리스트 추가
             grid.addWidget(btn_p, grid_row, 5)
 
         lay.addLayout(grid)
@@ -540,6 +541,9 @@ class AcsStagePanel(QWidget):
         self.btn_kin_move.setStyleSheet(_btn(C_ACCENT))
         self.btn_kin_move.setEnabled(False)
         self._move_btns.append(self.btn_kin_move)
+        self._motion_widgets.append(self.btn_kin_move) # 잠금 리스트 추가
+        self._motion_widgets.append(self.btn_kin_calc) # 계산 버튼도 포함
+        self._motion_widgets.append(self.btn_sync_get_to_set) # 싱크 버튼도 포함
         self.btn_kin_move.clicked.connect(self._on_kin_move)
 
         row_btn.addWidget(self.btn_kin_calc, 1)
@@ -562,8 +566,6 @@ class AcsStagePanel(QWidget):
 
         # 마지막 계산된 calPos 보관
         self._last_cal_pos = None
-
-
 
         # SETTINGS (Dry Run, Settle Time)
         lay.setContentsMargins(4, 8, 4, 8)
@@ -590,8 +592,6 @@ class AcsStagePanel(QWidget):
         row_set.addWidget(lbl_set)
         row_set.addWidget(self.spin_settle)
         lay.addLayout(row_set)
-
-
 
     # ── 연결 / 해제 ────────────────────────────────────────────────────
 
@@ -675,6 +675,10 @@ class AcsStagePanel(QWidget):
         
         # [Forward Kinematics] 실시간 DOF 계산 (모든 축 수신 시)
         if all(p is not None for p in positions[:6]):
+            if self._is_fwd_calculating:
+                return # 이미 계산 중이면 스킵
+            
+            self._is_fwd_calculating = True
             def run_fwd():
                 try:
                     motor_arr = np.array(positions[:6], dtype=float)
@@ -683,7 +687,11 @@ class AcsStagePanel(QWidget):
                         # res: [Rx, Ry, Rz, Tx, Ty, Tz]
                         self._last_actual_dof = res
                         self._update_cur_dof_ui(res)
-                except: pass
+                except: 
+                    pass
+                finally:
+                    self._is_fwd_calculating = False # 계산 완료 후 플래그 해제
+                    
             threading.Thread(target=run_fwd, daemon=True).start()
 
     def _on_sync_get_to_set(self):
@@ -730,6 +738,13 @@ class AcsStagePanel(QWidget):
         self.acs_disconnected.emit()
 
     # ── 전체 제어 ─────────────────────────────────────────────────────
+
+    def _set_motion_locked(self, locked: bool):
+        """이동 관련 위젯들을 일괄 비활성화/활성화."""
+        for w in self._motion_widgets:
+            w.setEnabled(not locked)
+        # CALC 버튼은 이동 중이 아닐 때만 켜짐
+        self.btn_kin_calc.setEnabled(not locked)
 
     def _on_enable_all(self):
         ctrl = self._ctrl_ref[0]
@@ -814,7 +829,6 @@ class AcsStagePanel(QWidget):
                 self._log("ACS: 연결 후 조그 가능합니다.")
                 return
 
-
         step = self._dof_step_spins[index].value()
         delta = sign * step
         spin = self._dof_spins[index]
@@ -869,7 +883,9 @@ class AcsStagePanel(QWidget):
         
         settle = self.spin_settle.value()
         self._auto_disable_timer.stop()
-        self.btn_kin_move.setEnabled(False)
+        
+        # UI 잠금 시작
+        self._set_motion_locked(True)
 
         self._kin_worker = _KinematicMoveWorker(
             ctrl, self._last_cal_pos, 
@@ -882,13 +898,13 @@ class AcsStagePanel(QWidget):
         self._kin_worker.start()
 
     def _on_kin_move_done(self):
-        self.btn_kin_move.setEnabled(True)
+        self._set_motion_locked(False) # UI 잠금 해제
         # 워커 시퀀스 내부에서 마지막에 disable_all()을 수행하므로 이미 OFF 상태임
         self._auto_disable_timer.stop() 
         self._log("[KINEMATICS] ✅ KINEMATIC MOVE 완료 (서보 OFF)")
  
     def _on_kin_move_error(self, msg: str):
-        self.btn_kin_move.setEnabled(True)
+        self._set_motion_locked(False) # UI 잠금 해제
         self._log(f"[KINEMATICS] ❌ KINEMATIC MOVE 오류: {msg}")
 
     def _on_auto_disable(self):
@@ -913,9 +929,10 @@ class AcsStagePanel(QWidget):
         self._settings.setValue(_SETTINGS_KEY_PORT,  self.edit_port.text().strip())
         
         # 섹션 접힘 상태 저장
-        self._settings.setValue(_SETTINGS_SEC_CONN_COL, self.sec_conn.is_collapsed())
-        self._settings.setValue(_SETTINGS_SEC_AXIS_COL, self.sec_axis.is_collapsed())
-        self._settings.setValue(_SETTINGS_SEC_KIN_COL,  self.sec_kin.is_collapsed())
+        self._settings.setValue(_SETTINGS_SEC_CONN_COL,   self.sec_conn.is_collapsed())
+        self._settings.setValue(_SETTINGS_SEC_AXIS_COL,   self.sec_axis.is_collapsed())
+        self._settings.setValue(_SETTINGS_SEC_GLOBAL_COL, self.sec_global.is_collapsed())
+        self._settings.setValue(_SETTINGS_SEC_KIN_COL,    self.sec_kin.is_collapsed())
 
         self._settings.setValue(_SETTINGS_KEY_DRY,   self.check_dry.isChecked())
         self._settings.setValue("acs/settle_ms",    self.spin_settle.value())
@@ -928,10 +945,11 @@ class AcsStagePanel(QWidget):
         self.edit_ip.setText(self._settings.value(_SETTINGS_KEY_IP,   "10.0.0.100"))
         self.edit_port.setText(self._settings.value(_SETTINGS_KEY_PORT, str(DEFAULT_PORT)))
         
-        # 섹션 접힘 상태 복원
-        self.sec_conn.set_collapsed(str(self._settings.value(_SETTINGS_SEC_CONN_COL, "false")).lower() == "true")
-        self.sec_axis.set_collapsed(str(self._settings.value(_SETTINGS_SEC_AXIS_COL, "false")).lower() == "true")
-        self.sec_kin.set_collapsed(str(self._settings.value(_SETTINGS_SEC_KIN_COL, "false")).lower() == "true")
+        # 섹션 접힘 상태 복원 (type=bool 명시로 안정성 확보)
+        self.sec_conn.set_collapsed(self._settings.value(_SETTINGS_SEC_CONN_COL,   False, type=bool))
+        self.sec_axis.set_collapsed(self._settings.value(_SETTINGS_SEC_AXIS_COL,   False, type=bool))
+        self.sec_global.set_collapsed(self._settings.value(_SETTINGS_SEC_GLOBAL_COL, False, type=bool))
+        self.sec_kin.set_collapsed(self._settings.value(_SETTINGS_SEC_KIN_COL,    False, type=bool))
 
         self.check_dry.setChecked(self._settings.value(_SETTINGS_KEY_DRY, False, type=bool))
         self.spin_settle.setValue(self._settings.value("acs/settle_ms", 500, type=int))

@@ -2,7 +2,6 @@
 core/motor/kinematic_calc.py
 AlignStage 키네마틱 계산기.
 
-KinematicSimulator_v2.py 의 calculate_position() 로직을 분리한 모듈.
 AlignStageAlgorithm.py (numpy/scipy 순수 Python)에 의존하며 C# DLL 불필요.
 
 축 매핑 (calPos 인덱스):
@@ -139,26 +138,26 @@ class KinematicCalc:
             d    = self.direction                # 모터 회전 방향 (+1 / -1)
 
             # 각 stage 별 변위 = (회전된 볼 위치) - (셋업 기준 위치)
-            # Stage 0: Y1, Z1 (Y=idx1, Z=idx2)
-            # Stage 1: X1, Z2 (X=idx0, Z=idx2)
-            # Stage 2: Y2, Z3 (Y=idx1, Z=idx2)
+            # Stage 0 (Ball 1): X, Y 성분 사용
+            # Stage 1 (Ball 2): Z, Y 성분 사용
+            # Stage 2 (Ball 3): X, Y 성분 사용
             final = np.zeros((3, 2))
-            final[0, 0] = ball[0, 1] - ssp3[0, 1]   # Stage0: ΔY
-            final[0, 1] = ball[0, 2] - ssp3[0, 2]   # Stage0: ΔZ
-            final[1, 0] = ball[1, 0] - ssp3[1, 0]   # Stage1: ΔX
-            final[1, 1] = ball[1, 2] - ssp3[1, 2]   # Stage1: ΔZ
-            final[2, 0] = ball[2, 1] - ssp3[2, 1]   # Stage2: ΔY
-            final[2, 1] = ball[2, 2] - ssp3[2, 2]   # Stage2: ΔZ
- 
-            # 모터 절대 명령값 = 엔코더 기준 + 방향부호×변위
-            # (각 축의 인덱스: X=0, Y=1, Z=2)
+            final[0, 0] = ball[0, 0] - ssp3[0, 0]   # Ball0: ΔX
+            final[0, 1] = ball[0, 1] - ssp3[0, 1]   # Ball0: ΔY
+            final[1, 0] = ball[1, 2] - ssp3[1, 2]   # Ball1: ΔZ
+            final[1, 1] = ball[1, 1] - ssp3[1, 1]   # Ball1: ΔY
+            final[2, 0] = ball[2, 0] - ssp3[2, 0]   # Ball2: ΔX
+            final[2, 1] = ball[2, 1] - ssp3[2, 1]   # Ball2: ΔY
+
+            # 모터 절대 명령값 = 엔코더 기준 + (변위 * 방향부호)
+            # cal_pos 순서: X1, Y1, Z1, Z2, X2, Y2
             cal_pos = np.array([
-                enc[0, 1] + final[0, 0] * d[0, 1],  # Y1 (Stage1 Y)
-                enc[0, 2] + final[0, 1] * d[0, 2],  # Z1 (Stage1 Z)
-                enc[1, 0] + final[1, 0] * d[1, 0],  # X1 (Stage2 X)
-                enc[1, 2] + final[1, 1] * d[1, 2],  # Z2 (Stage2 Z)
-                enc[2, 1] + final[2, 0] * d[2, 1],  # Y2 (Stage3 Y)
-                enc[2, 2] + final[2, 1] * d[2, 2],  # Z3 (Stage3 Z)
+                enc[0, 0] + final[0, 0] * d[0, 0],  # Motor 0: X1 (Stage 0, ΔX)
+                enc[0, 1] + final[0, 1] * d[0, 1],  # Motor 1: Y1 (Stage 0, ΔY)
+                enc[1, 2] + final[1, 0] * d[1, 2],  # Motor 2: Z1 (Stage 1, ΔZ)
+                enc[1, 1] + final[1, 1] * d[1, 1],  # Motor 3: Z2 (Stage 1, ΔY)
+                enc[2, 0] + final[2, 0] * d[2, 0],  # Motor 4: X2 (Stage 2, ΔX)
+                enc[2, 1] + final[2, 1] * d[2, 1],  # Motor 5: Y2 (Stage 2, ΔY)
             ])
 
             ok, violations = self.check_interlock(cal_pos)
@@ -179,12 +178,13 @@ class KinematicCalc:
         6축 모터 위치 → 6DOF [Rx, Ry, Rz, Tx, Ty, Tz] (rad/mm) 계산.
         
         Args:
-            motor_positions: [Y1, Z1, X1, Z2, Y2, Z3] (mm)
+            motor_positions: [X1, Y1, Z1, Z2, X2, Y2] (mm)
             x0: 초기 추정값 [Rx, Ry, Rz, Tx, Ty, Tz], None일 경우 0으로 시작.
         """
         if not _ALGO_OK: return None
         
         try:
+            # 입력받은 모터 위치값을 소수점 4째자리로 제한 (사용자 요청 반영)
             motor_positions = np.round(motor_positions, 4)
             enc = self.encoder_pos
             ssp3 = self.stage_setup.reshape(3, 3)
@@ -194,20 +194,18 @@ class KinematicCalc:
             # 1. 모터 위치 → 볼 위치 (b1, b2, b3) 역산
             # b = [X1, Y1, Z1, X2, Y2, Z2, X3, Y3, Z3]
             b = np.zeros(9)
-            # Stage 1: Y1(0), Z1(1) 
-            # 0 0 1
+            
+            # Stage 0 (Ball 1): Motor 0(X1) -> ΔX, Motor 1(Y1) -> ΔY
             b[0] = (motor_positions[0] - enc[0, 0]) * d[0, 0] + ssp3[0, 0] if mapping[0,0] == 0 else ssp3[0, 0] # X
             b[1] = (motor_positions[1] - enc[0, 1]) * d[0, 1] + ssp3[0, 1] if mapping[0,1] == 0 else ssp3[0, 1] # Y
             b[2] = (motor_positions[0] - enc[0, 2]) * d[0, 2] + ssp3[0, 2] if mapping[0,2] == 0 else ssp3[0, 2] # Z
         
-            # 1 0 0
-            # Stage 2: X1(2), Z2(3)
+            # Stage 1 (Ball 2): Motor 2(Z1) -> ΔZ, Motor 3(Z2) -> ΔY
             b[3] = (motor_positions[2] - enc[1, 0]) * d[1, 0] + ssp3[1, 0] if mapping[1,0] == 0 else ssp3[1, 0] # X
             b[4] = (motor_positions[3] - enc[1, 1]) * d[1, 1] + ssp3[1, 1] if mapping[1,1] == 0 else ssp3[1, 1] # Y
             b[5] = (motor_positions[2] - enc[1, 2]) * d[1, 2] + ssp3[1, 2] if mapping[1,2] == 0 else ssp3[1, 2] # Z
             
-            # 0 0 1
-            # Stage 3: Y2(4), Z3(5)
+            # Stage 2 (Ball 3): Motor 4(X2) -> ΔX, Motor 5(Y2) -> ΔY
             b[6] = (motor_positions[4] - enc[2, 0]) * d[2, 0] + ssp3[2, 0] if mapping[2,0] == 0 else ssp3[2, 0] # X
             b[7] = (motor_positions[5] - enc[2, 1]) * d[2, 1] + ssp3[2, 1] if mapping[2,1] == 0 else ssp3[2, 1] # Y
             b[8] = (motor_positions[4] - enc[2, 2]) * d[2, 2] + ssp3[2, 2] if mapping[2,2] == 0 else ssp3[2, 2] # Z
