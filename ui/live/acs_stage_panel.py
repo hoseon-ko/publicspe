@@ -432,7 +432,7 @@ class AcsStagePanel(QWidget):
 
         for b in (self.btn_en_all, self.btn_dis_all, self.btn_stop):
             b.setEnabled(False)
-            self._move_btns.append(b)
+            # _move_btns에 넣지 않음 — SYNC 버튼과 같은 시점(FK 첫 수신)에 활성화
 
         self.btn_en_all .clicked.connect(self._on_enable_all)
         self.btn_dis_all.clicked.connect(self._on_disable_all)
@@ -607,9 +607,9 @@ class AcsStagePanel(QWidget):
     def set_controller(self, ctrl: AcsStageController | None):
         """외부(MainWindow 등)에서 연결된 컨트롤러를 주입받아 UI를 동기화."""
         self._ctrl_ref[0] = ctrl
-        if ctrl:
-            # 연결된 상태 UI로 전환
-            label = "EXTERNAL" if not ctrl.is_simulator else "SIMULATOR"
+        if ctrl and ctrl.is_connected:
+            # 실제로 연결된 상태일 때만 CONNECTED UI로 전환
+            label = "SIMULATOR" if ctrl.is_simulator else "EXTERNAL"
             self.lbl_status.setText(f"● CONNECTED  [{label}]")
             self.lbl_status.setStyleSheet(lbl(C_ACCENT, mono=True, bold=True))
             self.btn_connect.setEnabled(False)
@@ -619,8 +619,7 @@ class AcsStagePanel(QWidget):
             self.check_sim.setEnabled(False)
             for b in self._move_btns:
                 b.setEnabled(True)
-            
-            # 이미 폴링 중이더라도 콜백 재등록 (안전성)
+            # 이미 폴링 중이더라도 콜백 재등록 (UniqueConnection으로 중복 방지)
             ctrl.start_polling(self._on_positions, self._on_states, self._on_lost)
         else:
             self._set_disconnected_ui()
@@ -694,6 +693,9 @@ class AcsStagePanel(QWidget):
         for b in self._move_btns:
             b.setEnabled(False)
         self.btn_sync_get_to_set.setEnabled(False)
+        self.btn_en_all.setEnabled(False)
+        self.btn_dis_all.setEnabled(False)
+        self.btn_stop.setEnabled(False)
         for row in self._axis_rows:
             row.lbl_pos.setText("---")
             row.update_state({'enabled': False, 'in_pos': False})
@@ -752,9 +754,12 @@ class AcsStagePanel(QWidget):
             if lbl in self._lbl_cur_dof:
                 self._lbl_cur_dof[lbl].setText(f"{v:+.4f}")
         
-        # 데이터가 있으면 Sync 버튼 활성화
+        # FK 데이터 첫 수신 시 SYNC + ENABLE/DISABLE/STOP 버튼 동시 활성화
         if not self.btn_sync_get_to_set.isEnabled():
             self.btn_sync_get_to_set.setEnabled(True)
+            self.btn_en_all.setEnabled(True)
+            self.btn_dis_all.setEnabled(True)
+            self.btn_stop.setEnabled(True)
 
 
     def _on_states(self, states: list):
@@ -991,31 +996,20 @@ class AcsStagePanel(QWidget):
             val = self._settings.value(f"acs/kin_step_{i}", 0.1, type=float)
             spin.setValue(val)
 
-    def set_controller(self, ctrl: AcsStageController):
-        """외부에서 생성된 컨트롤러 주입 (DeepAlign 탭 등에서 공유 용도)."""
-        if ctrl is None:
-            return
-        self._ctrl_ref[0] = ctrl
-        if ctrl.is_connected:
-            self.lbl_status.setText(f"● CONNECTED  [shared]")
-            self.lbl_status.setStyleSheet(lbl(C_ACCENT, mono=True, bold=True))
-            self.btn_connect.setEnabled(False)
-            self.btn_disconnect.setEnabled(True)
-            self.edit_ip.setEnabled(False)
-            self.edit_port.setEnabled(False)
-            self.check_sim.setEnabled(False)
-            for b in self._move_btns:
-                b.setEnabled(True)
-            self.acs_connected.emit(ctrl)
-
     # ── 로그 ─────────────────────────────────────────────────────────
 
     def stop_polling(self):
-        """프로그램 종료 시 호출하여 모든 내부 타이머 중지"""
+        """프로그램 종료 시 호출하여 모든 내부 타이머 + ACS Worker Thread 중지"""
         if hasattr(self, "_polling_timer") and self._polling_timer:
             self._polling_timer.stop()
         if hasattr(self, "_auto_disable_timer") and self._auto_disable_timer:
             self._auto_disable_timer.stop()
+        # ACS Worker Thread 정지 — 이걸 빠뜨리면 Worker가 앱 종료 후에도
+        # 살아서 poll을 계속 실행하고, Python GC가 Main Thread에서
+        # QTimer를 파괴할 때 "Timers cannot be stopped from another thread" 발생
+        ctrl = self._ctrl_ref[0] if self._ctrl_ref else None
+        if ctrl:
+            ctrl.stop_polling()
 
     def _log(self, msg: str):
         self.log_message.emit(msg)
