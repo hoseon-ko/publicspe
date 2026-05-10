@@ -71,10 +71,11 @@ def _btn(color: str) -> str:
     """
 
 
-def _spin_style() -> str:
+def _spin_style(bg: str | None = None) -> str:
+    bg_color = bg if bg else _C_BG
     return f"""
         QSpinBox, QDoubleSpinBox {{
-            background: {_C_BG}; border: 1px solid {_C_BORDER};
+            background: {bg_color}; border: 1px solid {_C_BORDER};
             color: #c0d0ff; border-radius: 3px;
             font-family: '{_FC}'; font-size: 14px; padding: 1px 4px;
         }}
@@ -139,96 +140,43 @@ class _AxisRow:
         self.lbl_state.setFixedWidth(26)
         grid.addWidget(self.lbl_state, row, 2)
 
-        # Enable 버튼
-        self.btn_en = QPushButton("EN")
-        self.btn_en.setFixedWidth(44)
-        self.btn_en.setStyleSheet(_btn(C_ACCENT))
-        self.btn_en.setEnabled(False)
-        self.btn_en.clicked.connect(self._on_enable)
-        move_btns.append(self.btn_en)
-        grid.addWidget(self.btn_en, row, 3)
+        # 1. 서보 상태 (Servo Status)
+        self.lbl_servo = QLabel("OFF")
+        self.lbl_servo.setFixedWidth(50)
+        self.lbl_servo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_servo.setStyleSheet("color: #64748b; font-size: 11px; font-weight: bold; border: 1px solid #334155; border-radius: 4px;")
+        grid.addWidget(self.lbl_servo, row, 3)
 
-        # Disable 버튼
-        self.btn_dis = QPushButton("DIS")
-        self.btn_dis.setFixedWidth(46)
-        self.btn_dis.setStyleSheet(_btn(C_DANGER))
-        self.btn_dis.setEnabled(False)
-        self.btn_dis.clicked.connect(self._on_disable)
-        move_btns.append(self.btn_dis)
-        grid.addWidget(self.btn_dis, row, 4)
-
-        # 조그 스텝 입력
-        self.spin_step = QDoubleSpinBox()
-        self.spin_step.setRange(0.0001, 100.0)
-        self.spin_step.setValue(0.1)
-        self.spin_step.setDecimals(4)
-        self.spin_step.setFixedWidth(90)
-        self.spin_step.setStyleSheet(_spin_style())
-        grid.addWidget(self.spin_step, row, 5)
-
-        # − 버튼
-        self.btn_minus = QPushButton("−")
-        self.btn_minus.setFixedWidth(38)
-        self.btn_minus.setStyleSheet(_btn(C_DANGER))
-        self.btn_minus.setEnabled(False)
-        self.btn_minus.clicked.connect(self._on_minus)
-        move_btns.append(self.btn_minus)
-        grid.addWidget(self.btn_minus, row, 6)
-
-        # + 버튼
-        self.btn_plus = QPushButton("+")
-        self.btn_plus.setFixedWidth(38)
-        self.btn_plus.setStyleSheet(_btn(C_ACCENT))
-        self.btn_plus.setEnabled(False)
-        self.btn_plus.clicked.connect(self._on_plus)
-        move_btns.append(self.btn_plus)
-        grid.addWidget(self.btn_plus, row, 7)
+        # 2. 이동 완료 상태 (Move Done / In-Position LED)
+        self.lbl_done = QLabel("●")
+        self.lbl_done.setFixedWidth(40)
+        self.lbl_done.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_done.setStyleSheet("color:#1e293b; font-size:16px;")
+        self.lbl_done.setToolTip("MOVE DONE (In-Position)")
+        grid.addWidget(self.lbl_done, row, 4)
 
     def update_position(self, pos: float):
         self.lbl_pos.setText(f"{pos:+.4f} mm")
 
-    def update_state(self, enabled: bool):
+    def update_state(self, state: dict):
+        """서보 상태 및 In-Position 상태 업데이트 (state: {'enabled': bool, 'in_pos': bool})"""
+        enabled = state.get("enabled", False)
+        in_pos  = state.get("in_pos", False)
+
+        # Servo Status
         if enabled:
-            self.lbl_state.setStyleSheet(f"color:{C_ACCENT}; font-size:13px;")
+            self.lbl_servo.setText("ENABLED")
+            self.lbl_servo.setStyleSheet("color: #14b8a6; font-size: 11px; font-weight: bold; border: 1px solid #14b8a6; border-radius: 4px; background: rgba(20,184,166,0.1);")
         else:
-            self.lbl_state.setStyleSheet("color:#304060; font-size:13px;")
+            self.lbl_servo.setText("OFF")
+            self.lbl_servo.setStyleSheet("color: #64748b; font-size: 11px; font-weight: bold; border: 1px solid #334155; border-radius: 4px;")
+
+        # Move Done (In-Position)
+        color = "#10b981" if in_pos else "#304060" # 완료 시 녹색, 이동 중 어두운 색
+        self.lbl_done.setStyleSheet(f"color:{color}; font-size:16px;")
 
     def _ctrl(self) -> AcsStageController | None:
         return self._ctrl_ref[0]
-
-    def _on_enable(self):
-        c = self._ctrl()
-        if c:
-            threading.Thread(target=c.enable_motor, args=(self.idx,), daemon=True).start()
-
-    def _on_disable(self):
-        c = self._ctrl()
-        if c:
-            threading.Thread(target=c.disable_motor, args=(self.idx,), daemon=True).start()
-
-    def _on_minus(self):
-        c = self._ctrl()
-        if c:
-            delta = -self.spin_step.value()
-            self._log(f"ACS Jog- (Axis {self.idx}): {delta:+.4f} mm")
-            def run():
-                try:
-                    c.move_by(self.idx, delta, wait=True)
-                except Exception as e:
-                    self._log(f"ACS Jog 실패: {e}")
-            threading.Thread(target=run, daemon=True).start()
-
-    def _on_plus(self):
-        c = self._ctrl()
-        if c:
-            delta = self.spin_step.value()
-            self._log(f"ACS Jog+ (Axis {self.idx}): {delta:+.4f} mm")
-            def run():
-                try:
-                    c.move_by(self.idx, delta, wait=True)
-                except Exception as e:
-                    self._log(f"ACS Jog 실패: {e}")
-            threading.Thread(target=run, daemon=True).start()
 
 
 class _KinematicMoveWorker(QThread):
@@ -242,12 +190,16 @@ class _KinematicMoveWorker(QThread):
     _SETTLE_MS     = 500    # In-Position 후 정착 대기
     _INPOS_TIMEOUT = 30000  # WaitMotionEnd 타임아웃 (ms)
 
-    def __init__(self, ctrl, targets: list, dry_run: bool, settle_ms: int = 500):
+    def __init__(self, ctrl: AcsStageController, targets: np.ndarray, 
+                 limits_plus: np.ndarray, limits_minus: np.ndarray,
+                 settle_ms: int = 500, dry: bool = False):
         super().__init__()
-        self._ctrl   = ctrl
-        self._targets = list(targets)
-        self._dry    = dry_run
+        self._ctrl = ctrl
+        self._targets = targets
+        self._limits_plus = limits_plus
+        self._limits_minus = limits_minus
         self._settle_ms = settle_ms
+        self._dry = dry
 
     def run(self):
         try:
@@ -259,32 +211,35 @@ class _KinematicMoveWorker(QThread):
                 return
 
             # ① Servo ON
-            self.log.emit("① Servo ON")
+            self.log.emit("[ACS] ① Servo ON")
             self._ctrl.enable_all()
-
+ 
             # ② 서보 ON 확인 대기 1s
-            self.log.emit("② Servo ON 확인 대기 (1 s)")
+            self.log.emit("[ACS] ② Servo ON 확인 대기 (1 s)")
             self.msleep(self._SERVO_ON_MS)
-
+ 
             # ③ 전축 이동 명령 (동시 발사 — wait=False)
-            self.log.emit("③ Move 명령 전송 (전축 동시)")
-            for i, target in enumerate(self._targets):
+            motor_names = ["Y1", "Z1", "X1", "Z2", "Y2", "Z3"]
+            self.log.emit("[ACS] ③ Move 명령 전송 (전축 동시)")
+            for i, (name, target, p_lim, n_lim) in enumerate(zip(motor_names, self._targets, self._limits_plus, self._limits_minus)):
+                # 사용자가 요청한 형식: [ACS] [AXIS] POS [TARGET] [PLIMIT] [NLIMIT]
+                self.log.emit(f"   [ACS] [{name}] POS: {target:+.4f} [PLIM: {p_lim:+.4f}, NLIM: {n_lim:+.4f}]")
                 self._ctrl.move_to(i, float(target), wait=False)
-
+ 
             # ④ In-Position 완료 대기 (IsCheckDoneStateAll)
-            self.log.emit("④ In-Position 완료 대기")
+            self.log.emit("[ACS] ④ In-Position 완료 대기")
             self._ctrl.wait_in_position_all(timeout_ms=self._INPOS_TIMEOUT)
-
+ 
             # ⑤ Settle Wait: 이동 완료 후 진동 억제를 위한 대기
-            self.log.emit(f"⑤ Settle Time 대기 ({self._settle_ms} ms)")
+            self.log.emit(f"[ACS] ⑤ Settle Time 대기 ({self._settle_ms} ms)")
             self.msleep(self._settle_ms)
-
+ 
             # ⑥ Servo OFF (락 걸기)
-            self.log.emit("⑥ Servo OFF (락 걸기)")
+            self.log.emit("[ACS] ⑥ Servo OFF (락 걸기)")
             self._ctrl.disable_all()
-
+ 
             # ⑦ 완료
-            self.log.emit("⑦ KINEMATIC MOVE 완료")
+            self.log.emit("[KINEMATICS] ⑦ KINEMATIC MOVE 완료")
             self.finished.emit()
 
         except Exception as e:
@@ -316,6 +271,9 @@ class AcsStagePanel(QWidget):
         self._auto_disable_timer.setSingleShot(True)
         self._auto_disable_timer.setInterval(5 * 60 * 1000)
         self._auto_disable_timer.timeout.connect(self._on_auto_disable)
+
+        # 실시간 포즈 계산용 (마지막 계산된 결과 저장)
+        self._last_actual_dof: Optional[np.ndarray] = None
 
         self._build_ui()
         self._load_settings()
@@ -412,8 +370,8 @@ class AcsStagePanel(QWidget):
         grid.setSpacing(4)
         grid.setContentsMargins(0, 0, 0, 0)
 
-        # 헤더
-        headers = ["Axis", "Position", "", "", "", "Step(mm)", "", ""]
+        # 헤더 (조작 버튼 제거 반영)
+        headers = ["Axis", "Position", "", "Servo", "Done"]
         for col, txt in enumerate(headers):
             lbl_hdr = QLabel(txt)
             lbl_hdr.setStyleSheet(lbl(C_TEXT_DIM, size="12px", mono=True))
@@ -461,50 +419,46 @@ class AcsStagePanel(QWidget):
         unavail = not kinematic_available()
 
 
-        # [Rethink Move] Kinematic Jog Step
-        step_row = QHBoxLayout()
-        step_row.setContentsMargins(4, 0, 4, 0)
-        lbl_step = QLabel("Jog Step (mm/mrad):")
-        lbl_step.setStyleSheet(f"color:{_C_DIM}; font-family:'{Fonts.UI}'; font-size:12px;")
-        self.kin_jog_step = QDoubleSpinBox()
-        self.kin_jog_step.setRange(0.0001, 50.0)
-        self.kin_jog_step.setValue(0.1)
-        self.kin_jog_step.setDecimals(4)
-        self.kin_jog_step.setFixedWidth(80)
-        self.kin_jog_step.setStyleSheet(_spin_style())
-        step_row.addWidget(lbl_step)
-        step_row.addWidget(self.kin_jog_step)
-        step_row.addStretch()
-        lay.addLayout(step_row)
-
+        # 상단 공통 Step 제거 (각 행으로 분산)
+        # ─────────────────────────────────────────────────────────────
+        
         # Trans / Rotate 입력 그리드 + Jog 버튼
         grid = QGridLayout()
-        grid.setSpacing(4)
-        grid.setContentsMargins(0, 4, 0, 4)
+        grid.setSpacing(6)
+        grid.setContentsMargins(4, 4, 4, 4)
+
+        # 헤더 추가
+        headers = ["DOF", "ACTUAL (GET)", "TARGET (SET)", "STEP", "", ""]
+        for col, txt in enumerate(headers):
+            h_lbl = QLabel(txt)
+            h_lbl.setStyleSheet(lbl(C_TEXT_DIM, size="10px", mono=True))
+            if col in [1, 2, 3]:
+                h_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            grid.addWidget(h_lbl, 0, col)
 
         labels = ["Tx", "Ty", "Tz", "Rx", "Ry", "Rz"]
         self._dof_spins: list[QDoubleSpinBox] = []
+        self._dof_step_spins: list[QDoubleSpinBox] = [] # 개별 스텝용
+        self._lbl_cur_dof: dict[str, QLabel] = {}
+
         for i, lbl_txt in enumerate(labels):
-            # 2열 구성 (좌: T-axes, 우: R-axes)
-            row, col_grp = divmod(i, 3)
-            col_base = row * 4
-            grid_row = col_grp
+            grid_row = i + 1
             
+            # 1. DOF 이름
             lbl_obj = QLabel(lbl_txt)
             lbl_obj.setStyleSheet(lbl(C_ACCENT, bold=True))
             lbl_obj.setFixedWidth(24)
-            grid.addWidget(lbl_obj, grid_row, col_base)
+            grid.addWidget(lbl_obj, grid_row, 0)
 
-            # Minus Button
-            btn_m = QPushButton("−")
-            btn_m.setFixedWidth(28)
-            btn_m.setStyleSheet(_btn(C_DANGER))
-            btn_m.setEnabled(not unavail)
-            btn_m.clicked.connect(lambda _, idx=i: self._on_kin_jog(idx, -1))
-            self._move_btns.append(btn_m)
-            grid.addWidget(btn_m, grid_row, col_base + 1)
+            # 2. ACTUAL (GET) 레이블
+            val_get = QLabel("---")
+            val_get.setFixedWidth(85)
+            val_get.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            val_get.setStyleSheet(lbl(C_WARN, bold=True, mono=True))
+            grid.addWidget(val_get, grid_row, 1)
+            self._lbl_cur_dof[lbl_txt] = val_get
 
-            # SpinBox
+            # 3. TARGET (SET) SpinBox
             spin = _DofSpinBox()
             spin.setRange(-500.0, 500.0)
             spin.setValue(0.0)
@@ -512,19 +466,48 @@ class AcsStagePanel(QWidget):
             spin.setFixedWidth(85)
             spin.setStyleSheet(_spin_style())
             spin.setEnabled(not unavail)
-            grid.addWidget(spin, grid_row, col_base + 2)
+            grid.addWidget(spin, grid_row, 2)
             self._dof_spins.append(spin)
+            
+            # 4. STEP SpinBox (개별 스텝)
+            step_spin = QDoubleSpinBox()
+            step_spin.setRange(0.0001, 100.0)
+            step_spin.setValue(0.1) # 기본값
+            step_spin.setDecimals(4)
+            step_spin.setFixedWidth(75)
+            step_spin.setStyleSheet(_spin_style("#1e293b"))
+            step_spin.setEnabled(not unavail)
+            grid.addWidget(step_spin, grid_row, 3)
+            self._dof_step_spins.append(step_spin)
 
-            # Plus Button
+            # 5. Minus Button
+            btn_m = QPushButton("−")
+            btn_m.setFixedWidth(28)
+            btn_m.setStyleSheet(_btn(C_DANGER))
+            btn_m.setEnabled(not unavail)
+            btn_m.clicked.connect(lambda _, idx=i: self._on_kin_jog(idx, -1))
+            self._move_btns.append(btn_m)
+            grid.addWidget(btn_m, grid_row, 4)
+
+            # 6. Plus Button
             btn_p = QPushButton("+")
             btn_p.setFixedWidth(28)
             btn_p.setStyleSheet(_btn(C_ACCENT))
             btn_p.setEnabled(not unavail)
             btn_p.clicked.connect(lambda _, idx=i: self._on_kin_jog(idx, 1))
             self._move_btns.append(btn_p)
-            grid.addWidget(btn_p, grid_row, col_base + 3)
+            grid.addWidget(btn_p, grid_row, 5)
 
         lay.addLayout(grid)
+
+        # [Sync Button] Get -> Set (그리드 바로 아래 배치)
+        self.btn_sync_get_to_set = QPushButton("SYNC ACTUAL (GET) → TARGET (SET)")
+        self.btn_sync_get_to_set.setToolTip("현재 실제 위치를 목표 입력칸으로 복사합니다.")
+        self.btn_sync_get_to_set.setStyleSheet(_btn(C_WARN).replace("transparent", "#1a1510"))
+        self.btn_sync_get_to_set.setFixedHeight(28)
+        self.btn_sync_get_to_set.setEnabled(False)
+        self.btn_sync_get_to_set.clicked.connect(self._on_sync_get_to_set)
+        lay.addWidget(self.btn_sync_get_to_set)
 
         # CALC + MOVE 버튼 (하단)
         row_btn = QHBoxLayout()
@@ -559,25 +542,6 @@ class AcsStagePanel(QWidget):
 
         # 마지막 계산된 calPos 보관
         self._last_cal_pos = None
-
-        # [Phase] 현재 실시간 도달 포지션 (Forward Kinematics)
-        cur_grp = QGroupBox("LIVE  POSE (FORWARD)")
-        cur_grp.setStyleSheet(grp_style(C_WARN))
-        cur_lay = QGridLayout(cur_grp)
-        cur_lay.setContentsMargins(8, 14, 8, 8)
-        cur_lay.setSpacing(4)
-        
-        for i, lbl_txt in enumerate(labels):
-            row_idx, col_idx = divmod(i, 3)
-            l = QLabel(f"{lbl_txt}:")
-            l.setStyleSheet(lbl(C_TEXT_DIM, size="12px"))
-            val = QLabel("---")
-            val.setStyleSheet(lbl(C_WARN, bold=True))
-            cur_lay.addWidget(l, row_idx, col_idx * 2)
-            cur_lay.addWidget(val, row_idx, col_idx * 2 + 1)
-            self._lbl_cur_dof[lbl_txt] = val
-            
-        lay.addWidget(cur_grp)
 
 
 
@@ -617,26 +581,26 @@ class AcsStagePanel(QWidget):
         use_sim  = self.check_sim.isChecked()
 
         if not use_sim and not ip:
-            self._log("ACS: IP를 입력하세요")
+            self._log("[ACS] IP를 입력하세요")
             return
-
+ 
         self._save_settings()
         ctrl = AcsStageController()
         ctrl.dry_run = self.check_dry.isChecked()
-
+ 
         try:
             if use_sim:
-                self._log("ACS: 시뮬레이터 연결 시도...")
+                self._log("[ACS] 시뮬레이터 연결 시도...")
                 ctrl.connect_simulator()
             else:
                 try:
                     port = int(port_str)
                 except ValueError:
-                    self._log("ACS: Port는 정수여야 합니다")
+                    self._log("[ACS] Port는 정수여야 합니다")
                     return
-                self._log(f"ACS: 연결 시도 → {ip}:{port}")
+                self._log(f"[ACS] 연결 시도 → {ip}:{port}")
                 ctrl.connect(ip, port)
-
+ 
             self._ctrl_ref[0] = ctrl
             label = "SIMULATOR" if use_sim else f"{ip}:{port_str}"
             self.lbl_status.setText(f"● CONNECTED  [{label}]")
@@ -650,12 +614,12 @@ class AcsStagePanel(QWidget):
                 b.setEnabled(True)
             self.acs_connected.emit(ctrl)
             ctrl.start_polling(self._on_positions, self._on_states, self._on_lost)
-            self._log(f"ACS: 연결 성공 ({'시뮬레이터' if use_sim else label})")
+            self._log(f"[ACS] 연결 성공 ({'시뮬레이터' if use_sim else label})")
         except Exception as e:
             err_str = str(e)
             if "No module named 'clr'" in err_str:
                 err_str = "pythonnet 미설치 (pip install pythonnet)"
-            self._log(f"ACS: 연결 실패 — {err_str}")
+            self._log(f"[ACS] 연결 실패 — {err_str}")
             self._ctrl_ref[0] = None
 
     def _on_disconnect(self):
@@ -665,7 +629,7 @@ class AcsStagePanel(QWidget):
         self._ctrl_ref[0] = None
         self._set_disconnected_ui()
         self.acs_disconnected.emit()
-        self._log("ACS: 연결 해제")
+        self._log("[ACS] 연결 해제")
 
     def _set_disconnected_ui(self):
         self.lbl_status.setText("● DISCONNECTED")
@@ -677,9 +641,10 @@ class AcsStagePanel(QWidget):
         self.check_sim.setEnabled(True)
         for b in self._move_btns:
             b.setEnabled(False)
+        self.btn_sync_get_to_set.setEnabled(False)
         for row in self._axis_rows:
             row.lbl_pos.setText("---")
-            row.update_state(False)
+            row.update_state({'enabled': False, 'in_pos': False})
 
     # ── 폴링 콜백 ─────────────────────────────────────────────────────
 
@@ -696,28 +661,50 @@ class AcsStagePanel(QWidget):
                     res = self._calc.calculate_forward(motor_arr)
                     if res is not None:
                         # res: [Rx, Ry, Rz, Tx, Ty, Tz]
+                        self._last_actual_dof = res
                         self._update_cur_dof_ui(res)
                 except: pass
             threading.Thread(target=run_fwd, daemon=True).start()
 
+    def _on_sync_get_to_set(self):
+        """현재 실제 포즈(Get)를 입력 필드(Set)로 동기화."""
+        if self._last_actual_dof is None:
+            return
+        
+        # res: [Rx, Ry, Rz, Tx, Ty, Tz] (rad/mm)
+        # vals: [Tx, Ty, Tz, Rx, Ry, Rz] (mm/mrad)
+        res = self._last_actual_dof
+        vals = [res[3], res[4], res[5], res[0]*1000.0, res[1]*1000.0, res[2]*1000.0]
+        
+        for spin, val in zip(self._dof_spins, vals):
+            spin.blockSignals(True)
+            spin.setValue(val)
+            spin.blockSignals(False)
+        
+        self._log("[KINEMATICS] Actual pose synced to input fields.")
+        self._on_kin_calc()  # Sync 후 버튼 상태 업데이트
+
     def _update_cur_dof_ui(self, res: np.ndarray):
-        # UI 업데이트는 메인 스레드에서 (임시로 threading 내에서 직접 호출하나 원래는 Signal 사용 권장)
-        # 하지만 QLabel.setText는 단순해서 대부분의 경우 안전함.
         # res: [Rx, Ry, Rz, Tx, Ty, Tz] (rad/mm)
         vals = [res[3], res[4], res[5], res[0]*1000.0, res[1]*1000.0, res[2]*1000.0]
         labels = ["Tx", "Ty", "Tz", "Rx", "Ry", "Rz"]
         for lbl, v in zip(labels, vals):
             if lbl in self._lbl_cur_dof:
                 self._lbl_cur_dof[lbl].setText(f"{v:+.4f}")
+        
+        # 데이터가 있으면 Sync 버튼 활성화
+        if not self.btn_sync_get_to_set.isEnabled():
+            self.btn_sync_get_to_set.setEnabled(True)
 
 
     def _on_states(self, states: list):
         for i, row in enumerate(self._axis_rows):
             if i < len(states):
+                # states[i] 는 {'enabled': bool, 'in_pos': bool} 형태의 dict
                 row.update_state(states[i])
 
     def _on_lost(self):
-        self._log("ACS: 연결 끊김 감지")
+        self._log("[ACS] 연결 끊김 감지")
         self._ctrl_ref[0] = None
         self._set_disconnected_ui()
         self.acs_disconnected.emit()
@@ -729,20 +716,20 @@ class AcsStagePanel(QWidget):
         if ctrl:
             threading.Thread(target=ctrl.enable_all, daemon=True).start()
             self._auto_disable_timer.start()  # 수동 Enable 시 5분 타이머 시작
-            self._log("ACS: ENABLE ALL (5분 후 자동 서보 OFF 예약)")
+            self._log("[ACS] ENABLE ALL (5분 후 자동 서보 OFF 예약)")
 
     def _on_disable_all(self):
         ctrl = self._ctrl_ref[0]
         if ctrl:
             threading.Thread(target=ctrl.disable_all, daemon=True).start()
             self._auto_disable_timer.stop()
-            self._log("ACS: DISABLE ALL")
+            self._log("[ACS] DISABLE ALL")
 
     def _on_stop_all(self):
         ctrl = self._ctrl_ref[0]
         if ctrl:
             ctrl.stop_all()
-            self._log("ACS: STOP ALL 실행")
+            self._log("[ACS] STOP ALL 실행")
 
     # ── 키네마틱 계산 / 이동 ──────────────────────────────────────────
 
@@ -792,12 +779,12 @@ class AcsStagePanel(QWidget):
         is_dry = self.check_dry.isChecked()
         ctrl = self._ctrl_ref[0]
         self.btn_kin_move.setEnabled(ok and (is_dry or (ctrl is not None and ctrl.is_connected)))
-
+ 
         if ok:
-            self._log("ACS Kinematic CALC: OK (인터락 통과)")
+            self._log("[KINEMATICS] Kinematic CALC: OK (인터락 통과)")
         else:
             v = violations[0] if violations else "?"
-            self._log(f"ACS Kinematic CALC: LIMIT 위반 — {v}")
+            self._log(f"[KINEMATICS] Kinematic CALC: LIMIT 위반 — {v}")
 
     def _on_kin_jog(self, index: int, sign: int):
         """[Rethink Move] 키네마틱 상대 이동: 현재 스핀박스 값에 Step을 가감하여 이동."""
@@ -813,7 +800,7 @@ class AcsStagePanel(QWidget):
         spin = self._dof_spins[index]
         
         labels = ["Tx", "Ty", "Tz", "Rx", "Ry", "Rz"]
-        self._log(f"ACS Kinematic Jog {labels[index]} ({'▲' if sign > 0 else '▼'}): {delta:+.4f}")
+        self._log(f"[KINEMATICS] Kinematic Jog {labels[index]} ({'▲' if sign > 0 else '▼'}): {delta:+.4f}")
         
         # 1. 값 업데이트
         new_val = spin.value() + delta
@@ -826,7 +813,7 @@ class AcsStagePanel(QWidget):
         if self.btn_kin_move.isEnabled():
             self._on_kin_move()
         else:
-            self._log("⚠️ Kinematic Jog 중단: 계산 결과가 리밋을 벗어났습니다.")
+            self._log("[KINEMATICS] ⚠️ Kinematic Jog 중단: 계산 결과가 리밋을 벗어났습니다.")
 
     def _on_kin_move(self):
         if self._last_cal_pos is None:
@@ -838,18 +825,37 @@ class AcsStagePanel(QWidget):
         is_dry = self.check_dry.isChecked()
         ctrl   = self._ctrl_ref[0]
 
-        if not is_dry and (ctrl is None or not ctrl.is_connected):
-            self._log("ACS: 연결 후 이동 가능")
-            return
-
         tag = "  [DRY RUN — 실제 이동 없음]" if is_dry else ""
-        self._log(f"ACS Kinematic MOVE 시작{tag}")
+        
+        # [Log Enhancement] 현재 위치(Get)와 목표 위치(Set)를 로그에 기록
+        try:
+            # Set values from spinboxes
+            set_vals = [s.value() for s in self._dof_spins]
+            set_s = ", ".join([f"{n}:{v:+.4f}" for n, v in zip(["Tx","Ty","Tz","Rx","Ry","Rz"], set_vals)])
+            
+            # Get values (Actual)
+            if self._last_actual_dof is not None:
+                r = self._last_actual_dof
+                get_vals = [r[3], r[4], r[5], r[0]*1000.0, r[1]*1000.0, r[2]*1000.0]
+                get_s = ", ".join([f"{n}:{v:+.4f}" for n, v in zip(["Tx","Ty","Tz","Rx","Ry","Rz"], get_vals)])
+            else:
+                get_s = "Unknown"
+                
+            self._log(f"[KINEMATICS] ▶ KINEMATIC MOVE 시작{tag}")
+            self._log(f"   [SET] {set_s}")
+            self._log(f"   [GET] {get_s}")
+        except Exception:
+            self._log(f"[KINEMATICS] ▶ KINEMATIC MOVE 시작{tag}")
         
         settle = self.spin_settle.value()
         self._auto_disable_timer.stop()
         self.btn_kin_move.setEnabled(False)
 
-        self._kin_worker = _KinematicMoveWorker(ctrl, self._last_cal_pos.copy(), is_dry, settle)
+        self._kin_worker = _KinematicMoveWorker(
+            ctrl, self._last_cal_pos, 
+            self._calc.plus_limits, self._calc.minus_limits,
+            settle, is_dry
+        )
         self._kin_worker.log.connect(self._log)
         self._kin_worker.finished.connect(self._on_kin_move_done)
         self._kin_worker.error.connect(self._on_kin_move_error)
@@ -859,17 +865,17 @@ class AcsStagePanel(QWidget):
         self.btn_kin_move.setEnabled(True)
         # 워커 시퀀스 내부에서 마지막에 disable_all()을 수행하므로 이미 OFF 상태임
         self._auto_disable_timer.stop() 
-        self._log("✅ KINEMATIC MOVE 완료 (서보 OFF)")
-
+        self._log("[KINEMATICS] ✅ KINEMATIC MOVE 완료 (서보 OFF)")
+ 
     def _on_kin_move_error(self, msg: str):
         self.btn_kin_move.setEnabled(True)
-        self._log(f"❌ KINEMATIC MOVE 오류: {msg}")
+        self._log(f"[KINEMATICS] ❌ KINEMATIC MOVE 오류: {msg}")
 
     def _on_auto_disable(self):
         ctrl = self._ctrl_ref[0]
         if ctrl and ctrl.is_connected:
             ctrl.disable_all()
-            self._log("⏱ 자동 서보 OFF (5분 대기 타임아웃)")
+            self._log("[ACS] ⏱ 자동 서보 OFF (5분 대기 타임아웃)")
 
     # ── 설정 ─────────────────────────────────────────────────────────
 
@@ -878,7 +884,7 @@ class AcsStagePanel(QWidget):
         if ctrl:
             ctrl.dry_run = checked
         msg = "⚠ DRY RUN 활성 — 실제 모터 미작동" if checked else "▶ DRY RUN 해제 — 실제 명령 전송"
-        self._log(f"ACS: {msg}")
+        self._log(f"[ACS] {msg}")
         self._on_kin_calc() # 버튼 상태 업데이트용
         self._save_settings()
 
@@ -886,15 +892,22 @@ class AcsStagePanel(QWidget):
         self._settings.setValue(_SETTINGS_KEY_IP,   self.edit_ip.text().strip())
         self._settings.setValue(_SETTINGS_KEY_PORT,  self.edit_port.text().strip())
         self._settings.setValue(_SETTINGS_KEY_DRY,   self.check_dry.isChecked())
-        self._settings.setValue("acs/kin_jog_step", self.kin_jog_step.value())
         self._settings.setValue("acs/settle_ms",    self.spin_settle.value())
+        
+        # Individual Steps 저장
+        for i, spin in enumerate(self._dof_step_spins):
+            self._settings.setValue(f"acs/kin_step_{i}", spin.value())
 
     def _load_settings(self):
         self.edit_ip.setText(self._settings.value(_SETTINGS_KEY_IP,   "10.0.0.100"))
         self.edit_port.setText(self._settings.value(_SETTINGS_KEY_PORT, str(DEFAULT_PORT)))
         self.check_dry.setChecked(self._settings.value(_SETTINGS_KEY_DRY, False, type=bool))
-        self.kin_jog_step.setValue(self._settings.value("acs/kin_jog_step", 0.1, type=float))
         self.spin_settle.setValue(self._settings.value("acs/settle_ms", 500, type=int))
+        
+        # Individual Steps 로드
+        for i, spin in enumerate(self._dof_step_spins):
+            val = self._settings.value(f"acs/kin_step_{i}", 0.1, type=float)
+            spin.setValue(val)
 
     def set_controller(self, ctrl: AcsStageController):
         """외부에서 생성된 컨트롤러 주입 (DeepAlign 탭 등에서 공유 용도)."""
