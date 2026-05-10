@@ -896,6 +896,23 @@ class AcsStagePanel(QWidget):
         self.kin_jog_step.setValue(self._settings.value("acs/kin_jog_step", 0.1, type=float))
         self.spin_settle.setValue(self._settings.value("acs/settle_ms", 500, type=int))
 
+    def set_controller(self, ctrl: AcsStageController):
+        """외부에서 생성된 컨트롤러 주입 (DeepAlign 탭 등에서 공유 용도)."""
+        if ctrl is None:
+            return
+        self._ctrl_ref[0] = ctrl
+        if ctrl.is_connected:
+            self.lbl_status.setText(f"● CONNECTED  [shared]")
+            self.lbl_status.setStyleSheet(lbl(C_ACCENT, mono=True, bold=True))
+            self.btn_connect.setEnabled(False)
+            self.btn_disconnect.setEnabled(True)
+            self.edit_ip.setEnabled(False)
+            self.edit_port.setEnabled(False)
+            self.check_sim.setEnabled(False)
+            for b in self._move_btns:
+                b.setEnabled(True)
+            self.acs_connected.emit(ctrl)
+
     # ── 로그 ─────────────────────────────────────────────────────────
 
     def _log(self, msg: str):

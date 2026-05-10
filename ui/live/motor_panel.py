@@ -627,6 +627,20 @@ class MotorPanel(QWidget):
     def is_connected(self) -> bool:
         return self._ctrl is not None and self._ctrl.is_connected
 
+    def set_controller(self, ctrl: PicomotorController):
+        """외부에서 생성된 컨트롤러 주입 (DeepAlign 탭 등에서 공유 용도)."""
+        if ctrl is None:
+            return
+        self._ctrl = ctrl
+        if self._ctrl.is_connected:
+            model = self._ctrl.model_name or "Connected"
+            self.lbl_status.setText(f"● {model}")
+            self.lbl_status.setStyleSheet(lbl(C_ACCENT, mono=True, bold=True))
+            self.btn_connect.setEnabled(False)
+            self._set_enabled(True)
+            self._start_polling()
+            self.connected.emit(model)
+
     def cleanup(self):
         self._save_step_settings()   # #18
         if self._ctrl:

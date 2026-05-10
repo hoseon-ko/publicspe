@@ -1,247 +1,477 @@
-import logging
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QMainWindow, 
-                             QDockWidget, QToolBar, QStatusBar, QPushButton, 
-                             QLabel, QProgressBar, QFrame, QStackedWidget, QGridLayout)
+"""
+ui/deepalign/deep_align_main.py
+DeepAlign Industrial Dashboard
+
+전략: 기존에 완성된 패널(MotorPanel, AutoFocusPanel, AcsStagePanel)을
+      각 탭 페이지에 ScrollArea로 감싸서 직접 임베드.
+      중복 UI 없음 — 100% 기존 패널 재사용.
+"""
+
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QFrame, QLineEdit, QComboBox, QCheckBox, QListWidget,
+    QGridLayout, QStackedWidget, QScrollArea, QButtonGroup
+)
 from PyQt6.QtCore import Qt, pyqtSignal
+
+from ui.live.motor_panel import MotorPanel
+from ui.live.autofocus_panel import AutoFocusPanel
+from ui.live.acs_stage_panel import AcsStagePanel
+
 
 class DeepAlignMainTab(QWidget):
     """
-    DeepAlign 통합 워크스페이스.
-    기존 탭들을 대체할 수 있는 전문가용 도킹 기반 UI의 메인 컨테이너.
+    DeepAlign Industrial Dashboard
+    - 5-탭 아이콘 사이드바
+    - 각 탭은 기존 완성된 패널을 ScrollArea로 감싸서 직접 임베드
     """
-    def __init__(self, parent=None, camera=None, acs=None, picos=None, kimmz=None):
+
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.camera = camera
-        self.acs = acs
-        self.picos = picos
-        self.kimmz = kimmz
-        
+        self.setObjectName("deepAlignTab")
+
+        # ── 기존 패널 인스턴스 생성 (단 1회) ──────────────────────────
+        self.mirror_panel = MotorPanel()
+        self.af_panel     = AutoFocusPanel()
+        self.align_panel  = AcsStagePanel()
+
         self._init_ui()
+        self._apply_global_styles()
+
+    # ─────────────────────────────────────────────────────────────────
+    # UI 초기화
+    # ─────────────────────────────────────────────────────────────────
 
     def _init_ui(self):
-        # 1. 메인 레이아웃 설정
-        self.main_layout = QHBoxLayout(self)
-        self.main_layout.setContentsMargins(0, 0, 0, 0)
-        self.main_layout.setSpacing(0)
+        main_lay = QHBoxLayout(self)
+        main_lay.setContentsMargins(0, 0, 0, 0)
+        main_lay.setSpacing(0)
 
-        # 2. 좌측 아이콘 사이드바
-        self.sidebar = self._create_sidebar()
-        self.main_layout.addWidget(self.sidebar)
+        # 1. 아이콘 사이드바 (좌측)
+        sidebar = self._create_icon_sidebar()
+        main_lay.addWidget(sidebar)
 
-        # 3. 중앙 메인 워크스페이스
-        self.workspace = QMainWindow()
-        self.workspace.setWindowFlags(Qt.WindowType.Widget)
-        self.workspace.setObjectName("deepAlignWorkspace")
-        
+        # 2. 중앙 패널 스택
         self.central_stack = QStackedWidget()
         self.central_stack.setObjectName("deepAlignStack")
-        self.workspace.setCentralWidget(self.central_stack)
-        
-        # 4. 하단 마스터 바
+        self.central_stack.setFixedWidth(380)
+        self.central_stack.setStyleSheet(
+            "background-color: #0d121d; border-right: 1px solid #1e293b;"
+        )
+
+        self.central_stack.addWidget(self._create_cam_page())       # 0
+        self.central_stack.addWidget(self._wrap_panel(self.mirror_panel))  # 1
+        self.central_stack.addWidget(self._wrap_panel(self.af_panel))      # 2
+        self.central_stack.addWidget(self._wrap_panel(self.align_panel))   # 3
+        self.central_stack.addWidget(self._create_analysis_page())  # 4
+        main_lay.addWidget(self.central_stack)
+
+        # 3. 우측 영역 (카메라 뷰 + 마스터 바)
+        right_widget = QWidget()
+        right_lay    = QVBoxLayout(right_widget)
+        right_lay.setContentsMargins(10, 10, 10, 10)
+        right_lay.setSpacing(10)
+
+        self.cam_view_area = QFrame()
+        self.cam_view_area.setStyleSheet(
+            "background-color: #000; border: 2px solid #1e293b; border-radius: 8px;"
+        )
+        v_cam = QVBoxLayout(self.cam_view_area)
+        lbl_cam = QLabel("LIVE CAMERA STREAM")
+        lbl_cam.setStyleSheet("color: #1e293b; font-size: 48px; font-weight: 900;")
+        v_cam.addWidget(lbl_cam, 0, Qt.AlignmentFlag.AlignCenter)
+        right_lay.addWidget(self.cam_view_area, 1)
+
         self.master_bar = self._create_master_bar()
-        
-        content_container = QWidget()
-        content_layout = QVBoxLayout(content_container)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(0)
-        content_layout.addWidget(self.workspace)
-        content_layout.addWidget(self.master_bar)
-        
-        self.main_layout.addWidget(content_container)
+        right_lay.addWidget(self.master_bar)
 
-        # 5. [중요] 모든 스타일을 하나의 덩어리로 관리 (충돌 방지)
-        self.setStyleSheet("""
-            QWidget#deepAlignWorkspace { background-color: #05080c; border: none; }
-            QWidget#deepAlignStack { background-color: #000000; border: 2px solid #1e293b; margin: 10px; border-radius: 8px; }
-            
-            /* Sidebar Styles */
-            QFrame#sidebarFrame { background-color: #0d121d; border-right: 1px solid #1e293b; }
-            QPushButton.sidebarBtn { 
-                background: transparent; color: #64748b; border: none; 
-                padding: 15px 5px; font-weight: 800; font-size: 11px;
-            }
-            QPushButton.sidebarBtn:checked { color: #4ecdc4; background: rgba(78, 205, 196, 0.1); border-left: 3px solid #4ecdc4; }
-            
-            /* Master Bar Styles */
-            QFrame#masterBarFrame { background-color: #0d121d; border-top: 2px solid #334155; }
-            QFrame.modContainer { background-color: #131a29; border: 1px solid #334155; border-radius: 6px; }
-            QFrame#progContainer { background-color: #020617; border: 2px solid #1e293b; border-radius: 8px; }
-            
-            /* Text Controls */
-            QLabel { color: #e2e8f0; font-family: 'Segoe UI', 'Malgun Gothic', 'Arial'; }
-            QLabel.statusHeader { color: #f59e0b; font-weight: 900; font-size: 15px; }
-            QLabel.timeLabel { color: #94a3b8; font-size: 11px; font-weight: bold; }
-            QLabel.metaLabel { color: #94a3b8; font-size: 11px; font-weight: 900; }
-            QLabel.healthVal { font-size: 15px; font-weight: 900; }
-            
-            /* Button Controls */
-            QPushButton.actionBtn { color: #ffffff; font-size: 13px; font-weight: 800; border-radius: 4px; }
-            QPushButton#snapBtn { background-color: #2563eb; }
-            QPushButton#liveBtn { background-color: #14b8a6; }
-            QPushButton#acqBtn { background-color: #e11d48; }
-            QPushButton#stopBtn { background-color: #7f1d1d; color: #fca5a5; border: 2px solid #b91c1c; }
-            
-            /* Progress Bar */
-            QProgressBar { background: #0f172a; border-radius: 4px; border: 1px solid #334155; }
-            QProgressBar::chunk { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #f43f5e, stop:1 #fb7185); border-radius: 3px; }
-        """)
+        main_lay.addWidget(right_widget, 1)
 
-    def _create_sidebar(self):
+        # 시그널 연결
+        self.mirror_panel.log_message.connect(self._on_sub_panel_log)
+        self.align_panel.log_message.connect(self._on_sub_panel_log)
+
+    # ─────────────────────────────────────────────────────────────────
+    # 아이콘 사이드바
+    # ─────────────────────────────────────────────────────────────────
+
+    def _create_icon_sidebar(self):
         sidebar = QFrame()
-        sidebar.setObjectName("sidebarFrame")
         sidebar.setFixedWidth(65)
-        layout = QVBoxLayout(sidebar)
-        layout.setContentsMargins(0, 20, 0, 20)
-        layout.setSpacing(15)
-        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        sidebar.setStyleSheet("background-color: #020617; border-right: 1px solid #1e293b;")
+        lay = QVBoxLayout(sidebar)
+        lay.setContentsMargins(0, 25, 0, 25)
+        lay.setSpacing(25)
 
-        self.btn_cam = QPushButton("CAM\nENG"); self.btn_cam.setProperty("class", "sidebarBtn"); self.btn_cam.setCheckable(True)
-        self.btn_mir = QPushButton("MIR\nADJ"); self.btn_mir.setProperty("class", "sidebarBtn"); self.btn_mir.setCheckable(True)
-        self.btn_foc = QPushButton("FOC\nCTL"); self.btn_foc.setProperty("class", "sidebarBtn"); self.btn_foc.setCheckable(True)
-        self.btn_aln = QPushButton("ALN\nSTG"); self.btn_aln.setProperty("class", "sidebarBtn"); self.btn_aln.setCheckable(True)
-        self.btn_ana = QPushButton("ANA\nLYS"); self.btn_ana.setProperty("class", "sidebarBtn"); self.btn_ana.setCheckable(True)
+        icons = [
+            ("📷", "#94a3b8"),
+            ("🪞", "#38bdf8"),
+            ("🔍", "#fbbf24"),
+            ("🎯", "#ef4444"),
+            ("📊", "#10b981"),
+        ]
+        self.sidebar_btns = []
+        self.btn_group = QButtonGroup(self)
+        self.btn_group.setExclusive(True)
 
-        self.btn_cam.setChecked(True)
-        for btn in [self.btn_cam, self.btn_mir, self.btn_foc, self.btn_aln, self.btn_ana]:
-            btn.setFixedWidth(65)
-            layout.addWidget(btn)
-        
-        layout.addStretch()
+        for i, (icon, color) in enumerate(icons):
+            btn = QPushButton(icon)
+            btn.setFixedSize(45, 45)
+            btn.setCheckable(True)
+            btn.setStyleSheet(f"""
+                QPushButton {{ background: transparent; color: {color}; font-size: 24px;
+                               border: none; border-radius: 12px; }}
+                QPushButton:hover {{ background: #1e293b; color: #f8fafc; }}
+                QPushButton:checked {{ background: #1e293b; color: #22d3ee;
+                                       border: 1px solid #22d3ee; }}
+            """)
+            btn.clicked.connect(lambda _, idx=i: self._on_tab_changed(idx))
+            lay.addWidget(btn, 0, Qt.AlignmentFlag.AlignCenter)
+            self.sidebar_btns.append(btn)
+            self.btn_group.addButton(btn, i)
+
+        self.sidebar_btns[0].setChecked(True)
+        lay.addStretch()
         return sidebar
+
+    def _on_tab_changed(self, idx: int):
+        self.central_stack.setCurrentIndex(idx)
+        if hasattr(self, 'master_btn_stack'):
+            self.master_btn_stack.setCurrentIndex(min(idx, self.master_btn_stack.count() - 1))
+
+    # ─────────────────────────────────────────────────────────────────
+    # 패널 래퍼 (기존 패널 → ScrollArea)
+    # ─────────────────────────────────────────────────────────────────
+
+    def _wrap_panel(self, panel: QWidget) -> QWidget:
+        """기존 패널을 ScrollArea로 감싸서 페이지 위젯으로 반환."""
+        page   = QWidget()
+        lay    = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidget(panel)
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("border: none; background: transparent;")
+        lay.addWidget(scroll)
+        return page
+
+    # ─────────────────────────────────────────────────────────────────
+    # 카메라 페이지 (탭 0 — 자체 UI)
+    # ─────────────────────────────────────────────────────────────────
+
+    def _create_cam_page(self):
+        page   = QWidget()
+        lay    = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("border: none; background: transparent;")
+
+        container = QWidget()
+        p_lay = QVBoxLayout(container)
+        p_lay.setContentsMargins(10, 10, 10, 10)
+        p_lay.setSpacing(12)
+
+        # DEVICE CONNECTION
+        conn_grp = self._make_section("🔌 DEVICE CONNECTION", "#64748b")
+        cl = QVBoxLayout(conn_grp.content_widget)
+        cl.setSpacing(8); cl.setContentsMargins(10, 10, 10, 10)
+
+        vg_frame = QFrame()
+        vg_frame.setFixedHeight(36)
+        vg_frame.setStyleSheet("QFrame { border: 1px solid #1e293b; }")
+        vg = QHBoxLayout(vg_frame)
+        vg.setContentsMargins(0, 0, 0, 0)
+        vg.setSpacing(0)
+        lbl_vendor = QLabel(" VENDOR:")
+        lbl_vendor.setFixedWidth(80)
+        lbl_vendor.setStyleSheet(
+            "color: #94a3b8; font-size: 12px; font-weight: bold;"
+            " border-right: 1px solid #1e293b; padding: 0 6px;"
+            " background: rgba(30,41,59,0.2);"
+        )
+        vg.addWidget(lbl_vendor)
+        self.cb_vendor = QComboBox()
+        self.cb_vendor.addItems(["HIKVISION", "Picam", "Simulation"])
+        self.cb_vendor.setStyleSheet(
+            "color: #14b8a6; font-size: 12px; font-weight: bold; border: none; padding: 6px;"
+        )
+        vg.addWidget(self.cb_vendor, 1)
+        cl.addWidget(vg_frame)
+
+        self.cam_list = QListWidget()
+        self.cam_list.setFixedHeight(60)
+        self.cam_list.setStyleSheet(
+            "background: #020617; border: 1px solid #1e293b; color: #94a3b8; font-size: 11px;"
+        )
+        cl.addWidget(self.cam_list)
+
+        self.btn_scan = self._style_btn("SCAN", "#64748b")
+        self.btn_scan.setFixedHeight(35)
+        cl.addWidget(self.btn_scan)
+
+        conn_row = QHBoxLayout()
+        self.btn_connect    = self._style_btn("CONNECT",    "#14b8a6")
+        self.btn_disconnect = self._style_btn("DISCONNECT", "#ef4444")
+        conn_row.addWidget(self.btn_connect)
+        conn_row.addWidget(self.btn_disconnect)
+        cl.addLayout(conn_row)
+        p_lay.addWidget(conn_grp)
+
+        # GRAB STATISTICS
+        stat_grp = self._make_section("📊 GRAB STATISTICS", "#22d3ee")
+        stl = QVBoxLayout(stat_grp.content_widget)
+        stl.setSpacing(6); stl.setContentsMargins(10, 10, 10, 10)
+        self.stat_labels = {}
+        for s in ["Bit Depth", "Sensor Size", "Active ROI", "Buffer Status"]:
+            row = QHBoxLayout()
+            ll  = QLabel(s + ":")
+            ll.setStyleSheet("color: #94a3b8; font-size: 12px; font-weight: bold;")
+            vv  = QLabel("---")
+            vv.setStyleSheet("color: #22d3ee; font-size: 12px; font-weight: 900;")
+            row.addWidget(ll); row.addWidget(vv); row.addStretch()
+            stl.addLayout(row)
+            self.stat_labels[s] = vv
+        p_lay.addWidget(stat_grp)
+
+        p_lay.addStretch()
+        scroll.setWidget(container)
+        lay.addWidget(scroll)
+        return page
+
+    # ─────────────────────────────────────────────────────────────────
+    # 분석 페이지 (탭 4 — 자체 UI)
+    # ─────────────────────────────────────────────────────────────────
+
+    def _create_analysis_page(self):
+        page  = QWidget()
+        lay   = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("border: none; background: transparent;")
+
+        container = QWidget()
+        p_lay = QVBoxLayout(container)
+        p_lay.setContentsMargins(10, 10, 10, 10)
+        p_lay.setSpacing(12)
+
+        sum_grp = self._make_section("📊 ANALYSIS SUMMARY", "#10b981")
+        sl = QVBoxLayout(sum_grp.content_widget)
+        sl.setContentsMargins(10, 10, 10, 10); sl.setSpacing(8)
+        metrics = [("PEAK INTENSITY", "---"), ("FWHM (px)", "---"), ("SNR", "---")]
+        grid = QFrame(); grid.setStyleSheet("border: 1px solid #1e293b;")
+        gl = QGridLayout(grid); gl.setContentsMargins(0, 0, 0, 0); gl.setSpacing(0)
+        for i, (m, v) in enumerate(metrics):
+            gl.addWidget(self._grid_lbl(f" {m}"), i, 0)
+            vv = QLabel(v)
+            vv.setStyleSheet("color: #10b981; font-size: 12px; font-weight: 900; padding: 6px;")
+            gl.addWidget(vv, i, 1)
+        sl.addWidget(grid)
+        p_lay.addWidget(sum_grp)
+        p_lay.addStretch()
+
+        scroll.setWidget(container)
+        lay.addWidget(scroll)
+        return page
+
+    # ─────────────────────────────────────────────────────────────────
+    # 마스터 바
+    # ─────────────────────────────────────────────────────────────────
 
     def _create_master_bar(self):
         bar = QFrame()
-        bar.setObjectName("masterBarFrame")
-        bar.setFixedHeight(85) 
-        main_layout = QHBoxLayout(bar)
-        main_layout.setContentsMargins(15, 8, 15, 8)
-        main_layout.setSpacing(15)
+        bar.setFixedHeight(65)
+        bar.setStyleSheet(
+            "background-color: #020617; border-top: 1px solid #991b1b;"
+        )
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(15, 10, 15, 5)
+        lay.setSpacing(25)
 
-        # --- [1] LEFT: CONTROL BUTTONS ---
-        ctrl_mod = QWidget()
-        ctrl_lay = QHBoxLayout(ctrl_mod); ctrl_lay.setContentsMargins(0,0,0,0); ctrl_lay.setSpacing(6)
-        
-        def create_fancy_btn(obj_name, main_txt, sub_txt, color):
-            btn = QPushButton(); btn.setObjectName(obj_name); btn.setFixedSize(90, 48)
-            btn.setCheckable(True)
-            l = QVBoxLayout(btn); l.setSpacing(0); l.setContentsMargins(0,4,0,4)
-            mt = QLabel(main_txt); mt.setStyleSheet("font-size: 13px; font-weight: 900; color: white; background:transparent; border:none;")
-            st = QLabel(sub_txt); st.setStyleSheet("font-size: 7px; font-weight: 700; color: rgba(255,255,255,0.5); background:transparent; border:none;")
-            mt.setAlignment(Qt.AlignmentFlag.AlignCenter); st.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            l.addWidget(mt); l.addWidget(st)
-            return btn
+        self.master_btn_stack = QStackedWidget()
+        self.master_btn_stack.setFixedSize(380, 45)
 
-        self.snap_btn = create_fancy_btn("snapBtn", "SNAP", "ONE SHOT", "#2563eb")
-        self.live_btn = create_fancy_btn("liveBtn", "LIVE", "ON AIR", "#14b8a6")
-        self.acq_btn = create_fancy_btn("acqBtn", "ACQUIRE", "RECORDING", "#e11d48")
-        self.stop_btn = create_fancy_btn("stopBtn", "STOP", "FORCE EXIT", "#7f1d1d")
-        
-        for btn in [self.snap_btn, self.live_btn, self.acq_btn, self.stop_btn]:
-            ctrl_lay.addWidget(btn)
-        main_layout.addWidget(ctrl_mod)
+        # 0: Camera
+        cam_w = QWidget(); cbl = QHBoxLayout(cam_w); cbl.setContentsMargins(0,0,0,0); cbl.setSpacing(8)
+        self.btn_snap     = self._dash_btn("SNAP",    "",          "#3b82f6")
+        self.btn_live_air = self._dash_btn("LIVE",    "ON AIR",    "#14b8a6")
+        self.btn_acquire  = self._dash_btn("ACQUIRE", "RECORDING", "#e11d48")
+        self.btn_stop_main = self._dash_btn("STOP",   "",          "#ef4444")
+        for b in (self.btn_snap, self.btn_live_air, self.btn_acquire, self.btn_stop_main):
+            cbl.addWidget(b)
+        self.master_btn_stack.addWidget(cam_w)
 
-        # --- [2] CENTER: PROGRESS & TIME ---
-        center_mod = QWidget()
-        center_lay = QVBoxLayout(center_mod); center_lay.setContentsMargins(5,0,5,0); center_lay.setSpacing(4)
-        
-        # Upper: Frame & Time
-        time_row = QHBoxLayout(); time_row.setContentsMargins(0,0,0,0)
-        self.lbl_frames = QLabel("FRAME: 0 / 0 (0.0%)")
-        self.lbl_frames.setStyleSheet("color: #64748b; font-size: 10px; font-weight: 800; border:none;")
-        time_row.addWidget(self.lbl_frames)
-        
-        time_row.addStretch()
+        # 1: Mirror
+        mir_w = QWidget(); mbl = QHBoxLayout(mir_w); mbl.setContentsMargins(0,0,0,0); mbl.setSpacing(8)
+        for t, s, c in [("ZERO ALL","ALL AXIS","#38bdf8"),("RESET","","#64748b"),("STOP","EMERGENCY","#ef4444")]:
+            mbl.addWidget(self._dash_btn(t, s, c))
+        self.master_btn_stack.addWidget(mir_w)
 
-        def add_t(lay, label):
-            l = QLabel(label); l.setStyleSheet("color: #475569; font-size: 9px; font-weight: 800; border:none;")
-            v = QLabel("00:00:00"); v.setStyleSheet("color: #f8fafc; font-size: 11px; font-weight: 900; border:none;")
-            lay.addWidget(l); lay.addWidget(v)
-            return v
+        # 2: AF
+        af_w = QWidget(); abl = QHBoxLayout(af_w); abl.setContentsMargins(0,0,0,0); abl.setSpacing(8)
+        for t, s, c in [("RUN AF","SEARCH","#fbbf24"),("ABORT","","#ef4444"),("SET Z","BASE","#3b82f6")]:
+            abl.addWidget(self._dash_btn(t, s, c))
+        self.master_btn_stack.addWidget(af_w)
 
-        self.val_elapsed = add_t(time_row, "ELAPSED:")
-        sep1 = QLabel("|"); sep1.setStyleSheet("color: #334155; border:none;"); time_row.addWidget(sep1)
-        self.val_remain = add_t(time_row, "REMAIN:")
-        sep2 = QLabel("|"); sep2.setStyleSheet("color: #334155; border:none;"); time_row.addWidget(sep2)
-        self.val_eta = add_t(time_row, "ETA:")
-        center_lay.addLayout(time_row)
+        # 3: Align
+        al_w = QWidget(); albl = QHBoxLayout(al_w); albl.setContentsMargins(0,0,0,0); albl.setSpacing(8)
+        for t, s, c in [("ENABLE","ALL","#4ecdc4"),("CALC","KINEM.","#aa7acc"),("MOVE","EXECUTE","#ef4444"),("STOP","ALL","#64748b")]:
+            albl.addWidget(self._dash_btn(t, s, c))
+        self.master_btn_stack.addWidget(al_w)
 
-        # Lower: Progress Bar
-        self.progress_bar = QProgressBar(); self.progress_bar.setFixedHeight(18)
-        self.progress_bar.setTextVisible(True); self.progress_bar.setFormat(" %p% COMPLETE")
-        self.progress_bar.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        center_lay.addWidget(self.progress_bar)
-        main_layout.addWidget(center_mod, stretch=2)
+        # 4: Analysis
+        an_w = QWidget()
+        lbl_an = QLabel("ANALYSIS COMMANDS")
+        lbl_an.setStyleSheet("color: #10b981; font-weight: 900;")
+        QHBoxLayout(an_w).addWidget(lbl_an)
+        self.master_btn_stack.addWidget(an_w)
 
-        # --- [3] RIGHT: HEALTH DASHBOARD (Grid Style) ---
-        health_mod = QWidget()
-        health_lay = QHBoxLayout(health_mod); health_lay.setContentsMargins(5,0,0,0); health_lay.setSpacing(12)
-        
-        def add_h_stack(label, color):
-            container = QWidget()
-            l = QVBoxLayout(container); l.setSpacing(2); l.setContentsMargins(0,0,0,0)
-            lbl = QLabel(label); lbl.setStyleSheet("color: #64748b; font-size: 8px; font-weight: 800; border:none;")
-            val = QLabel("---"); val.setStyleSheet(f"color: {color}; font-size: 11px; font-weight: 900; border:none;")
-            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter); val.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            l.addWidget(lbl); l.addWidget(val)
-            health_lay.addWidget(container)
-            return val
+        lay.addWidget(self.master_btn_stack)
 
-        self.lbl_dropped = add_h_stack("DROPPED", "#f43f5e")
-        self.lbl_write = add_h_stack("WRITE RATE", "#22d3ee")
-        self.lbl_disk = add_h_stack("STORAGE", "#a78bfa")
-        self.lbl_buffer = add_h_stack("BUFFER", "#fbbf24")
-        
-        main_layout.addWidget(health_mod)
+        # 진행 영역
+        prog_lay = QVBoxLayout(); prog_lay.setSpacing(4); prog_lay.setContentsMargins(10, 8, 10, 8)
+        top_row = QHBoxLayout()
+        self.lbl_frame_info = QLabel("FRAME: <font color='#f8fafc'>— / —</font>")
+        self.lbl_frame_info.setStyleSheet("font-size: 10px; font-weight: 800; color: #64748b; border: none;")
+        self.lbl_times = QLabel("ELAPSED: <font color='#f8fafc'>--:--:--</font>")
+        self.lbl_times.setStyleSheet("font-size: 10px; font-weight: 800; color: #64748b; border: none;")
+        top_row.addWidget(self.lbl_frame_info); top_row.addStretch(); top_row.addWidget(self.lbl_times)
+        prog_lay.addLayout(top_row)
 
-        # Stylesheet
-        self.setStyleSheet(self.styleSheet() + """
-            QProgressBar { 
-                background: #0f172a; border-radius: 9px; border: 1px solid #334155; 
-                color: white; font-size: 9px; font-weight: 900;
-            }
-            QProgressBar::chunk { 
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #f43f5e, stop:1 #fb7185); 
-                border-radius: 8px; 
-            }
-            QPushButton#snapBtn { background-color: #2563eb; border: none; border-radius: 6px; }
-            QPushButton#liveBtn { background-color: #14b8a6; border: none; border-radius: 6px; }
-            QPushButton#acqBtn { background-color: #e11d48; border: none; border-radius: 6px; }
-            QPushButton#stopBtn { background-color: #450a0a; border: 1px solid #ef4444; border-radius: 6px; }
-            QPushButton:hover { background-color: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.2); }
-            QPushButton:pressed { background-color: rgba(0,0,0,0.2); }
-        """)
+        self.prog_bar = QFrame(); self.prog_bar.setFixedHeight(12)
+        self.prog_bar.setStyleSheet("background: #0f172a; border-radius: 6px; border: 1px solid #1e293b;")
+        pb_lay = QHBoxLayout(self.prog_bar); pb_lay.setContentsMargins(0, 0, 0, 0)
+        self.prog_fill = QFrame(); self.prog_fill.setFixedHeight(12)
+        self.prog_fill.setStyleSheet(
+            "background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #e11d48,stop:1 #fb7185); border-radius: 6px;"
+        )
+        pb_lay.addWidget(self.prog_fill, 0); pb_lay.addStretch(100)
+        prog_lay.addWidget(self.prog_bar)
+        lay.addLayout(prog_lay, 1)
 
+        # 텔레메트리
+        tel = QHBoxLayout(); tel.setSpacing(20)
+        for label, val in [("DROPPED","0"),("WRITE RATE","--- MB/s"),("STORAGE","--- Free"),("BUFFER","---")]:
+            vbox = QVBoxLayout(); vbox.setSpacing(2)
+            ll = QLabel(label); ll.setStyleSheet("color: #64748b; font-size: 9px; font-weight: 900; border: none;")
+            vv = QLabel(val);   vv.setStyleSheet("color: #14b8a6; font-size: 11px; font-weight: 900; border: none;")
+            vbox.addWidget(ll); vbox.addWidget(vv)
+            tel.addLayout(vbox)
+        lay.addLayout(tel)
         return bar
 
-    # ── 하드웨어 공유 메서드 (MainWindow 연동) ──────────────────
+    # ─────────────────────────────────────────────────────────────────
+    # 헬퍼
+    # ─────────────────────────────────────────────────────────────────
+
+    def _make_section(self, title: str, color: str, collapsed: bool = False):
+        panel = QFrame()
+        panel.setObjectName("subPanel")
+        panel.setStyleSheet("QFrame#subPanel { background: transparent; }")
+        lay = QVBoxLayout(panel); lay.setContentsMargins(0,0,0,0); lay.setSpacing(0)
+        header = QPushButton(title)
+        header.setCheckable(True); header.setChecked(not collapsed)
+        header.setStyleSheet(f"""
+            QPushButton {{ background: #0f172a; color: {color}; font-weight: 900; font-size: 11px;
+                           text-align: left; padding: 10px; border: 1px solid #1e293b;
+                           border-top: 4px solid {color}; }}
+            QPushButton:checked {{ border-bottom: none; }}
+        """)
+        lay.addWidget(header)
+        panel.content_widget = QWidget()
+        panel.content_widget.setVisible(not collapsed)
+        lay.addWidget(panel.content_widget)
+        header.toggled.connect(panel.content_widget.setVisible)
+        return panel
+
+    def _grid_lbl(self, txt: str) -> QLabel:
+        l = QLabel(txt)
+        l.setFixedWidth(90)
+        l.setStyleSheet(
+            "color: #94a3b8; font-size: 12px; font-weight: bold;"
+            " border-right: 1px solid #1e293b; padding: 0 6px;"
+            " background: rgba(30,41,59,0.2);"
+        )
+        return l
+
+    def _style_btn(self, txt: str, color: str) -> QPushButton:
+        btn = QPushButton(txt)
+        btn.setStyleSheet(f"""
+            QPushButton {{ background: transparent; color: {color}; border: 1px solid {color};
+                           border-radius: 4px; font-weight: bold; font-size: 11px; padding: 5px; }}
+            QPushButton:hover {{ background: {color}22; }}
+        """)
+        return btn
+
+    def _dash_btn(self, title: str, sub: str, color: str) -> QPushButton:
+        btn = QPushButton()
+        btn.setFixedSize(85, 45)
+        btn.setStyleSheet(f"""
+            QPushButton {{ background: {color}; color: white; border-radius: 4px;
+                           border: none; font-weight: 900; padding: 0; }}
+            QPushButton:hover {{ background: {color}dd; }}
+        """)
+        lay = QVBoxLayout(btn); lay.setContentsMargins(0,5,0,5); lay.setSpacing(0)
+        t = QLabel(title); t.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        t.setStyleSheet("font-size: 13px; background: transparent; border: none; color: white;")
+        lay.addWidget(t)
+        if sub:
+            s = QLabel(sub); s.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            s.setStyleSheet("font-size: 8px; background: transparent; border: none; color: rgba(255,255,255,0.8);")
+            lay.addWidget(s)
+        return btn
+
+    def _apply_global_styles(self):
+        self.setStyleSheet("""
+            QWidget#deepAlignStack { background-color: #05080c; }
+            QScrollArea { border: none; background: transparent; }
+            QScrollBar:vertical { border: none; background: #05080c; width: 6px; }
+            QScrollBar::handle:vertical { background: #1e293b; border-radius: 3px; }
+        """)
+
+    # ─────────────────────────────────────────────────────────────────
+    # 공개 API (main_window 에서 호출)
+    # ─────────────────────────────────────────────────────────────────
 
     def set_shared_camera(self, cam):
-        self.camera = cam
-        cam_name = getattr(cam, "model_name", "Connected")
-        self.lbl_status.setText(f"STATUS: READY ({cam_name})")
-        logging.info(f"[DeepAlign] Camera connected: {cam_name}")
+        self._cam = cam
 
     def clear_shared_camera(self):
-        self.camera = None
-        self.lbl_status.setText("STATUS: DISCONNECTED")
-        logging.info("[DeepAlign] Camera disconnected")
+        self._cam = None
 
-    def set_acs_ctrl(self, acs):
-        self.acs = acs
-        logging.info("[DeepAlign] ACS Controller linked")
-
-    def clear_acs_ctrl(self):
-        self.acs = None
-        logging.info("[DeepAlign] ACS Controller unlinked")
-
-    def set_kimm_ctrl(self, kimmz):
-        self.kimmz = kimmz
-        logging.info("[DeepAlign] KIMM-Z Controller linked")
+    def set_kimm_ctrl(self, ctrl):
+        self._kimm = ctrl
 
     def clear_kimm_ctrl(self):
-        self.kimmz = None
-        logging.info("[DeepAlign] KIMM-Z Controller unlinked")
+        self._kimm = None
 
-    def set_picos_ctrl(self, picos):
-        self.picos = picos
-        logging.info("[DeepAlign] Picomotor Controller linked")
+    def set_acs_ctrl(self, ctrl):
+        self._acs = ctrl
+        if hasattr(self, 'align_panel') and ctrl is not None:
+            # 컨트롤러를 align_panel에 직접 주입
+            self.align_panel._ctrl_ref[0] = ctrl
+            if ctrl.is_connected:
+                from theme.styles import C_ACCENT
+                from theme.styles import lbl as lbl_style
+                self.align_panel.lbl_status.setText(f"● CONNECTED")
+                self.align_panel.lbl_status.setStyleSheet(lbl_style(C_ACCENT, mono=True, bold=True))
+                self.align_panel.btn_connect.setEnabled(False)
+                self.align_panel.btn_disconnect.setEnabled(True)
+                for b in self.align_panel._move_btns:
+                    b.setEnabled(True)
+
+    def clear_acs_ctrl(self):
+        self._acs = None
+
+    def set_picos_ctrl(self, ctrl):
+        self._picos = ctrl
+        if hasattr(self, 'mirror_panel') and ctrl is not None:
+            self.mirror_panel.set_controller(ctrl)
+
+    def _on_sub_panel_log(self, msg: str):
+        print(f"[DeepAlign] {msg}")
