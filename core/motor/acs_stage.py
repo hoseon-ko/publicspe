@@ -19,6 +19,7 @@ from typing import Optional
 
 from core.logger import dev_logger
 from PyQt6.QtCore import QObject, QThread, pyqtSignal, pyqtSlot, QTimer, Qt, QMetaObject, Q_ARG
+from PyQt6.QtWidgets import QApplication
 
 log = logging.getLogger(__name__)
 
@@ -122,7 +123,6 @@ class AcsWorker(QObject):
             if is_moving:
                 try:
                     self._api.Kill(ax)
-                    import time
                     time.sleep(0.05)
                 except: pass
                 
@@ -267,20 +267,25 @@ class AcsStageController(QObject):
 
     def wait_for_enabled_all(self, timeout_ms: int = 2000) -> bool:
         start = time.time()
+        main_thread = QApplication.instance().thread()
         while (time.time() - start) * 1000 < timeout_ms:
             if all(self.is_enabled(i) for i in range(6)): 
                 return True
-            QApplication.processEvents() # UI 이벤트를 처리하며 대기
+            # 메인 스레드에서 호출된 경우에만 UI 이벤트 처리
+            if QThread.currentThread() == main_thread:
+                QApplication.processEvents()
             time.sleep(0.05)
         return False
 
     def wait_in_position_all(self, timeout_ms: int = 30000):
         """하드웨어 API 직접 호출 대신 캐시된 moving 상태를 체크하며 대기."""
         start = time.time()
+        main_thread = QApplication.instance().thread()
         while (time.time() - start) * 1000 < timeout_ms:
             if not any(self.is_moving(i) for i in range(6)):
                 return
-            QApplication.processEvents()
+            if QThread.currentThread() == main_thread:
+                QApplication.processEvents()
             time.sleep(0.05)
 
     # ── 워커 생명주기 ────────────────────────────────────────────────
