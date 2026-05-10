@@ -111,14 +111,29 @@ class AcsWorker(QObject):
         try:
             ax = _axis_enum(axis)
             mstate = int(self._api.GetMotorState(ax))
-            # 이동 중이면 먼저 멈춤 (bit 0x02: In Motion)
-            if mstate & _MST_INMOTION:
-                self._api.Halt(ax)
+            is_enabled = bool(mstate & _MST_ENABLE)
+            is_moving  = bool(mstate & _MST_INMOTION)
+
+            # 1. 이미 원하는 상태라면 아무것도 하지 않음 (가장 중요)
+            if is_enabled == enable:
+                return
+
+            # 2. 상태를 바꿔야 하는데 이동 중이라면 강제 종료
+            if is_moving:
+                try:
+                    self._api.Kill(ax)
+                    import time
+                    time.sleep(0.05)
+                except: pass
                 
-            if enable: self._api.Enable(ax)
-            else: self._api.Disable(ax)
+            # 3. 실제 명령 수행
+            if enable: 
+                self._api.Enable(ax)
+            else: 
+                self._api.Disable(ax)
+                
         except Exception as e:
-            log.error(f"[ACS Worker] Enable error: {e}")
+            log.error(f"[ACS Worker] Enable error (Axis {axis}): {e}")
 
     @pyqtSlot()
     def set_enable_all(self):
@@ -162,6 +177,12 @@ class AcsStageController(QObject):
         self._worker: Optional[AcsWorker] = None
         self._thread: Optional[QThread] = None
         self.dry_run = False
+        
+        self._axes      = list(range(6))
+        
+        # 캐시된 하드웨어 상태 (스레드 간 경합 방지용)
+        self._last_positions = [0.0] * 6
+        self._last_states    = [{"enabled": False, "moving": False, "in_pos": False}] * 6
         
         # 소프트 리밋 초기화
         from core.motor.kinematic_calc import DEFAULT_PLUS_LIMITS, DEFAULT_MINUS_LIMITS
@@ -221,28 +242,45 @@ class AcsStageController(QObject):
         current = self.get_position(axis)
         self.move_to(axis, current + delta_mm, wait=wait)
 
-    # ── 상태 조회 (직접 호출 허용 - Read Only) ────────────────────────
+    # ── 상태 조회 (캐시 데이터 사용 - 하드웨어 직접 접근 금지) ────────────────
+    
+    def _update_cache(self, positions, states):
+        """워커에서 온 데이터를 내부 캐시에 저장."""
+        self._last_positions = positions
+        self._last_states = states
 
     def get_position(self, axis: int) -> float:
-        if not self._connected: return 0.0
-        return float(self._api.GetFPosition(_axis_enum(axis)))
+        if 0 <= axis < 6:
+            return self._last_positions[axis]
+        return 0.0
 
     def is_enabled(self, axis: int) -> bool:
-        if not self._connected: return False
-        return bool(int(self._api.GetMotorState(_axis_enum(axis))) & _MST_ENABLE)
+        if 0 <= axis < 6:
+            return self._last_states[axis]["enabled"]
+        return False
+
+    def is_moving(self, axis: int) -> bool:
+        if 0 <= axis < 6:
+            return self._last_states[axis]["moving"]
+        return False
 
     def wait_for_enabled_all(self, timeout_ms: int = 2000) -> bool:
         start = time.time()
         while (time.time() - start) * 1000 < timeout_ms:
-            if all(self.is_enabled(i) for i in range(6)): return True
+            if all(self.is_enabled(i) for i in range(6)): 
+                return True
+            QApplication.processEvents() # UI 이벤트를 처리하며 대기
             time.sleep(0.05)
         return False
 
     def wait_in_position_all(self, timeout_ms: int = 30000):
-        if not self._connected: return
-        for i in range(6):
-            try: self._api.WaitMotionEnd(_axis_enum(i), timeout_ms)
-            except: pass
+        """하드웨어 API 직접 호출 대신 캐시된 moving 상태를 체크하며 대기."""
+        start = time.time()
+        while (time.time() - start) * 1000 < timeout_ms:
+            if not any(self.is_moving(i) for i in range(6)):
+                return
+            QApplication.processEvents()
+            time.sleep(0.05)
 
     # ── 워커 생명주기 ────────────────────────────────────────────────
 
@@ -253,6 +291,12 @@ class AcsStageController(QObject):
         self._worker = AcsWorker(self._api)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.setup)
+        
+        # 내부 캐시 업데이트 연결
+        self._worker.positions_updated.connect(self._update_cache)
+        self._worker.states_updated.connect(self._update_cache)
+        
+        # 외부 콜백 연결
         self._worker.positions_updated.connect(on_positions)
         self._worker.states_updated.connect(on_states)
         self._worker.connection_lost.connect(on_lost)
