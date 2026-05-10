@@ -235,9 +235,11 @@ class _KinematicMoveWorker(QThread):
             self.log.emit("[ACS] ① Servo ON")
             self._ctrl.enable_all()
  
-            # ② 서보 ON 확인 대기 1s
-            self.log.emit("[ACS] ② Servo ON 확인 대기 (1 s)")
-            self.msleep(self._SERVO_ON_MS)
+            # ② 서보 ON 확인 대기
+            self.log.emit("[ACS] ② Servo ON 상태 확인 대기...")
+            if not self._ctrl.wait_for_enabled_all(timeout_ms=self._SERVO_ON_MS):
+                raise RuntimeError("Servo ON 확인 실패 (Timeout)")
+            self.log.emit("[ACS] ② Servo ON 확인 완료")
  
             # ③ 전축 이동 명령 (동시 발사 — wait=False)
             motor_names = ["Y1", "Z1", "X1", "Z2", "Y2", "Z3"]
@@ -749,14 +751,14 @@ class AcsStagePanel(QWidget):
     def _on_enable_all(self):
         ctrl = self._ctrl_ref[0]
         if ctrl:
-            threading.Thread(target=ctrl.enable_all, daemon=True).start()
+            ctrl.enable_all()
             self._auto_disable_timer.start()  # 수동 Enable 시 5분 타이머 시작
             self._log("[ACS] ENABLE ALL (5분 후 자동 서보 OFF 예약)")
 
     def _on_disable_all(self):
         ctrl = self._ctrl_ref[0]
         if ctrl:
-            threading.Thread(target=ctrl.disable_all, daemon=True).start()
+            ctrl.disable_all()
             self._auto_disable_timer.stop()
             self._log("[ACS] DISABLE ALL")
 
