@@ -21,23 +21,30 @@ from ui.main_window import MainWindow
 from core.spe_reader import SpeFile
 from core.logger import app_logger, sys_logger
 
+_FATAL_ERROR_SHOWN = False
+
 def _global_exception_handler(exc_type, exc_value, exc_traceback):
-    """[Phase 1] 전역 예외 처리기: 미처리 에러를 가로채어 로그 파일에 기록"""
-    if issubclass(exc_type, KeyboardInterrupt):
-        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+    global _FATAL_ERROR_SHOWN
+    if issubclass(exc_type, KeyboardInterrupt) or _FATAL_ERROR_SHOWN:
         return
-        
-    err_msg = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
-    sys_logger.critical(f"Uncaught Exception:\n{err_msg}")
     
-    if QApplication.instance():
-      
+    _FATAL_ERROR_SHOWN = True
+    err_msg = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+    sys_logger.critical(f"FATAL Uncaught Exception:\n{err_msg}")
+    
+    app = QApplication.instance()
+    if app:
+        # 모든 타이머/이벤트 중지 시도
+        app.quit()
+        
         msg_box = QMessageBox()
         msg_box.setIcon(QMessageBox.Icon.Critical)
         msg_box.setWindowTitle("Fatal Error")
-        msg_box.setText("프로그램 실행 중 치명적인 오류가 발생했습니다.\n로그 파일(logs/)을 확인해주세요.")
+        msg_box.setText("치명적인 오류가 발생하여 프로그램을 종료합니다.")
         msg_box.setDetailedText(err_msg)
         msg_box.exec()
+        
+    sys.exit(1)
 
 sys.excepthook = _global_exception_handler
 

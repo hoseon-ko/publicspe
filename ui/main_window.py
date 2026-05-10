@@ -245,6 +245,10 @@ class MainWindow(QMainWindow):
         self.live_tab.acs_stage_panel.acs_connected.connect(self.kin_tab.set_acs_ctrl)
         self.live_tab.acs_stage_panel.acs_disconnected.connect(self.kin_tab.clear_acs_ctrl)
 
+        # Kinematic 탭에서 직접 연결한 경우 Live 탭에도 전파
+        self.kin_tab.acs_panel.acs_connected.connect(self.live_tab.acs_stage_panel.set_controller)
+        self.kin_tab.acs_panel.acs_disconnected.connect(lambda: self.live_tab.acs_stage_panel.set_controller(None))
+
         # 하드웨어 공유: Live ↔ DeepAlign
         self.live_tab.camera_connected.connect(self.deep_align_tab.set_shared_cameraera)
         self.live_tab.camera_disconnected.connect(self.deep_align_tab.clear_shared_cameraera)

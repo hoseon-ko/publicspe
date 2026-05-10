@@ -168,6 +168,7 @@ class AcquisitionTab(QWidget):
         self._bm = BackgroundManager.instance()
         self._bm.bg_changed.connect(self._on_bg_changed)
         self._build_ui()
+        self._restore_settings()
 
     def _estimate_frame_timing(self, exposure_ms: float, timeout_s: float) -> tuple[float, float, float, float]:
         """프레임 시간 모델(Exposure + Readout + Delta)을 계산한다.
@@ -361,17 +362,16 @@ class AcquisitionTab(QWidget):
         self.grp_adc.setVisible(False)
         left.addWidget(self.grp_adc)
 
-        # 저장 경로
-        grp_save = CollapsibleSection("SAVE", accent=C_ACCENT)
+        # 저장 경로 및 파일 네이밍
+        grp_save = CollapsibleSection("SAVE & FILE NAMING", accent=C_ACCENT)
         gs = grp_save.content_layout()
+        
         path_row = QHBoxLayout()
         lbl_dir = QLabel("Dir:")
         lbl_dir.setStyleSheet(_LBL)
+        lbl_dir.setFixedWidth(50)
         self.edit_save_dir = QLineEdit("acquisitions")
-        self.edit_save_dir.setStyleSheet(f"""
-            QLineEdit {{ background: #080e1e; border: 1px solid #0f3460; color: #c0d0ff;
-                border-radius: 3px; font-family: '{_FC}'; font-size: {_FS_CTRL}; padding: 2px 4px; }}
-        """)
+        self.edit_save_dir.setStyleSheet(EDIT_STYLE)
         btn_browse = QPushButton("…")
         btn_browse.setFixedWidth(30)
         btn_browse.setStyleSheet(_BTN)
@@ -381,11 +381,43 @@ class AcquisitionTab(QWidget):
         path_row.addWidget(btn_browse)
         gs.addLayout(path_row)
 
+        gs.addWidget(QFrame(frameShape=QFrame.Shape.HLine, styleSheet="color: #0f3460;"))
+
+        # Base Name
+        name_row = QHBoxLayout()
+        lbl_name = QLabel("Base Name:")
+        lbl_name.setStyleSheet(_LBL)
+        lbl_name.setFixedWidth(80)
+        self.edit_base_name = QLineEdit("picam_data")
+        self.edit_base_name.setStyleSheet(EDIT_STYLE)
+        self.edit_base_name.textChanged.connect(self._update_file_preview)
+        name_row.addWidget(lbl_name)
+        name_row.addWidget(self.edit_base_name, 1)
+        gs.addLayout(name_row)
+
+        # Options Row (Date, Time, Inc)
+        opt_row = QHBoxLayout()
+        self.check_inc_date = QCheckBox("Date")
+        self.check_inc_time = QCheckBox("Time")
+        self.check_inc_num = QCheckBox("Inc")
+        for cb in [self.check_inc_date, self.check_inc_time, self.check_inc_num]:
+            cb.setChecked(True)
+            cb.setStyleSheet(CHECKBOX_STYLE)
+            cb.toggled.connect(self._update_file_preview)
+            opt_row.addWidget(cb)
+        gs.addLayout(opt_row)
+
+        # Preview
+        self.lbl_file_preview = QLabel("picam_data_20240101_120000_001.spe")
+        self.lbl_file_preview.setStyleSheet(f"color: #4ecdc4; font-family: '{_FC}'; font-size: 11px; padding: 4px; background: #080e1e; border-radius: 2px;")
+        self.lbl_file_preview.setWordWrap(True)
+        gs.addWidget(self.lbl_file_preview)
+
+        gs.addWidget(QFrame(frameShape=QFrame.Shape.HLine, styleSheet="color: #0f3460;"))
+
         self.check_auto_open = QCheckBox("획득 후 Analysis 탭에서 자동으로 열기")
         self.check_auto_open.setChecked(True)
-        self.check_auto_open.setStyleSheet(
-            f"QCheckBox {{ color: #8090a8; font-family: '{_FC}'; font-size: {_FS_CTRL}; }}"
-        )
+        self.check_auto_open.setStyleSheet(CHECKBOX_STYLE)
         gs.addWidget(self.check_auto_open)
         left.addWidget(grp_save)
 
@@ -504,9 +536,19 @@ class AcquisitionTab(QWidget):
         right_widget.setLayout(right_layout)
         root.addWidget(right_widget, 1)
 
-        # ── 시그널 연결 ───────────────────────────────────────────────
         self.btn_acquire.clicked.connect(self._start_acquisition)
         self.spin_exposure.valueChanged.connect(self._on_exposure_spin_changed)
+        
+        # 설정 자동 저장 연결
+        self.edit_save_dir.textChanged.connect(self._save_settings)
+        self.edit_base_name.textChanged.connect(self._save_settings)
+        self.check_inc_date.toggled.connect(self._save_settings)
+        self.check_inc_time.toggled.connect(self._save_settings)
+        self.check_inc_num.toggled.connect(self._save_settings)
+        self.spin_exposure.valueChanged.connect(self._save_settings)
+        self.spin_frames.valueChanged.connect(self._save_settings)
+        self.spin_timeout.valueChanged.connect(self._save_settings)
+        self.check_auto_open.toggled.connect(self._save_settings)
 
     def _on_exposure_spin_changed(self, ms: float):
         """Acquisition 노출 UI 변경을 외부 탭에 전달한다 (카메라 즉시 적용 안 함)."""
@@ -860,12 +902,32 @@ class AcquisitionTab(QWidget):
             return frames
         return self._bm.apply_list([np.asarray(f) for f in frames])
 
+    def _update_file_preview(self):
+        base = self.edit_base_name.text().strip() or "data"
+        ts = ""
+        if self.check_inc_date.isChecked(): ts += datetime.now().strftime("_%Y%m%d")
+        if self.check_inc_time.isChecked(): ts += datetime.now().strftime("_%H%M%S")
+        num = "_001" if self.check_inc_num.isChecked() else ""
+        self.lbl_file_preview.setText(f"{base}{ts}{num}.spe")
+
     def _save_spe(self, frames: list) -> Path:
         save_dir = Path(self.edit_save_dir.text().strip() or "acquisitions")
         save_dir.mkdir(parents=True, exist_ok=True)
 
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"picam_{ts}_{len(frames)}frames.spe"
+        base = self.edit_base_name.text().strip() or "picam"
+        ts = ""
+        if self.check_inc_date.isChecked(): ts += datetime.now().strftime("_%Y%m%d")
+        if self.check_inc_time.isChecked(): ts += datetime.now().strftime("_%H%M%S")
+        
+        filename = f"{base}{ts}"
+        if self.check_inc_num.isChecked():
+            idx = 1
+            while (save_dir / f"{filename}_{idx:03d}.spe").exists():
+                idx += 1
+            filename = f"{filename}_{idx:03d}.spe"
+        else:
+            filename = f"{filename}.spe"
+
         out_path = save_dir / filename
 
         if self._camera is not None and isinstance(self._camera, PicamCamera):
@@ -899,6 +961,10 @@ class AcquisitionTab(QWidget):
     def _save_settings(self):
         s = QSettings("SpeAnalyze", "AcquisitionTab")
         s.setValue("save_dir", self.edit_save_dir.text())
+        s.setValue("base_name", self.edit_base_name.text())
+        s.setValue("inc_date", self.check_inc_date.isChecked())
+        s.setValue("inc_time", self.check_inc_time.isChecked())
+        s.setValue("inc_num", self.check_inc_num.isChecked())
         s.setValue("exposure", self.spin_exposure.value())
         s.setValue("frames", self.spin_frames.value())
         s.setValue("timeout", self.spin_timeout.value())
@@ -908,10 +974,15 @@ class AcquisitionTab(QWidget):
     def _restore_settings(self):
         s = QSettings("SpeAnalyze", "AcquisitionTab")
         self.edit_save_dir.setText(s.value("save_dir", "acquisitions"))
+        self.edit_base_name.setText(s.value("base_name", "picam_data"))
+        self.check_inc_date.setChecked(s.value("inc_date", True, type=bool))
+        self.check_inc_time.setChecked(s.value("inc_time", True, type=bool))
+        self.check_inc_num.setChecked(s.value("inc_num", True, type=bool))
         self.spin_exposure.setValue(float(s.value("exposure", 100.0)))
         self.spin_frames.setValue(int(s.value("frames", 10)))
         self.spin_timeout.setValue(float(s.value("timeout", 30.0)))
         self.check_auto_open.setChecked(s.value("auto_open", True, type=bool))
+        self._update_file_preview()
 
     def cleanup(self):
         """카메라는 LiveTab 소유이므로 여기서 해제하지 않는다."""

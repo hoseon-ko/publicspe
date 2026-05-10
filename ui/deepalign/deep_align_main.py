@@ -285,9 +285,9 @@ class DeepAlignMainTab(QWidget):
 
     def _create_master_bar(self):
         bar = QFrame()
-        bar.setFixedHeight(65)
+        bar.setFixedHeight(75)
         bar.setStyleSheet(
-            "background-color: #020617; border-top: 1px solid #991b1b;"
+            "background-color: #020617; border-top: 4px solid #ef4444;"
         )
         lay = QHBoxLayout(bar)
         lay.setContentsMargins(15, 10, 15, 5)
@@ -333,25 +333,41 @@ class DeepAlignMainTab(QWidget):
 
         lay.addWidget(self.master_btn_stack)
 
-        # 진행 영역
-        prog_lay = QVBoxLayout(); prog_lay.setSpacing(4); prog_lay.setContentsMargins(10, 8, 10, 8)
+        # 진행 영역 (Premium Progress Bar)
+        prog_lay = QVBoxLayout(); prog_lay.setSpacing(6); prog_lay.setContentsMargins(10, 5, 10, 5)
         top_row = QHBoxLayout()
         self.lbl_frame_info = QLabel("FRAME: <font color='#f8fafc'>— / —</font>")
-        self.lbl_frame_info.setStyleSheet("font-size: 10px; font-weight: 800; color: #64748b; border: none;")
-        self.lbl_times = QLabel("ELAPSED: <font color='#f8fafc'>--:--:--</font>")
-        self.lbl_times.setStyleSheet("font-size: 10px; font-weight: 800; color: #64748b; border: none;")
+        self.lbl_frame_info.setStyleSheet("font-size: 11px; font-weight: 800; color: #94a3b8; border: none;")
+        self.lbl_times = QLabel("ELAPSED: <font color='#f8fafc'>00:00:00</font> | REMAIN: <font color='#f8fafc'>00:00:00</font> | ETA: <font color='#f8fafc'>00:00:00</font>")
+        self.lbl_times.setStyleSheet("font-size: 11px; font-weight: 800; color: #94a3b8; border: none;")
         top_row.addWidget(self.lbl_frame_info); top_row.addStretch(); top_row.addWidget(self.lbl_times)
         prog_lay.addLayout(top_row)
 
-        self.prog_bar = QFrame(); self.prog_bar.setFixedHeight(12)
-        self.prog_bar.setStyleSheet("background: #0f172a; border-radius: 6px; border: 1px solid #1e293b;")
-        pb_lay = QHBoxLayout(self.prog_bar); pb_lay.setContentsMargins(0, 0, 0, 0)
-        self.prog_fill = QFrame(); self.prog_fill.setFixedHeight(12)
+        # Container for progress bar and centered text
+        self.prog_container = QFrame(); self.prog_container.setFixedHeight(22)
+        self.prog_container.setStyleSheet("background: #0f172a; border-radius: 11px; border: 1px solid #1e293b;")
+        
+        container_lay = QGridLayout(self.prog_container)
+        container_lay.setContentsMargins(0, 0, 0, 0)
+        
+        self.prog_fill = QFrame(); self.prog_fill.setFixedHeight(22)
         self.prog_fill.setStyleSheet(
-            "background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #e11d48,stop:1 #fb7185); border-radius: 6px;"
+            "background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #e11d48,stop:1 #fb7185); border-radius: 11px;"
         )
-        pb_lay.addWidget(self.prog_fill, 0); pb_lay.addStretch(100)
-        prog_lay.addWidget(self.prog_bar)
+        container_lay.addWidget(self.prog_fill, 0, 0)
+        
+        self.lbl_prog_text = QLabel("0% COMPLETE")
+        self.lbl_prog_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_prog_text.setStyleSheet("color: white; font-size: 10px; font-weight: 900; background: transparent; border: none;")
+        container_lay.addWidget(self.lbl_prog_text, 0, 0)
+        
+        # Stretch handling for progress fill
+        self.prog_spacer = QWidget()
+        container_lay.addWidget(self.prog_spacer, 0, 1)
+        container_lay.setColumnStretch(0, 0) # Initial 0%
+        container_lay.setColumnStretch(1, 100)
+        
+        prog_lay.addWidget(self.prog_container)
         lay.addLayout(prog_lay, 1)
 
         # 텔레메트리
@@ -410,19 +426,21 @@ class DeepAlignMainTab(QWidget):
 
     def _dash_btn(self, title: str, sub: str, color: str) -> QPushButton:
         btn = QPushButton()
-        btn.setFixedSize(85, 45)
+        btn.setFixedSize(90, 48)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setStyleSheet(f"""
-            QPushButton {{ background: {color}; color: white; border-radius: 4px;
+            QPushButton {{ background: {color}; color: white; border-radius: 6px;
                            border: none; font-weight: 900; padding: 0; }}
-            QPushButton:hover {{ background: {color}dd; }}
+            QPushButton:hover {{ background: {color}cc; }}
+            QPushButton:pressed {{ background: {color}aa; margin-top: 1px; }}
         """)
-        lay = QVBoxLayout(btn); lay.setContentsMargins(0,5,0,5); lay.setSpacing(0)
+        lay = QVBoxLayout(btn); lay.setContentsMargins(0,6,0,6); lay.setSpacing(0)
         t = QLabel(title); t.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        t.setStyleSheet("font-size: 13px; background: transparent; border: none; color: white;")
+        t.setStyleSheet("font-size: 13px; font-weight: 900; background: transparent; border: none; color: white; letter-spacing: 0.5px;")
         lay.addWidget(t)
         if sub:
             s = QLabel(sub); s.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            s.setStyleSheet("font-size: 8px; background: transparent; border: none; color: rgba(255,255,255,0.8);")
+            s.setStyleSheet("font-size: 8px; font-weight: 800; background: transparent; border: none; color: rgba(255,255,255,0.9);")
             lay.addWidget(s)
         return btn
 
