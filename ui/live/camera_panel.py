@@ -99,6 +99,80 @@ class CameraControlPanel(QWidget):
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(6)
 
+        # ── 카메라 선택 그룹 ──────────────────────────────────────────
+        grp_dev = CollapsibleSection("CAMERA DEVICE")
+        gd = grp_dev.content_layout()
+
+        # 카메라 종류 선택
+        type_row = QHBoxLayout()
+        self.combo_cam_type = QComboBox()
+        self.combo_cam_type.addItems(["HIKVISION", "Picam", "SIMULATED"])
+        self.combo_cam_type.setStyleSheet("""
+            QComboBox { background: #080e1e; border: 1px solid #0f3460;
+                color: #c0d0ff; border-radius: 3px;
+                font-family: 'Courier New'; font-size: 14px; padding: 2px 6px; }
+            QComboBox::drop-down { border: none; }
+            QComboBox QAbstractItemView { background: #0f1729; color: #c0d0ff; }
+        """)
+        type_row.addWidget(QLabel("Type:"))
+        type_row.addWidget(self.combo_cam_type)
+        gd.addLayout(type_row)
+
+        # 디바이스 목록
+        self.camera_list = QListWidget()
+        self.camera_list.setFixedHeight(64)
+        self.camera_list.setStyleSheet("""
+            QListWidget { background: #080e1e; border: 1px solid #0f3460;
+                color: #8090a8; font-family: 'Courier New'; font-size: 14px; }
+            QListWidget::item:selected { background: #0f3460; color: #e94560; }
+        """)
+        gd.addWidget(self.camera_list)
+
+        row1 = QHBoxLayout()
+        self.btn_scan = QPushButton("SCAN")
+        self.btn_connect = QPushButton("CONNECT")
+        self.btn_disconnect = QPushButton("DISCONNECT")
+        for btn in (self.btn_scan, self.btn_connect, self.btn_disconnect):
+            btn.setStyleSheet(_BTN_STYLE)
+        row1.addWidget(self.btn_scan)
+        row1.addWidget(self.btn_connect)
+        row1.addWidget(self.btn_disconnect)
+        gd.addLayout(row1)
+
+        row2 = QHBoxLayout()
+        self.btn_start = QPushButton("▶ START")
+        self.btn_stop  = QPushButton("■ STOP")
+        self.btn_start.setStyleSheet(_BTN_STYLE)
+        self.btn_stop.setStyleSheet(_BTN_STYLE.replace("#4ecdc4", "#e94560"))
+        row2.addWidget(self.btn_start)
+        row2.addWidget(self.btn_stop)
+        gd.addLayout(row2)
+
+        row3 = QHBoxLayout()
+        self.btn_snap = QPushButton("📷 SNAP")
+        self.btn_snap.setStyleSheet(_BTN_STYLE.replace("#4ecdc4", "#ffe66d"))
+        self.btn_snap.setToolTip("단일 프레임 촬영 (라이브 정지 상태에서 사용)")
+        row3.addWidget(self.btn_snap)
+
+        self.check_gil_block = QCheckBox("Simulate GIL Block")
+        self.check_gil_block.setStyleSheet(_CHECK_STYLE)
+        self.check_gil_block.setToolTip("체크 시 UI 멈춤(GIL 독점) 현상 재현")
+        self.check_gil_block.setVisible(False)
+        row3.addWidget(self.check_gil_block)
+
+        gd.addLayout(row3)
+        
+        # [LightField Style] 단일 촬영 노출 게이지 바
+        from PyQt6.QtWidgets import QProgressBar
+        self.bar_snap_progress = QProgressBar()
+        self.bar_snap_progress.setFixedHeight(4)
+        self.bar_snap_progress.setTextVisible(False)
+        self.bar_snap_progress.setRange(0, 100)
+        self.bar_snap_progress.setValue(0)
+        self.bar_snap_progress.setStyleSheet(
+            "QProgressBar { background: transparent; border: none; } "
+            "QProgressBar::chunk { background: #ffe66d; border-radius: 2px; }"
+        )
         gd.addWidget(self.bar_snap_progress)
 
         self._sections.append(grp_dev)
