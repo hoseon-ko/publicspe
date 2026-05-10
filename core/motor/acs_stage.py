@@ -56,11 +56,10 @@ except Exception as e:
 AXIS_LABELS = ["Y1", "Z1", "X1", "Z2", "Y2", "Z3"]
 DEFAULT_PORT = 700
 
-# GetMotorState() 결과의 LSB가 ACSC_MST_ENABLE(모터 활성화) 비트.
-# ACS SDK 헤더의 ACSC_MST_ENABLE = 0x00000001 정의를 그대로 사용.
 # GetMotorState() 결과 비트 정의
-_MST_ENABLE = 0x01  # 모터 활성화 (Servo ON)
-_MST_INPOS  = 0x10  # In-Position (이동 완료)
+_MST_ENABLE   = 0x01  # 모터 활성화 (Servo ON)
+_MST_INMOTION = 0x02  # 이동 중 (In Motion)
+_MST_INPOS    = 0x10  # In-Position (이동 완료)
 
 
 def is_available() -> bool:
@@ -68,15 +67,18 @@ def is_available() -> bool:
 
 
 def _axis_enum(idx: int):
-    """0-based 인덱스를 ACS .NET Axis enum 으로 변환.
-    SDK가 미로딩 상태(테스트 환경)인 경우 정수 그대로 반환 — Api 호출 시 어차피 실패함.
-    """
-    names = [
-        "ACSC_AXIS_1", "ACSC_AXIS_2", "ACSC_AXIS_3",
-        "ACSC_AXIS_4", "ACSC_AXIS_5", "ACSC_AXIS_6",
-    ]
-    if _AxisEnum is not None and 0 <= idx < len(names):
-        return getattr(_AxisEnum, names[idx])
+    """0-based 인덱스를 ACS 실제 물리 축 번호(0, 1, 4, 5, 8, 9)로 변환."""
+    # 스크린샷 확인 결과: Axis 0(Y1), 1(Z1), 4(X1), 5(Z2), 8(Y2), 9(Z3)
+    mapping = [0, 1, 4, 5, 8, 9]
+    if 0 <= idx < len(mapping):
+        axis_num = mapping[idx]
+        if _AxisEnum is not None:
+            # Axis Enum이 로드된 경우 해당 Enum 값 반환 (예: Axis.ACSC_AXIS_0)
+            try:
+                return getattr(_AxisEnum, f"ACSC_AXIS_{axis_num}")
+            except AttributeError:
+                return axis_num
+        return axis_num
     return idx
 
 
@@ -105,9 +107,14 @@ class _PollingWorker(QObject):
                     
                     # 상세 상태 비트 체크
                     mstate = int(self._api.GetMotorState(ax))
+                    is_enabled = bool(mstate & _MST_ENABLE)
+                    is_inpos   = bool(mstate & _MST_INPOS)
+                    is_moving  = bool(mstate & _MST_INMOTION)
+                    
+                    # 최종 '이동 완료' 판정: 움직이지 않고(Move Done) AND 인포지션(In-Position)인 경우
                     states.append({
-                        "enabled": bool(mstate & _MST_ENABLE),
-                        "in_pos":  bool(mstate & _MST_INPOS)
+                        "enabled": is_enabled,
+                        "in_pos":  (not is_moving) and is_inpos
                     })
                 fail = 0
                 self.positions_updated.emit(positions)

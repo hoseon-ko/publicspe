@@ -55,15 +55,15 @@ DEFAULT_STAGE_SETUP_POS = np.array([
 ], dtype=float)
 
 DEFAULT_STAGE_ENCODER_POS = np.array([
-    [1277.5,   -1513.68,    0.0  ],
-    [   0.0,   -1592.31,  804.45 ],
-    [1052.41,  -1433.52,    0.0  ],
+    [   0.0,   1277.5,  -1513.68 ], # Stage 1 (X, Y, Z)
+    [ 804.45,     0.0,  -1592.31 ], # Stage 2 (X, Y, Z)
+    [   0.0,   1052.41, -1433.52 ], # Stage 3 (X, Y, Z)
 ], dtype=float)
-
+ 
 DEFAULT_DIRECTION = np.array([
-    [ 1.,  1.,  1.],
-    [ 1.,  1.,  1.],
-    [-1.,  1.,  1.],
+    [ 1.,  1.,  1.], # Stage 1 (X, Y, Z)
+    [ 1.,  1.,  1.], # Stage 2 (X, Y, Z)
+    [-1.,  1.,  1.], # Stage 3 (X, Y, Z) -> X is -1 per screenshot
 ], dtype=float)
 
 # Slave mapping (sm1X..sm3Z)
@@ -139,24 +139,26 @@ class KinematicCalc:
             d    = self.direction                # 모터 회전 방향 (+1 / -1)
 
             # 각 stage 별 변위 = (회전된 볼 위치) - (셋업 기준 위치)
-            # stage 0(=Y1/Z1)은 Y,Z 두 축 / stage 1(=X1/Z2)은 X,Z / stage 2(=Y2/Z3)은 Y,Z
+            # Stage 0: Y1, Z1 (Y=idx1, Z=idx2)
+            # Stage 1: X1, Z2 (X=idx0, Z=idx2)
+            # Stage 2: Y2, Z3 (Y=idx1, Z=idx2)
             final = np.zeros((3, 2))
-            final[0, 0] = ball[0, 0] - ssp3[0, 0]   # Stage0: ΔY
-            final[0, 1] = ball[0, 1] - ssp3[0, 1]   # Stage0: ΔZ
-            final[1, 0] = ball[1, 2] - ssp3[1, 2]   # Stage1: ΔX (인덱스 2 = X 컴포넌트)
-            final[1, 1] = ball[1, 1] - ssp3[1, 1]   # Stage1: ΔZ
-            final[2, 0] = ball[2, 0] - ssp3[2, 0]   # Stage2: ΔY
-            final[2, 1] = ball[2, 1] - ssp3[2, 1]   # Stage2: ΔZ
-
+            final[0, 0] = ball[0, 1] - ssp3[0, 1]   # Stage0: ΔY
+            final[0, 1] = ball[0, 2] - ssp3[0, 2]   # Stage0: ΔZ
+            final[1, 0] = ball[1, 0] - ssp3[1, 0]   # Stage1: ΔX
+            final[1, 1] = ball[1, 2] - ssp3[1, 2]   # Stage1: ΔZ
+            final[2, 0] = ball[2, 1] - ssp3[2, 1]   # Stage2: ΔY
+            final[2, 1] = ball[2, 2] - ssp3[2, 2]   # Stage2: ΔZ
+ 
             # 모터 절대 명령값 = 엔코더 기준 + 방향부호×변위
-            # (열 인덱스는 enc/d의 XYZ 컴포넌트 — 모터가 실제 움직이는 축)
+            # (각 축의 인덱스: X=0, Y=1, Z=2)
             cal_pos = np.array([
-                enc[0, 0] + final[0, 0] * d[0, 0],  # Y1 (stage0 Y축)
-                enc[0, 1] + final[0, 1] * d[0, 1],  # Z1 (stage0 Z축)
-                enc[1, 2] + final[1, 0] * d[1, 2],  # X1 (stage1 X축)
-                enc[1, 1] + final[1, 1] * d[1, 1],  # Z2 (stage1 Z축)
-                enc[2, 0] + final[2, 0] * d[2, 0],  # Y2 (stage2 Y축)
-                enc[2, 1] + final[2, 1] * d[2, 1],  # Z3 (stage2 Z축)
+                enc[0, 1] + final[0, 0] * d[0, 1],  # Y1 (Stage1 Y)
+                enc[0, 2] + final[0, 1] * d[0, 2],  # Z1 (Stage1 Z)
+                enc[1, 0] + final[1, 0] * d[1, 0],  # X1 (Stage2 X)
+                enc[1, 2] + final[1, 1] * d[1, 2],  # Z2 (Stage2 Z)
+                enc[2, 1] + final[2, 0] * d[2, 1],  # Y2 (Stage3 Y)
+                enc[2, 2] + final[2, 1] * d[2, 2],  # Z3 (Stage3 Z)
             ])
 
             ok, violations = self.check_interlock(cal_pos)
@@ -188,22 +190,22 @@ class KinematicCalc:
             piv = pivot_override if pivot_override is not None else self.pivot
             
             # 1. 모터 위치 → 볼 위치 (b1, b2, b3) 역산
-            # ball[stage, comp] = (motor - enc) / d + ssp
+            # b = [X1, Y1, Z1, X2, Y2, Z2, X3, Y3, Z3]
             b = np.zeros(9)
-            # Stage 0: Y1(0), Z1(1)
-            b[0] = (motor_positions[0] - enc[0, 0]) / d[0, 0] + ssp3[0, 0] # Y
-            b[1] = (motor_positions[1] - enc[0, 1]) / d[0, 1] + ssp3[0, 1] # Z
-            b[2] = ssp3[0, 2] # X는 stage0에서 고정
+            # Stage 1: Y1(0), Z1(1)
+            b[0] = ssp3[0, 0] # X 고정
+            b[1] = (motor_positions[0] - enc[0, 1]) / d[0, 1] + ssp3[0, 1] # Y
+            b[2] = (motor_positions[1] - enc[0, 2]) / d[0, 2] + ssp3[0, 2] # Z
             
-            # Stage 1: X1(2), Z2(3)
-            b[3] = ssp3[1, 0] # Y는 stage1에서 고정
-            b[4] = (motor_positions[3] - enc[1, 1]) / d[1, 1] + ssp3[1, 1] # Z
-            b[5] = (motor_positions[2] - enc[1, 2]) / d[1, 2] + ssp3[1, 2] # X
+            # Stage 2: X1(2), Z2(3)
+            b[3] = (motor_positions[2] - enc[1, 0]) / d[1, 0] + ssp3[1, 0] # X
+            b[4] = ssp3[1, 1] # Y 고정
+            b[5] = (motor_positions[3] - enc[1, 2]) / d[1, 2] + ssp3[1, 2] # Z
             
-            # Stage 2: Y2(4), Z3(5)
-            b[6] = (motor_positions[4] - enc[2, 0]) / d[2, 0] + ssp3[2, 0] # Y
-            b[7] = (motor_positions[5] - enc[2, 1]) / d[2, 1] + ssp3[2, 1] # Z
-            b[8] = ssp3[2, 2] # X는 stage2에서 고정
+            # Stage 3: Y2(4), Z3(5)
+            b[6] = ssp3[2, 0] # X 고정
+            b[7] = (motor_positions[4] - enc[2, 1]) / d[2, 1] + ssp3[2, 1] # Y
+            b[8] = (motor_positions[5] - enc[2, 2]) / d[2, 2] + ssp3[2, 2] # Z
             
             if x0 is None:
                 x0 = np.zeros(6)
