@@ -74,14 +74,33 @@ class AcsWorker(QObject):
     states_updated    = pyqtSignal(list)
     connection_lost   = pyqtSignal()
 
-    def __init__(self, api):
+    def __init__(self):
         super().__init__()
-        self._api = api
+        self._api = None
+        self._conn_params = None # (type, ip, port)
         self._timer = None
         self._is_polling = False
 
+    def set_connection_params(self, conn_type, ip=None, port=None):
+        self._conn_params = (conn_type, ip, port)
+
     @pyqtSlot()
     def setup(self):
+        # 1. API 객체 생성 및 연결을 반드시 이 스레드 내에서 수행!
+        try:
+            self._api = _Api()
+            conn_type, ip, port = self._conn_params
+            if conn_type == "ethernet":
+                self._api.OpenCommEthernetTCP(ip, port)
+            elif conn_type == "simulator":
+                self._api.OpenCommSimulator()
+            log.info(f"[ACS Worker] Connected via {conn_type}")
+        except Exception as e:
+            log.error(f"[ACS Worker] Connection failed: {e}")
+            self.connection_lost.emit()
+            return
+
+        # 2. 타이머 시작
         self._timer = QTimer()
         self._timer.timeout.connect(self._poll)
         self._timer.setInterval(200)
@@ -113,35 +132,27 @@ class AcsWorker(QObject):
             ax = _axis_enum(axis)
             mstate = int(self._api.GetMotorState(ax))
             is_enabled = bool(mstate & _MST_ENABLE)
-            is_moving  = bool(mstate & _MST_INMOTION)
 
-            # 1. 이미 원하는 상태라면 아무것도 하지 않음 (가장 중요)
+            # 이미 원하는 상태라면 중복 명령 방지
             if is_enabled == enable:
                 return
 
-            # 2. 상태를 바꿔야 하는데 이동 중이라면 강제 종료
-            if is_moving:
-                try:
-                    self._api.Kill(ax)
-                    time.sleep(0.05)
-                except: pass
-                
-            # 3. 실제 명령 수행
             if enable: 
                 self._api.Enable(ax)
             else: 
                 self._api.Disable(ax)
-                
         except Exception as e:
             log.error(f"[ACS Worker] Enable error (Axis {axis}): {e}")
 
     @pyqtSlot()
     def set_enable_all(self):
-        for i in range(6): self.set_enable(i, True)
+        for i in range(6): 
+            self.set_enable(i, True)
 
     @pyqtSlot()
     def set_disable_all(self):
-        for i in range(6): self.set_enable(i, False)
+        for i in range(6): 
+            self.set_enable(i, False)
 
     @pyqtSlot(int, float)
     def move_to(self, axis: int, target: float):
@@ -193,18 +204,16 @@ class AcsStageController(QObject):
 
     def connect(self, ip: str, port: int = DEFAULT_PORT):
         if not _ACS_OK: raise RuntimeError(f"DLL Load Failed: {_ACS_IMPORT_ERROR}")
-        self._api = _Api()
-        self._api.OpenCommEthernetTCP(ip, port)
         self._connected = True
         self._simulator = False
-        dev_logger.info(f"ACS Connected: {ip}:{port}")
+        self._conn_info = ("ethernet", ip, port)
+        dev_logger.info(f"ACS Connection requested: {ip}:{port}")
 
     def connect_simulator(self):
         if not _ACS_OK: raise RuntimeError(f"DLL Load Failed: {_ACS_IMPORT_ERROR}")
-        self._api = _Api()
-        self._api.OpenCommSimulator()
         self._connected = True
         self._simulator = True
+        self._conn_info = ("simulator", None, None)
 
     def disconnect(self):
         self.stop_polling()
@@ -294,7 +303,8 @@ class AcsStageController(QObject):
         if not self._connected: return
         self.stop_polling()
         self._thread = QThread()
-        self._worker = AcsWorker(self._api)
+        self._worker = AcsWorker()
+        self._worker.set_connection_params(*self._conn_info)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.setup)
         
