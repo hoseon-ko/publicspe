@@ -85,7 +85,11 @@ class CameraControlPanel(QWidget):
         self._temp_thread: Optional[TempPollerThread] = None
         self._cmd_thread:  Optional[QThread] = None
         self._cmd_worker:  Optional[_CamCommandWorker] = None
+        self._settings = QSettings("SpeAnalyze", "CameraPanel")
+        self._sections: list[CollapsibleSection] = []
+
         self._build_ui()
+        self._load_settings()
         self._set_connected(False)
 
     # ── UI 빌드 ───────────────────────────────────────────────────────
@@ -95,82 +99,9 @@ class CameraControlPanel(QWidget):
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(6)
 
-        # ── 카메라 선택 그룹 ──────────────────────────────────────────
-        grp_dev = CollapsibleSection("CAMERA DEVICE")
-        gd = grp_dev.content_layout()
-
-        # 카메라 종류 선택
-        type_row = QHBoxLayout()
-        self.combo_cam_type = QComboBox()
-        self.combo_cam_type.addItems(["HIKVISION", "Picam", "SIMULATED"])
-        self.combo_cam_type.setStyleSheet("""
-            QComboBox { background: #080e1e; border: 1px solid #0f3460;
-                color: #c0d0ff; border-radius: 3px;
-                font-family: 'Courier New'; font-size: 14px; padding: 2px 6px; }
-            QComboBox::drop-down { border: none; }
-            QComboBox QAbstractItemView { background: #0f1729; color: #c0d0ff; }
-        """)
-        type_row.addWidget(QLabel("Type:"))
-        type_row.addWidget(self.combo_cam_type)
-        gd.addLayout(type_row)
-
-        # 디바이스 목록
-        self.camera_list = QListWidget()
-        self.camera_list.setFixedHeight(64)
-        self.camera_list.setStyleSheet("""
-            QListWidget { background: #080e1e; border: 1px solid #0f3460;
-                color: #8090a8; font-family: 'Courier New'; font-size: 14px; }
-            QListWidget::item:selected { background: #0f3460; color: #e94560; }
-        """)
-        gd.addWidget(self.camera_list)
-
-        row1 = QHBoxLayout()
-        self.btn_scan = QPushButton("SCAN")
-        self.btn_connect = QPushButton("CONNECT")
-        self.btn_disconnect = QPushButton("DISCONNECT")
-        for btn in (self.btn_scan, self.btn_connect, self.btn_disconnect):
-            btn.setStyleSheet(_BTN_STYLE)
-        row1.addWidget(self.btn_scan)
-        row1.addWidget(self.btn_connect)
-        row1.addWidget(self.btn_disconnect)
-        gd.addLayout(row1)
-
-        row2 = QHBoxLayout()
-        self.btn_start = QPushButton("▶ START")
-        self.btn_stop  = QPushButton("■ STOP")
-        self.btn_start.setStyleSheet(_BTN_STYLE)
-        self.btn_stop.setStyleSheet(_BTN_STYLE.replace("#4ecdc4", "#e94560"))
-        row2.addWidget(self.btn_start)
-        row2.addWidget(self.btn_stop)
-        gd.addLayout(row2)
-
-        row3 = QHBoxLayout()
-        self.btn_snap = QPushButton("📷 SNAP")
-        self.btn_snap.setStyleSheet(_BTN_STYLE.replace("#4ecdc4", "#ffe66d"))
-        self.btn_snap.setToolTip("단일 프레임 촬영 (라이브 정지 상태에서 사용)")
-        row3.addWidget(self.btn_snap)
-
-        self.check_gil_block = QCheckBox("Simulate GIL Block")
-        self.check_gil_block.setStyleSheet(_CHECK_STYLE)
-        self.check_gil_block.setToolTip("체크 시 UI 멈춤(GIL 독점) 현상 재현")
-        self.check_gil_block.setVisible(False)
-        row3.addWidget(self.check_gil_block)
-
-        gd.addLayout(row3)
-        
-        # [LightField Style] 단일 촬영 노출 게이지 바
-        from PyQt6.QtWidgets import QProgressBar
-        self.bar_snap_progress = QProgressBar()
-        self.bar_snap_progress.setFixedHeight(4)
-        self.bar_snap_progress.setTextVisible(False)
-        self.bar_snap_progress.setRange(0, 100)
-        self.bar_snap_progress.setValue(0)
-        self.bar_snap_progress.setStyleSheet(
-            "QProgressBar { background: transparent; border: none; } "
-            "QProgressBar::chunk { background: #ffe66d; border-radius: 2px; }"
-        )
         gd.addWidget(self.bar_snap_progress)
 
+        self._sections.append(grp_dev)
         layout.addWidget(grp_dev)
 
         # ── 노출 그룹 ─────────────────────────────────────────────────
@@ -189,6 +120,8 @@ class CameraControlPanel(QWidget):
         ge.addWidget(lbl_exp)
         ge.addWidget(self.spin_exposure, 1)
         ge.addWidget(self.btn_apply_exp)
+        
+        self._sections.append(grp_exp)
         layout.addWidget(grp_exp)
 
         # ── FPS 그룹 (HIKVISION 전용) ─────────────────────────────────
@@ -207,6 +140,8 @@ class CameraControlPanel(QWidget):
         gf.addWidget(self.check_fps_lock)
         gf.addWidget(self.spin_fps, 1)
         gf.addWidget(self.btn_apply_fps)
+        
+        self._sections.append(self.grp_fps)
         layout.addWidget(self.grp_fps)
 
         # ── 평균화 그룹 ───────────────────────────────────────────────
@@ -245,6 +180,8 @@ class CameraControlPanel(QWidget):
         mode_row.addWidget(self.combo_temporal, 1)
         mode_row.addWidget(self.btn_reset_accum)
         ga.addLayout(mode_row)
+        
+        self._sections.append(grp_avg)
         layout.addWidget(grp_avg)
 
         # ── 이진화 / Centroid 그룹 (HIKVISION 전용) ──────────────────
@@ -316,6 +253,10 @@ class CameraControlPanel(QWidget):
         self._centroid_mode_grp.addButton(self.rb_centroid_binary,   0)
         self._centroid_mode_grp.addButton(self.rb_centroid_weighted, 1)
         gp.addWidget(centroid_mode_grp)
+        
+        self._sections.append(self.grp_proc)
+        self._sections.append(thresh_grp)    # 중첩 섹션
+        self._sections.append(centroid_mode_grp)
         layout.addWidget(self.grp_proc)
 
         # ── 로그 스케일 그룹 (HIKVISION 전용) ────────────────────────
@@ -336,6 +277,8 @@ class CameraControlPanel(QWidget):
         log_row.addWidget(self.spin_log)
         gl.addWidget(self.check_log)
         gl.addLayout(log_row)
+        
+        self._sections.append(self.grp_log)
         layout.addWidget(self.grp_log)
 
         # ── 배경 차분 그룹 (HIKVISION 전용) ──────────────────────────
@@ -354,6 +297,8 @@ class CameraControlPanel(QWidget):
         self.check_tdiff = QCheckBox("Frame Diff (시간 차분)")
         self.check_tdiff.setStyleSheet(_CHECK_STYLE)
         gb.addWidget(self.check_tdiff)
+        
+        self._sections.append(self.grp_bg)
         layout.addWidget(self.grp_bg)
 
         # ── Dark / Flat 그룹 (소프트웨어, 모든 카메라) ───────────────
@@ -377,6 +322,8 @@ class CameraControlPanel(QWidget):
         flat_row.addWidget(self.btn_cap_flat)
         flat_row.addWidget(self.btn_flat_toggle)
         gdf.addLayout(flat_row)
+        
+        self._sections.append(self.grp_dark)
         layout.addWidget(self.grp_dark)
 
         # ── Centroid + 통계 상태 표시 ────────────────────────────────
@@ -402,6 +349,8 @@ class CameraControlPanel(QWidget):
             "font-size: 14px; font-weight: bold;"
         )
         gc2.addWidget(self.lbl_sat)
+        
+        self._sections.append(self.grp_centroid)
         layout.addWidget(self.grp_centroid)
 
         # ── 온도 그룹 (Picam 전용) ────────────────────────────────────
@@ -424,6 +373,8 @@ class CameraControlPanel(QWidget):
         self.lbl_temp_status = QLabel("Reading: —")
         self.lbl_temp_status.setStyleSheet(_LBL_STYLE)
         gt.addWidget(self.lbl_temp_status)
+        
+        self._sections.append(self.grp_temp)
         layout.addWidget(self.grp_temp)
 
         # ── ADC 그룹 (Picam 전용) ─────────────────────────────────────
@@ -454,6 +405,8 @@ class CameraControlPanel(QWidget):
         self.btn_apply_adc = QPushButton("APPLY ADC")
         self.btn_apply_adc.setStyleSheet(_BTN_STYLE)
         gadc.addWidget(self.btn_apply_adc)
+        
+        self._sections.append(self.grp_adc)
         layout.addWidget(self.grp_adc)
 
         # ── 공간 필터 그룹 (소프트웨어, 모든 카메라) ─────────────────
@@ -499,6 +452,8 @@ class CameraControlPanel(QWidget):
         med_row.addWidget(self.check_median)
         med_row.addWidget(self.spin_median_k)
         gsf.addLayout(med_row)
+        
+        self._sections.append(self.grp_spatial)
         layout.addWidget(self.grp_spatial)
 
         # ── Display 스트레칭 그룹 ─────────────────────────────────────
@@ -556,9 +511,15 @@ class CameraControlPanel(QWidget):
         man_row.addWidget(lbl_mx); man_row.addWidget(self.spin_man_max)
         self.grp_stretch_man.setVisible(False)
         gst.addWidget(self.grp_stretch_man)
+        
+        self._sections.append(self.grp_stretch)
         layout.addWidget(self.grp_stretch)
 
         layout.addStretch()
+
+        # 섹션 변경 시 자동 저장 연결
+        for sec in self._sections:
+            sec.toggled.connect(self._save_settings)
 
         # ── 시그널 연결 ───────────────────────────────────────────────
         self.btn_scan.clicked.connect(self.camera_scan_requested)
@@ -961,3 +922,17 @@ class CameraControlPanel(QWidget):
             self.camera_list.addItem(item)
         if items:
             self.camera_list.setCurrentRow(0)
+
+    def _save_settings(self):
+        for sec in self._sections:
+            key = f"sec/{sec._title_lbl.text()}_collapsed"
+            self._settings.setValue(key, sec.is_collapsed())
+
+    def _load_settings(self):
+        for sec in self._sections:
+            key = f"sec/{sec._title_lbl.text()}_collapsed"
+            val = self._settings.value(key, None)
+            if val is not None:
+                # QSettings에서 가져올 때 bool 타입 명시
+                collapsed = str(val).lower() == 'true'
+                sec.set_collapsed(collapsed)

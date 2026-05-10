@@ -330,6 +330,12 @@ class AcsStagePanel(QWidget):
         self._build_kinematic_group(self.sec_kin.content_layout())
         root.addWidget(self.sec_kin)
 
+        # 섹션 변경 시 자동 저장 연결
+        self.sec_conn.toggled.connect(self._save_settings)
+        self.sec_axis.toggled.connect(self._save_settings)
+        self.sec_global.toggled.connect(self._save_settings)
+        self.sec_kin.toggled.connect(self._save_settings)
+
         root.addStretch()
 
     def _build_conn_group(self, lay: QVBoxLayout):

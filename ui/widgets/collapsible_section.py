@@ -13,7 +13,7 @@ ui/widgets/collapsible_section.py
 """
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve
+from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QSizePolicy,
 )
@@ -33,6 +33,7 @@ class CollapsibleSection(QWidget):
     │  content area                            │
     └──────────────────────────────────────────┘
     """
+    toggled = pyqtSignal(bool)  # 접힘 상태 변경 시 발생 (True: 접힘, False: 펼침)
 
     def __init__(
         self,
@@ -148,6 +149,7 @@ class CollapsibleSection(QWidget):
             return
         self._collapsed = collapsed
         self._arrow.setText("▶" if collapsed else "▼")
+        self.toggled.emit(collapsed)
 
         if animated:
             self._run_animation(target_h=0 if collapsed else -1)

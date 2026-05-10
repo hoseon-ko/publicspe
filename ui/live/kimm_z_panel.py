@@ -81,6 +81,11 @@ class KIMMZPanel(QWidget):
         self._build_settings_group(self.sec_set.content_layout())
         root.addWidget(self.sec_set)
 
+        # 섹션 변경 시 자동 저장 연결
+        self._sections = [self.sec_conn, self.sec_stat, self.sec_ctrl, self.sec_set]
+        for sec in self._sections:
+            sec.toggled.connect(self._save_settings)
+
         root.addStretch()
 
     def _build_conn_group(self, lay: QVBoxLayout):
@@ -361,12 +366,24 @@ class KIMMZPanel(QWidget):
         self._settings.setValue(_SETTINGS_KEY_VEL,   self.spin_vel.value())
         self._settings.setValue(_SETTINGS_KEY_DRY,   self.check_dry.isChecked())
 
+        # 섹션 상태 저장
+        for sec in self._sections:
+            key = f"kimm/sec_{sec._title_lbl.text().replace(' ', '_').lower()}_collapsed"
+            self._settings.setValue(key, sec.is_collapsed())
+
     def _load_settings(self):
         self.edit_ip.setText(self._settings.value(_SETTINGS_KEY_IP,   "192.168.1.100"))
         self.edit_port.setText(self._settings.value(_SETTINGS_KEY_PORT, "5000"))
         self.spin_limit.setValue(float(self._settings.value(_SETTINGS_KEY_LIMIT, 10000.0)))
         self.spin_vel.setValue(float(self._settings.value(_SETTINGS_KEY_VEL, 10.0)))
         self.check_dry.setChecked(self._settings.value(_SETTINGS_KEY_DRY, False, type=bool))
+
+        # 섹션 상태 복원
+        for sec in self._sections:
+            key = f"kimm/sec_{sec._title_lbl.text().replace(' ', '_').lower()}_collapsed"
+            val = self._settings.value(key, None)
+            if val is not None:
+                sec.set_collapsed(str(val).lower() == 'true')
 
     # ── 로그 헬퍼 ─────────────────────────────────────────────────────
 

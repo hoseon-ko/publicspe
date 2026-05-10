@@ -399,6 +399,19 @@ class LiveTab(QMainWindow):
 
         sidebar_v.addStretch(1)
 
+        # ── #21 상태 복원 ──
+        _s = QSettings("SpeAnalyze", "LiveTab")
+        self._sec_cam  .set_collapsed(_s.value("sec/camera_collapsed",  False, type=bool))
+        self._sec_motor.set_collapsed(_s.value("sec/motor_collapsed",   False, type=bool))
+        self._sec_kimm .set_collapsed(_s.value("sec/kimm_collapsed",    True,  type=bool))
+        self._sec_acs  .set_collapsed(_s.value("sec/acs_collapsed",     True,  type=bool))
+
+        # 변경 시 자동 저장 연결
+        self._sec_cam  .toggled.connect(lambda c: _s.setValue("sec/camera_collapsed", c))
+        self._sec_motor.toggled.connect(lambda c: _s.setValue("sec/motor_collapsed", c))
+        self._sec_kimm .toggled.connect(lambda c: _s.setValue("sec/kimm_collapsed", c))
+        self._sec_acs  .toggled.connect(lambda c: _s.setValue("sec/acs_collapsed", c))
+
         left_scroll = QScrollArea()
         left_scroll.setWidget(sidebar)
         left_scroll.setWidgetResizable(True)

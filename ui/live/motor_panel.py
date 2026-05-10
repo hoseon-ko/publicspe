@@ -246,6 +246,11 @@ class MotorPanel(QWidget):
         self._build_weight_group(self.sec_weight.content_layout())
         layout.addWidget(self.sec_weight)
 
+        # 섹션 변경 시 자동 저장 연결
+        self._sections = [self.sec_conn, self.sec_axes, self.sec_weight]
+        for sec in self._sections:
+            sec.toggled.connect(self._save_step_settings)
+
         # ── 포지션 스냅샷 라벨 ────────────────────────────────────────
         self.lbl_snapshot = QLabel("M1:—  M2:—  M3:—  M4:—")
         self.lbl_snapshot.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -586,6 +591,13 @@ class MotorPanel(QWidget):
             bwd = s.value(f"weight_bwd_m{m}", sb.value(), type=float)
             sf.setValue(fwd)
             sb.setValue(bwd)
+        
+        # 섹션 상태 복원
+        for sec in self._sections:
+            key = f"sec/{sec._title_lbl.text()}_collapsed"
+            val = s.value(key, None)
+            if val is not None:
+                sec.set_collapsed(str(val).lower() == 'true')
 
     def _save_step_settings(self):
         """스텝 값 + 가중치를 QSettings에 저장."""
@@ -595,6 +607,12 @@ class MotorPanel(QWidget):
         for m, (sf, sb) in self._weight_spins.items():
             s.setValue(f"weight_fwd_m{m}", sf.value())
             s.setValue(f"weight_bwd_m{m}", sb.value())
+        
+        # 섹션 상태 저장
+        for sec in self._sections:
+            key = f"sec/{sec._title_lbl.text()}_collapsed"
+            s.setValue(key, sec.is_collapsed())
+            
         s.sync()
 
     # ── Public ────────────────────────────────────────────────────────
