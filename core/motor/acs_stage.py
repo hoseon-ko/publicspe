@@ -110,6 +110,11 @@ class AcsWorker(QObject):
     def set_enable(self, axis: int, enable: bool):
         try:
             ax = _axis_enum(axis)
+            mstate = int(self._api.GetMotorState(ax))
+            # 이동 중이면 먼저 멈춤 (bit 0x02: In Motion)
+            if mstate & _MST_INMOTION:
+                self._api.Halt(ax)
+                
             if enable: self._api.Enable(ax)
             else: self._api.Disable(ax)
         except Exception as e:
