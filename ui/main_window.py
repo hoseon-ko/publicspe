@@ -553,5 +553,14 @@ class MainWindow(QMainWindow):
                     print(f"Error restoring settings for {type(tab).__name__}: {e}")
 
     def closeEvent(self, event):
+        """프로그램 종료 시 폴링 스레드 및 타이머 안전 종료"""
+        try:
+            if hasattr(self.live_tab, "stop_polling"):
+                self.live_tab.stop_polling()
+            if hasattr(self.kin_tab, "acs_panel") and self.kin_tab.acs_panel:
+                self.kin_tab.acs_panel.stop_polling()
+        except Exception as e:
+            print(f"Close cleanup error: {e}")
+            
         self.save_all_settings()
         super().closeEvent(event)

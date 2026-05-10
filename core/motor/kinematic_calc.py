@@ -280,3 +280,102 @@ class KinematicCalc:
             self.pivot[1] + bpath * np.sin(bz_rad) * -1,
             self.pivot[2] + bpath * np.cos(bz_rad),
         ])
+
+    # ── Workspace Analysis (역산 및 시뮬레이션) ───────────────────────────
+
+    def is_reachable(self, trans_mm: list[float], rotate_mrad: list[float]) -> bool:
+        """해당 좌표가 모든 모터 리밋 내에 있는지 확인."""
+        cal_pos, _, ok, _ = self.calculate(trans_mm, rotate_mrad)
+        return ok
+
+    def get_axis_limits(self, axis_idx: int, trans_mm: list[float], rotate_mrad: list[float], 
+                        search_range: float = 30.0, step: float = 0.1) -> tuple[float, float]:
+        """
+        특정 축(0..5: Tx, Ty, Tz, Rx, Ry, Rz)의 현재 상태 기준 최대/최소 가동 범위를 역산.
+        이분 탐색(Binary Search)으로 정밀하게 한계점을 찾습니다.
+        """
+        def check(val: float) -> bool:
+            t, r = list(trans_mm), list(rotate_mrad)
+            if axis_idx < 3: t[axis_idx] = val
+            else: r[axis_idx-3] = val
+            return self.is_reachable(t, r)
+
+        current_val = trans_mm[axis_idx] if axis_idx < 3 else rotate_mrad[axis_idx-3]
+        
+        # Upper Limit 찾기
+        high = current_val + search_range
+        low = current_val
+        for _ in range(12): # ~0.007 precision
+            mid = (low + high) / 2
+            if check(mid): low = mid
+            else: high = mid
+        max_val = low
+
+        # Lower Limit 찾기
+        high = current_val
+        low = current_val - search_range
+        for _ in range(12):
+            mid = (low + high) / 2
+            if check(mid): high = mid
+            else: low = mid
+        min_val = high
+
+        return min_val, max_val
+
+    def get_reachability_matrix(self, plane: str, fixed_vals: dict, 
+                                range_x: tuple[float, float], range_y: tuple[float, float], 
+                                resolution: int = 40) -> np.ndarray:
+        """
+        특정 평면(예: 'XY')의 도달 가능 여부 행렬을 생성.
+        fixed_vals: {'tz':0, 'rx':0, 'ry':0, 'rz':0} 등
+        """
+        xs = np.linspace(range_x[0], range_x[1], resolution)
+        ys = np.linspace(range_y[0], range_y[1], resolution)
+        matrix = np.zeros((resolution, resolution), dtype=bool)
+
+        t = [fixed_vals.get('tx', 0), fixed_vals.get('ty', 0), fixed_vals.get('tz', 0)]
+        r = [fixed_vals.get('rx', 0), fixed_vals.get('ry', 0), fixed_vals.get('rz', 0)]
+
+        for i, y in enumerate(ys):
+            for j, x in enumerate(xs):
+                if plane == 'XY': t[0], t[1] = x, y
+                elif plane == 'XZ': t[0], t[2] = x, y
+                elif plane == 'RxRy': r[0], r[1] = x/1000.0, y/1000.0 # mrad -> rad
+                matrix[i, j] = self.is_reachable(t, r)
+        
+        return matrix
+
+    def find_largest_rectangle(self, matrix: np.ndarray, xs: np.ndarray, ys: np.ndarray) -> tuple[float, float, float, float]:
+        """
+        Binary matrix 내에서 가장 큰 면적의 직사각형 영역을 찾음.
+        Returns: (min_x, max_x, min_y, max_y)
+        """
+        rows, cols = matrix.shape
+        heights = np.zeros(cols, dtype=int)
+        max_area = 0
+        best_rect = (0, 0, 0, 0) # (left, right, bottom, top)
+
+        for r in range(rows):
+            # 현재 행 기준 높이 업데이트
+            for c in range(cols):
+                if matrix[r, c]: heights[c] += 1
+                else: heights[c] = 0
+            
+            # Histogram에서 최대 직사각형 찾기 알고리즘
+            stack = []
+            for i, h in enumerate(np.append(heights, 0)):
+                while stack and heights[stack[-1]] >= h:
+                    height = heights[stack.pop()]
+                    width = i if not stack else i - stack[-1] - 1
+                    area = height * width
+                    if area > max_area:
+                        max_area = area
+                        right = i - 1
+                        left = i - width
+                        bottom = r - height + 1
+                        top = r
+                        best_rect = (left, right, bottom, top)
+                stack.append(i)
+
+        l, r, b, t = best_rect
+        return (xs[l], xs[r], ys[b], ys[t])

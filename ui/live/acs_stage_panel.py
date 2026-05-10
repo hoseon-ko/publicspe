@@ -601,6 +601,29 @@ class AcsStagePanel(QWidget):
         row_set.addWidget(self.spin_settle)
         lay.addLayout(row_set)
 
+    # ── 제어기 주입 (External Injection) ──────────────────────────────
+
+    def set_controller(self, ctrl: AcsStageController | None):
+        """외부(MainWindow 등)에서 연결된 컨트롤러를 주입받아 UI를 동기화."""
+        self._ctrl_ref[0] = ctrl
+        if ctrl:
+            # 연결된 상태 UI로 전환
+            label = "EXTERNAL" if not ctrl.is_simulator else "SIMULATOR"
+            self.lbl_status.setText(f"● CONNECTED  [{label}]")
+            self.lbl_status.setStyleSheet(lbl(C_ACCENT, mono=True, bold=True))
+            self.btn_connect.setEnabled(False)
+            self.btn_disconnect.setEnabled(True)
+            self.edit_ip.setEnabled(False)
+            self.edit_port.setEnabled(False)
+            self.check_sim.setEnabled(False)
+            for b in self._move_btns:
+                b.setEnabled(True)
+            
+            # 이미 폴링 중이더라도 콜백 재등록 (안전성)
+            ctrl.start_polling(self._on_positions, self._on_states, self._on_lost)
+        else:
+            self._set_disconnected_ui()
+
     # ── 연결 / 해제 ────────────────────────────────────────────────────
 
     def _on_connect(self):
@@ -985,6 +1008,13 @@ class AcsStagePanel(QWidget):
             self.acs_connected.emit(ctrl)
 
     # ── 로그 ─────────────────────────────────────────────────────────
+
+    def stop_polling(self):
+        """프로그램 종료 시 호출하여 모든 내부 타이머 중지"""
+        if hasattr(self, "_polling_timer") and self._polling_timer:
+            self._polling_timer.stop()
+        if hasattr(self, "_auto_disable_timer") and self._auto_disable_timer:
+            self._auto_disable_timer.stop()
 
     def _log(self, msg: str):
         self.log_message.emit(msg)
