@@ -1,4 +1,5 @@
 
+from core.motor.acs_stage import AcsStageController
 from PyQt6.QtWidgets import (QDoubleSpinBox, QGroupBox, QSplitter, QTextEdit, QWidget, 
                              QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QLineEdit, 
                              QPushButton, QComboBox, QFrame, QSlider, QSpinBox)
