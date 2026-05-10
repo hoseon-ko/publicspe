@@ -438,11 +438,11 @@ class DeepAlignMainTab(QWidget):
     # 공개 API (main_window 에서 호출)
     # ─────────────────────────────────────────────────────────────────
 
-    def set_shared_camera(self, cam):
-        self._cam = cam
+    def set_shared_cameraera(self, camera):
+        self._camera = camera
 
-    def clear_shared_camera(self):
-        self._cam = None
+    def clear_shared_cameraera(self):
+        self._camera = None
 
     def set_kimm_ctrl(self, ctrl):
         self._kimm = ctrl

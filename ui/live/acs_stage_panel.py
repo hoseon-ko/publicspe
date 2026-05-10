@@ -276,11 +276,11 @@ class AcsStagePanel(QWidget):
     acs_connected   = pyqtSignal(object)   # AcsStageController
     acs_disconnected = pyqtSignal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, ctrl: AcsStageController = None):
         super().__init__(parent)
         # _ctrl_ref: _AxisRow 인스턴스들이 컨트롤러를 공유하기 위한 mutable 컨테이너.
         # 연결/해제 시 [0] 슬롯만 갱신하면 모든 _AxisRow가 즉시 새 ctrl을 본다.
-        self._ctrl_ref: list[AcsStageController | None] = [None]
+        self._ctrl_ref: list[AcsStageController | None] = [ctrl]
         self._move_btns: list[QPushButton] = []
         self._axis_rows: list[_AxisRow] = []
         self._motion_widgets: list[QWidget] = [] # 잠금 대상 위젯 리스트

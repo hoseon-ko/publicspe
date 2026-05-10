@@ -29,6 +29,7 @@ from ui.scan.scan_tab import ScanTab
 from ui.autofocus.autofocus_tab import AutoFocusTab
 from ui.kinematic.kinematic_tab import KinematicTab
 from ui.deepalign.deep_align_main import DeepAlignMainTab
+from core.motor.acs_stage import AcsStageController
 from theme.styles import Fonts, Sizes, C_ACCENT, C_TEXT_DIM, C_BG_MED, C_BORDER
 from core.logger import app_logger, register_ui_callback
 
@@ -46,6 +47,7 @@ class MainWindow(QMainWindow):
     def __init__(self, spe_class=None):
         super().__init__()
         self._spe_class = spe_class
+        self.acs_ctrl = AcsStageController()
         self.setWindowTitle("SpeAnalyze — Integrated Lab Control")
         self.setMinimumSize(1300, 850)
         self.resize(1700, 1000)
@@ -133,11 +135,11 @@ class MainWindow(QMainWindow):
         self.stack.setStyleSheet("background: #0a0f1e;")
 
         # ── 모드별 탭 인스턴스 생성 ─────────────────────────────────
-        self.live_tab = LiveTab()
+        self.live_tab = LiveTab(acs_ctrl=self.acs_ctrl)
         self.live_tab.status_message.connect(self._on_status)
-        self.live_tab.camera_connected.connect(self._on_cam_connected)
-        self.live_tab.camera_disconnected.connect(self._on_cam_disconnected)
-        self.live_tab.cam_panel.exposure_applied.connect(self._on_exposure_changed)
+        self.live_tab.camera_connected.connect(self._on_camera_connected)
+        self.live_tab.camera_disconnected.connect(self._on_camera_disconnected)
+        self.live_tab.camera_panel.exposure_applied.connect(self._on_exposure_changed)
         self.live_tab.frame_stats_updated.connect(self._on_frame_stats)
 
         self.acq_tab = AcquisitionTab()
@@ -155,7 +157,7 @@ class MainWindow(QMainWindow):
         self.af_tab.af_starting.connect(self.live_tab.stop_live)
         self.af_tab.af_done.connect(self.live_tab.resume_live)
 
-        self.kin_tab = KinematicTab()
+        self.kin_tab = KinematicTab(acs_ctrl=self.acs_ctrl)
         self.kin_tab.log_message.connect(self._on_status)
         self.kin_tab.kin_starting.connect(self.live_tab.stop_live)
         self.kin_tab.kin_done.connect(self.live_tab.resume_live)
@@ -199,14 +201,14 @@ class MainWindow(QMainWindow):
             f"color: {_TAB_NORMAL}; font-family: '{_FC}';"
             " font-size: 10px; padding: 0 6px;"
         )
-        self._hdr_cam  = QLabel("—")
+        self._hdr_camera  = QLabel("—")
         self._hdr_exp  = QLabel("—")
         self._hdr_fps  = QLabel("—")
-        for lbl in (self._hdr_cam, self._hdr_exp, self._hdr_fps):
+        for lbl in (self._hdr_camera, self._hdr_exp, self._hdr_fps):
             lbl.setStyleSheet(_hdr_lbl_style)
 
         hdr_h.addWidget(_vsep())
-        hdr_h.addWidget(self._hdr_cam)
+        hdr_h.addWidget(self._hdr_camera)
         hdr_h.addWidget(_vsep())
         hdr_h.addWidget(self._hdr_exp)
         hdr_h.addWidget(_vsep())
@@ -217,35 +219,35 @@ class MainWindow(QMainWindow):
         root_v.addWidget(self.stack, 1)
 
         # ── 인터탭 연결 ──────────────────────────────────────────────
-        self.live_tab.camera_connected.connect(self.acq_tab.set_shared_camera)
-        self.live_tab.camera_disconnected.connect(self.acq_tab.clear_shared_camera)
+        self.live_tab.camera_connected.connect(self.acq_tab.set_shared_cameraera)
+        self.live_tab.camera_disconnected.connect(self.acq_tab.clear_shared_cameraera)
         self.acq_tab.acquisition_starting.connect(self.live_tab.stop_live)
         self.acq_tab.acquisition_done.connect(self.live_tab.resume_live)
 
-        self.live_tab.camera_connected.connect(self.scan_tab.set_shared_camera)
-        self.live_tab.camera_disconnected.connect(self.scan_tab.clear_shared_camera)
+        self.live_tab.camera_connected.connect(self.scan_tab.set_shared_cameraera)
+        self.live_tab.camera_disconnected.connect(self.scan_tab.clear_shared_cameraera)
         self.scan_tab.scan_starting.connect(self.live_tab.stop_live)
         self.scan_tab.scan_done.connect(self.live_tab.resume_live)
 
         # 카메라 공유: Live ↔ AutoFocus
-        self.live_tab.camera_connected.connect(self.af_tab.set_shared_camera)
-        self.live_tab.camera_disconnected.connect(self.af_tab.clear_shared_camera)
+        self.live_tab.camera_connected.connect(self.af_tab.set_shared_cameraera)
+        self.live_tab.camera_disconnected.connect(self.af_tab.clear_shared_cameraera)
 
         # KIMM 공유: Live ↔ AutoFocus
         self.live_tab.kimm_z_panel.kimm_connected.connect(self.af_tab.set_kimm_ctrl)
         self.live_tab.kimm_z_panel.kimm_disconnected.connect(self.af_tab.clear_kimm_ctrl)
 
         # 카메라 공유: Live ↔ Kinematic
-        self.live_tab.camera_connected.connect(self.kin_tab.set_shared_camera)
-        self.live_tab.camera_disconnected.connect(self.kin_tab.clear_shared_camera)
+        self.live_tab.camera_connected.connect(self.kin_tab.set_shared_cameraera)
+        self.live_tab.camera_disconnected.connect(self.kin_tab.clear_shared_cameraera)
 
         # ACS 스테이지 공유: Live ↔ Kinematic
         self.live_tab.acs_stage_panel.acs_connected.connect(self.kin_tab.set_acs_ctrl)
         self.live_tab.acs_stage_panel.acs_disconnected.connect(self.kin_tab.clear_acs_ctrl)
 
         # 하드웨어 공유: Live ↔ DeepAlign
-        self.live_tab.camera_connected.connect(self.deep_align_tab.set_shared_camera)
-        self.live_tab.camera_disconnected.connect(self.deep_align_tab.clear_shared_camera)
+        self.live_tab.camera_connected.connect(self.deep_align_tab.set_shared_cameraera)
+        self.live_tab.camera_disconnected.connect(self.deep_align_tab.clear_shared_cameraera)
         self.live_tab.kimm_z_panel.kimm_connected.connect(self.deep_align_tab.set_kimm_ctrl)
         self.live_tab.kimm_z_panel.kimm_disconnected.connect(self.deep_align_tab.clear_kimm_ctrl)
         self.live_tab.acs_stage_panel.acs_connected.connect(self.deep_align_tab.set_acs_ctrl)
@@ -254,9 +256,9 @@ class MainWindow(QMainWindow):
 
         self.scan_tab.set_motor_panel(self.live_tab.motor_panel)
 
-        self.live_tab.cam_panel.exposure_applied.connect(self.scan_tab.set_exposure_ui)
+        self.live_tab.camera_panel.exposure_applied.connect(self.scan_tab.set_exposure_ui)
         self.scan_tab.exposure_changed.connect(self.live_tab.sync_exposure_ui)
-        self.live_tab.cam_panel.exposure_applied.connect(self.acq_tab.set_exposure_ui)
+        self.live_tab.camera_panel.exposure_applied.connect(self.acq_tab.set_exposure_ui)
         self.acq_tab.exposure_changed.connect(self.live_tab.sync_exposure_ui)
 
         # ── 상태바 (하단) ─────────────────────────────────────────────
@@ -288,17 +290,17 @@ class MainWindow(QMainWindow):
             return f
 
         _perm = f"color: {C_TEXT_DIM}; font-family: '{Fonts.MONO}'; font-size: {Sizes.SMALL}; padding: 0 8px;"
-        self._sb_cam  = QLabel("📷 —")
+        self._sb_camera  = QLabel("📷 —")
         self._sb_exp  = QLabel("⏱ —")
         self._sb_size = QLabel("📐 —")
         self._sb_fps  = QLabel("fps: —")
-        for lbl in (self._sb_cam, self._sb_exp, self._sb_size, self._sb_fps):
+        for lbl in (self._sb_camera, self._sb_exp, self._sb_size, self._sb_fps):
             lbl.setStyleSheet(_perm)
-        self._sb_cam.setStyleSheet(
+        self._sb_camera.setStyleSheet(
             f"color: {C_ACCENT}; font-family: '{Fonts.MONO}'; font-size: {Sizes.SMALL}; padding: 0 8px;"
         )
 
-        for w in (_sep(), self._sb_cam, _sep(), self._sb_exp,
+        for w in (_sep(), self._sb_camera, _sep(), self._sb_exp,
                   _sep(), self._sb_size, _sep(), self._sb_fps, _sep()):
             self._status_bar.addPermanentWidget(w)
 
@@ -376,28 +378,28 @@ class MainWindow(QMainWindow):
 
     # ── 슬롯 ─────────────────────────────────────────────────────────
 
-    def _on_cam_connected(self, cam):
-        name = type(cam).__name__.replace("Camera", "")
+    def _on_camera_connected(self, camera):
+        name = type(camera).__name__.replace("Camera", "")
         _s = (f"color: #4ecdc4; font-family: '{Fonts.MONO}';"
               f" font-size: {Sizes.SMALL}; padding: 0 8px;")
-        self._sb_cam.setText(f"📷 {name}")
-        self._sb_cam.setStyleSheet(_s)
-        self._hdr_cam.setText(name)
-        self._hdr_cam.setStyleSheet(
+        self._sb_camera.setText(f"📷 {name}")
+        self._sb_camera.setStyleSheet(_s)
+        self._hdr_camera.setText(name)
+        self._hdr_camera.setStyleSheet(
             f"color: #4ecdc4; font-family: '{Fonts.MONO}'; font-size: 10px; padding: 0 6px;"
         )
 
-    def _on_cam_disconnected(self):
+    def _on_camera_disconnected(self):
         _s = (f"color: {C_TEXT_DIM}; font-family: '{Fonts.MONO}';"
               f" font-size: {Sizes.SMALL}; padding: 0 8px;")
-        self._sb_cam.setText("📷 —"); self._sb_cam.setStyleSheet(
+        self._sb_camera.setText("📷 —"); self._sb_camera.setStyleSheet(
             f"color: {C_ACCENT}; font-family: '{Fonts.MONO}'; font-size: {Sizes.SMALL}; padding: 0 8px;"
         )
         self._sb_size.setText("📐 —")
         self._sb_fps.setText("fps: —")
         self._sb_exp.setText("⏱ —")
         _ds = (f"color: {_TAB_NORMAL}; font-family: '{Fonts.MONO}'; font-size: 10px; padding: 0 6px;")
-        self._hdr_cam.setText("—"); self._hdr_cam.setStyleSheet(_ds)
+        self._hdr_camera.setText("—"); self._hdr_camera.setStyleSheet(_ds)
         self._hdr_exp.setText("—"); self._hdr_fps.setText("—")
 
     def _on_exposure_changed(self, ms: float):
@@ -471,12 +473,12 @@ class MainWindow(QMainWindow):
         _LOG_STYLE = f"background: #080e1e; border: none; color: #c0d0ff; font-family: '{Fonts.MONO}'; font-size: 12px;"
         self.txt_sys = QTextEdit(); self.txt_sys.setReadOnly(True); self.txt_sys.setStyleSheet(_LOG_STYLE)
         self.txt_dev = QTextEdit(); self.txt_dev.setReadOnly(True); self.txt_dev.setStyleSheet(_LOG_STYLE)
-        self.txt_cam = QTextEdit(); self.txt_cam.setReadOnly(True); self.txt_cam.setStyleSheet(_LOG_STYLE)
+        self.txt_camera = QTextEdit(); self.txt_camera.setReadOnly(True); self.txt_camera.setStyleSheet(_LOG_STYLE)
         self.txt_calc = QTextEdit(); self.txt_calc.setReadOnly(True); self.txt_calc.setStyleSheet(_LOG_STYLE)
 
         self.log_tabs.addTab(self.txt_sys, "SYSTEM")
         self.log_tabs.addTab(self.txt_dev, "DEVICE")
-        self.log_tabs.addTab(self.txt_cam, "CAMERA")
+        self.log_tabs.addTab(self.txt_camera, "CAMERA")
         self.log_tabs.addTab(self.txt_calc, "CALC")
         layout.addWidget(self.log_tabs)
 
@@ -506,7 +508,7 @@ class MainWindow(QMainWindow):
         
         cat_tag = ""
         if category != "sys":
-            tag_color = "#aa7acc" if category == "calc" else "#4ecdc4" if category == "cam" else "#ff9f43"
+            tag_color = "#aa7acc" if category == "calc" else "#4ecdc4" if category == "camera" else "#ff9f43"
             cat_tag = f"<span style='color:{tag_color}; font-weight:bold;'>[{category.upper()}]</span> "
 
         color = "#c0d0ff"
@@ -520,7 +522,7 @@ class MainWindow(QMainWindow):
 
         target = self.txt_sys
         if category == "dev": target = self.txt_dev
-        elif category == "cam": target = self.txt_cam
+        elif category == "camera": target = self.txt_camera
         elif category == "calc": target = self.txt_calc
         
         target.append(html)

@@ -141,27 +141,32 @@ class MotorStressBar(QWidget):
 
 class KinematicTab(QWidget):
     log_message = pyqtSignal(str); kin_starting = pyqtSignal(); kin_done = pyqtSignal()
-    def __init__(self, parent=None):
-        super().__init__(parent); self.calc = KinematicCalc(); self.acs_panel = None; self.current_1d_range = (0, 0); self._setup_ui()
+    def __init__(self, parent=None, acs_ctrl: AcsStageController = None):
+        super().__init__(parent); self.acs_ctrl = acs_ctrl; self.calc = KinematicCalc(); self.acs_panel = None; self.current_1d_range = (0, 0); self._setup_ui()
     def set_acs_ctrl(self, ctrl):
         if self.acs_panel: self.acs_panel.set_controller(ctrl); self.update_analysis()
     def clear_acs_ctrl(self):
         if self.acs_panel: self.acs_panel.set_controller(None)
-    def set_shared_camera(self, cam): pass
-    def clear_shared_camera(self): pass
+    def set_shared_cameraera(self, camera): pass
+    def clear_shared_cameraera(self): pass
     def stop_polling(self):
         if self.acs_panel: self.acs_panel.stop_polling()
 
     def _setup_ui(self):
         main_layout = QVBoxLayout(self); main_layout.setContentsMargins(5, 5, 5, 5)
         self.splitter = QSplitter(Qt.Orientation.Horizontal); self.splitter.setStyleSheet("QSplitter::handle { background-color: #1e293b; width: 2px; }")
-        self.acs_panel = AcsStagePanel(None); self.acs_panel.log_message.connect(self.log_message.emit); self.splitter.addWidget(self.acs_panel)
+        self.acs_panel = AcsStagePanel(None, ctrl=self.acs_ctrl); self.acs_panel.log_message.connect(self.log_message.emit); self.splitter.addWidget(self.acs_panel)
         center_widget = QWidget(); center_layout = QVBoxLayout(center_widget)
-        map_ctrl_lay = QHBoxLayout(); map_ctrl_lay.addWidget(QLabel("MODE:")); self.combo_plane = QComboBox(); self.combo_plane.addItems(["XY (2D Map)", "XZ (2D Map)", "RxRy (2D Map)", "Tx (1D Search)", "Ty (1D Search)", "Tz (1D Search)", "Rx (1D Search)", "Ry (1D Search)", "Rz (1D Search)"]); self.combo_plane.currentIndexChanged.connect(self.update_analysis); map_ctrl_lay.addWidget(self.combo_plane)
+        map_ctrl_lay = QHBoxLayout(); map_ctrl_lay.addWidget(QLabel("MODE:")); self.combo_plane = QComboBox(); self.combo_plane.addItems(["XY (2D Map)", "XZ (2D Map)", "YZ (2D Map)", "RxRy (2D Map)", "RxRz (2D Map)", "RyRz (2D Map)", "TxRx (2D Map)", "TyRy (2D Map)", "TzRz (2D Map)", "Tx (1D Search)", "Ty (1D Search)", "Tz (1D Search)", "Rx (1D Search)", "Ry (1D Search)", "Rz (1D Search)"]); self.combo_plane.currentIndexChanged.connect(self.update_analysis); map_ctrl_lay.addWidget(self.combo_plane)
         self.lbl_fixed_info = QLabel("Fixed: ..."); self.lbl_fixed_info.setStyleSheet("color: #ffffff; font-size: 11px; font-weight: bold;"); map_ctrl_lay.addWidget(self.lbl_fixed_info); map_ctrl_lay.addStretch(); center_layout.addLayout(map_ctrl_lay)
         map_vbox = QVBoxLayout(); self.map_widget = WorkspaceMapWidget(); map_vbox.addWidget(self.map_widget)
-        self.slider_1d = QSlider(Qt.Orientation.Horizontal); self.slider_1d.setStyleSheet(STYLE_SLIDER_OVERLAY); self.slider_1d.setRange(0, 1000); self.slider_1d.setFixedHeight(30); self.slider_1d.setVisible(False); self.slider_1d.valueChanged.connect(self._on_slider_moved_internal)
-        slider_container = QWidget(); slider_lay = QHBoxLayout(slider_container); slider_lay.setContentsMargins(30, 0, 30, 0); slider_lay.addWidget(self.slider_1d); map_vbox.addWidget(slider_container)
+        self.slider_1d = QSlider(Qt.Orientation.Horizontal); self.slider_1d.setStyleSheet(STYLE_SLIDER_OVERLAY); self.slider_1d.setRange(0, 1000); self.slider_1d.setFixedHeight(25); self.slider_1d.valueChanged.connect(self._on_slider_moved_internal)
+        self.container_1d = QWidget(); c1d_lay = QHBoxLayout(self.container_1d); c1d_lay.setContentsMargins(30, 0, 30, 0); c1d_lay.addWidget(self.slider_1d); map_vbox.addWidget(self.container_1d)
+
+        self.container_2d = QWidget(); c2d_lay = QVBoxLayout(self.container_2d); c2d_lay.setContentsMargins(30, 0, 30, 0); c2d_lay.setSpacing(2)
+        row_x = QHBoxLayout(); self.lbl_sl_x = QLabel("X:"); self.lbl_sl_x.setFixedWidth(25); self.lbl_sl_x.setStyleSheet("color: #94a3b8; font-weight: bold; font-size: 10px;"); self.slider_x = QSlider(Qt.Orientation.Horizontal); self.slider_x.setStyleSheet(STYLE_SLIDER_OVERLAY); self.slider_x.setRange(0, 1000); self.slider_x.setFixedHeight(22); self.slider_x.valueChanged.connect(self._on_slider_2d_moved); row_x.addWidget(self.lbl_sl_x); row_x.addWidget(self.slider_x); c2d_lay.addLayout(row_x)
+        row_y = QHBoxLayout(); self.lbl_sl_y = QLabel("Y:"); self.lbl_sl_y.setFixedWidth(25); self.lbl_sl_y.setStyleSheet("color: #94a3b8; font-weight: bold; font-size: 10px;"); self.slider_y = QSlider(Qt.Orientation.Horizontal); self.slider_y.setStyleSheet(STYLE_SLIDER_OVERLAY); self.slider_y.setRange(0, 1000); self.slider_y.setFixedHeight(22); self.slider_y.valueChanged.connect(self._on_slider_2d_moved); row_y.addWidget(self.lbl_sl_y); row_y.addWidget(self.slider_y); c2d_lay.addLayout(row_y)
+        map_vbox.addWidget(self.container_2d); self.container_1d.setVisible(False); self.container_2d.setVisible(False)
         center_layout.addLayout(map_vbox, 4); self.view_3d = Kinematic3DWidget(); center_layout.addWidget(self.view_3d, 3)
         bar_grid = QGridLayout(); self.motor_bars = []
         names = ["M1 (Y1)", "M2 (Z1)", "M3 (X1)", "M4 (Z2)", "M5 (Y2)", "M6 (Z3)"]
@@ -187,6 +192,28 @@ class KinematicTab(QWidget):
         for i, name in enumerate(["Tx", "Ty", "Tz", "Rx", "Ry", "Rz"]):
             self.fixed_inputs[name].setValue(spins[i].value())
         self.update_analysis()
+
+    def _on_slider_2d_moved(self, _):
+        mode = self.combo_plane.currentText()
+        if "XY" in mode: axes = ("Tx", "Ty"); lims = ((-15, 15), (-15, 15))
+        elif "XZ" in mode: axes = ("Tx", "Tz"); lims = ((-15, 15), (-15, 15))
+        elif "YZ" in mode: axes = ("Ty", "Tz"); lims = ((-15, 15), (-15, 15))
+        elif "RxRy" in mode: axes = ("Rx", "Ry"); lims = ((-50, 50), (-50, 50))
+        elif "RxRz" in mode: axes = ("Rx", "Rz"); lims = ((-50, 50), (-50, 50))
+        elif "RyRz" in mode: axes = ("Ry", "Rz"); lims = ((-50, 50), (-50, 50))
+        elif "TxRx" in mode: axes = ("Tx", "Rx"); lims = ((-15, 15), (-50, 50))
+        elif "TyRy" in mode: axes = ("Ty", "Ry"); lims = ((-15, 15), (-50, 50))
+        elif "TzRz" in mode: axes = ("Tz", "Rz"); lims = ((-15, 15), (-50, 50))
+        else: return
+
+        v_x = lims[0][0] + (lims[0][1] - lims[0][0]) * (self.slider_x.value() / 1000.0)
+        v_y = lims[1][0] + (lims[1][1] - lims[1][0]) * (self.slider_y.value() / 1000.0)
+
+        for ax, val in zip(axes, [v_x, v_y]):
+            self.fixed_inputs[ax].blockSignals(True); self.fixed_inputs[ax].setValue(val); self.fixed_inputs[ax].blockSignals(False)
+        
+        self._update_motor_stress_from_fixed()
+        self.map_widget.current_pos = (v_x, v_y); self.map_widget.update()
 
     def _on_slider_moved_internal(self, val):
         mode = self.combo_plane.currentText(); axis_name = mode.split(" ")[0]; min_v, max_v = self.current_1d_range
@@ -214,16 +241,61 @@ class KinematicTab(QWidget):
         try:
             f = {k: v.value() for k, v in self.fixed_inputs.items()}; t_fixed, r_fixed = [f['Tx'], f['Ty'], f['Tz']], [f['Rx'], f['Ry'], f['Rz']]
             spins = self.acs_panel._dof_spins; t_curr = [spins[0].value(), spins[1].value(), spins[2].value()]; r_curr = [spins[3].value()*1000.0, spins[4].value()*1000.0, spins[5].value()*1000.0]
-            mode = self.combo_plane.currentText(); is_1d = "1D Search" in mode; self.slider_1d.setVisible(is_1d); res = self.spin_res.value(); step_v = self.spin_prec.value()
+            mode = self.combo_plane.currentText(); is_1d = "1D Search" in mode; self.container_1d.setVisible(is_1d); self.container_2d.setVisible(not is_1d); res = self.spin_res.value(); step_v = self.spin_prec.value()
             if "XY" in mode:
                 matrix = self.calc.get_reachability_matrix('XY', {'tz':f['Tz'], 'rx':f['Rx'], 'ry':f['Ry'], 'rz':f['Rz']}, (-15, 15), (-15, 15), resolution=res)
                 self.map_widget.set_data(matrix, (-15, 15), (-15, 15), t_curr[0], t_curr[1], mode, labels=("Tx", "Ty"))
+                self.lbl_sl_x.setText("Tx:"); self.lbl_sl_y.setText("Ty:")
+                self.slider_x.blockSignals(True); self.slider_x.setValue(int((t_curr[0]+15)/30*1000)); self.slider_x.blockSignals(False)
+                self.slider_y.blockSignals(True); self.slider_y.setValue(int((t_curr[1]+15)/30*1000)); self.slider_y.blockSignals(False)
             elif "XZ" in mode:
                 matrix = self.calc.get_reachability_matrix('XZ', {'ty':f['Ty'], 'rx':f['Rx'], 'ry':f['Ry'], 'rz':f['Rz']}, (-15, 15), (-15, 15), resolution=res)
                 self.map_widget.set_data(matrix, (-15, 15), (-15, 15), t_curr[0], t_curr[2], mode, labels=("Tx", "Tz"))
+                self.lbl_sl_x.setText("Tx:"); self.lbl_sl_y.setText("Tz:")
+                self.slider_x.blockSignals(True); self.slider_x.setValue(int((t_curr[0]+15)/30*1000)); self.slider_x.blockSignals(False)
+                self.slider_y.blockSignals(True); self.slider_y.setValue(int((t_curr[2]+15)/30*1000)); self.slider_y.blockSignals(False)
+            elif "YZ" in mode:
+                matrix = self.calc.get_reachability_matrix('YZ', {'tx':f['Tx'], 'rx':f['Rx'], 'ry':f['Ry'], 'rz':f['Rz']}, (-15, 15), (-15, 15), resolution=res)
+                self.map_widget.set_data(matrix, (-15, 15), (-15, 15), t_curr[1], t_curr[2], mode, labels=("Ty", "Tz"))
+                self.lbl_sl_x.setText("Ty:"); self.lbl_sl_y.setText("Tz:")
+                self.slider_x.blockSignals(True); self.slider_x.setValue(int((t_curr[1]+15)/30*1000)); self.slider_x.blockSignals(False)
+                self.slider_y.blockSignals(True); self.slider_y.setValue(int((t_curr[2]+15)/30*1000)); self.slider_y.blockSignals(False)
             elif "RxRy" in mode:
                 matrix = self.calc.get_reachability_matrix('RxRy', {'tx':f['Tx'], 'ty':f['Ty'], 'tz':f['Tz'], 'rz':f['Rz']}, (-50, 50), (-50, 50), resolution=res)
                 self.map_widget.set_data(matrix, (-50, 50), (-50, 50), r_curr[0], r_curr[1], mode, labels=("Rx", "Ry"))
+                self.lbl_sl_x.setText("Rx:"); self.lbl_sl_y.setText("Ry:")
+                self.slider_x.blockSignals(True); self.slider_x.setValue(int((r_curr[0]+50)/100*1000)); self.slider_x.blockSignals(False)
+                self.slider_y.blockSignals(True); self.slider_y.setValue(int((r_curr[1]+50)/100*1000)); self.slider_y.blockSignals(False)
+            elif "RxRz" in mode:
+                matrix = self.calc.get_reachability_matrix('RxRz', {'tx':f['Tx'], 'ty':f['Ty'], 'tz':f['Tz'], 'ry':f['Ry']}, (-50, 50), (-50, 50), resolution=res)
+                self.map_widget.set_data(matrix, (-50, 50), (-50, 50), r_curr[0], r_curr[2], mode, labels=("Rx", "Rz"))
+                self.lbl_sl_x.setText("Rx:"); self.lbl_sl_y.setText("Rz:")
+                self.slider_x.blockSignals(True); self.slider_x.setValue(int((r_curr[0]+50)/100*1000)); self.slider_x.blockSignals(False)
+                self.slider_y.blockSignals(True); self.slider_y.setValue(int((r_curr[2]+50)/100*1000)); self.slider_y.blockSignals(False)
+            elif "RyRz" in mode:
+                matrix = self.calc.get_reachability_matrix('RyRz', {'tx':f['Tx'], 'ty':f['Ty'], 'tz':f['Tz'], 'rx':f['Rx']}, (-50, 50), (-50, 50), resolution=res)
+                self.map_widget.set_data(matrix, (-50, 50), (-50, 50), r_curr[1], r_curr[2], mode, labels=("Ry", "Rz"))
+                self.lbl_sl_x.setText("Ry:"); self.lbl_sl_y.setText("Rz:")
+                self.slider_x.blockSignals(True); self.slider_x.setValue(int((r_curr[1]+50)/100*1000)); self.slider_x.blockSignals(False)
+                self.slider_y.blockSignals(True); self.slider_y.setValue(int((r_curr[2]+50)/100*1000)); self.slider_y.blockSignals(False)
+            elif "TxRx" in mode:
+                matrix = self.calc.get_reachability_matrix('TxRx', {'ty':f['Ty'], 'tz':f['Tz'], 'ry':f['Ry'], 'rz':f['Rz']}, (-15, 15), (-50, 50), resolution=res)
+                self.map_widget.set_data(matrix, (-15, 15), (-50, 50), t_curr[0], r_curr[0], mode, labels=("Tx", "Rx"))
+                self.lbl_sl_x.setText("Tx:"); self.lbl_sl_y.setText("Rx:")
+                self.slider_x.blockSignals(True); self.slider_x.setValue(int((t_curr[0]+15)/30*1000)); self.slider_x.blockSignals(False)
+                self.slider_y.blockSignals(True); self.slider_y.setValue(int((r_curr[0]+50)/100*1000)); self.slider_y.blockSignals(False)
+            elif "TyRy" in mode:
+                matrix = self.calc.get_reachability_matrix('TyRy', {'tx':f['Tx'], 'tz':f['Tz'], 'rx':f['Rx'], 'rz':f['Rz']}, (-15, 15), (-50, 50), resolution=res)
+                self.map_widget.set_data(matrix, (-15, 15), (-50, 50), t_curr[1], r_curr[1], mode, labels=("Ty", "Ry"))
+                self.lbl_sl_x.setText("Ty:"); self.lbl_sl_y.setText("Ry:")
+                self.slider_x.blockSignals(True); self.slider_x.setValue(int((t_curr[1]+15)/30*1000)); self.slider_x.blockSignals(False)
+                self.slider_y.blockSignals(True); self.slider_y.setValue(int((r_curr[1]+50)/100*1000)); self.slider_y.blockSignals(False)
+            elif "TzRz" in mode:
+                matrix = self.calc.get_reachability_matrix('TzRz', {'tx':f['Tx'], 'ty':f['Ty'], 'rx':f['Rx'], 'ry':f['Ry']}, (-15, 15), (-50, 50), resolution=res)
+                self.map_widget.set_data(matrix, (-15, 15), (-50, 50), t_curr[2], r_curr[2], mode, labels=("Tz", "Rz"))
+                self.lbl_sl_x.setText("Tz:"); self.lbl_sl_y.setText("Rz:")
+                self.slider_x.blockSignals(True); self.slider_x.setValue(int((t_curr[2]+15)/30*1000)); self.slider_x.blockSignals(False)
+                self.slider_y.blockSignals(True); self.slider_y.setValue(int((r_curr[2]+50)/100*1000)); self.slider_y.blockSignals(False)
             elif is_1d:
                 axis_name = mode.split(" ")[0]; axis_idx = {"Tx":0, "Ty":1, "Tz":2, "Rx":3, "Ry":4, "Rz":5}[axis_name]
                 min_v, max_v = self.calc.get_axis_limits(axis_idx, t_fixed, r_fixed, step=step_v); self.current_1d_range = (min_v, max_v)

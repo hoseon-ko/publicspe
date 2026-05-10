@@ -26,7 +26,7 @@ from core.image_processor import (
     DisplayStretch, TemporalMode, CentroidMode,
 )
 
-class _CamCommandWorker(QObject):
+class _CameraCommandWorker(QObject):
     """임의의 카메라 SDK 호출을 백그라운드에서 실행 — 메인 스레드 블로킹 방지."""
     success = pyqtSignal(object)
     error   = pyqtSignal(str)
@@ -61,7 +61,7 @@ class CameraControlPanel(QWidget):
     """
     카메라 연결/해제 + 파라미터 제어 패널.
 
-    외부에서 attach_camera(cam) 로 카메라를 연결하고
+    외부에서 attach_camera(camera) 로 카메라를 연결하고
     detach_camera() 로 해제한다.
     ImageProcessor 인스턴스를 공유해 처리 파라미터를 실시간 반영한다.
     """
@@ -80,11 +80,11 @@ class CameraControlPanel(QWidget):
     def __init__(self, processor: ImageProcessor, parent=None):
         super().__init__(parent)
         self._proc = processor
-        self._cam: Optional[BaseCamera] = None
+        self._camera: Optional[BaseCamera] = None
         self._caps: Optional[CameraCapabilities] = None
         self._temp_thread: Optional[TempPollerThread] = None
         self._cmd_thread:  Optional[QThread] = None
-        self._cmd_worker:  Optional[_CamCommandWorker] = None
+        self._cmd_worker:  Optional[_CameraCommandWorker] = None
         self._settings = QSettings("SpeAnalyze", "CameraPanel")
         self._sections: list[CollapsibleSection] = []
 
@@ -614,7 +614,7 @@ class CameraControlPanel(QWidget):
         self.btn_stop.clicked.connect(self.camera_stop_requested)
         self.btn_snap.clicked.connect(self.snap_requested)
         self.check_gil_block.toggled.connect(
-            lambda checked: setattr(self._cam, 'simulate_gil_block', checked) if self._cam else None
+            lambda checked: setattr(self._camera, 'simulate_gil_block', checked) if self._camera else None
         )
         self.btn_apply_exp.clicked.connect(self._apply_exposure)
         self.btn_apply_fps.clicked.connect(self._apply_fps)
@@ -658,22 +658,22 @@ class CameraControlPanel(QWidget):
 
     # ── 카메라 어태치 / 디태치 ────────────────────────────────────────
 
-    def attach_camera(self, cam: BaseCamera):
-        self._cam = cam
-        self._caps = cam.capabilities
+    def attach_camera(self, camera: BaseCamera):
+        self._camera = camera
+        self._caps = camera.capabilities
         self._apply_capabilities(self._caps)
         self._set_connected(True)
         
         from core.camera.simulated import SimulatedCamera
-        if isinstance(cam, SimulatedCamera):
+        if isinstance(camera, SimulatedCamera):
             self.check_gil_block.setVisible(True)
-            self.check_gil_block.setChecked(getattr(cam, 'simulate_gil_block', False))
+            self.check_gil_block.setChecked(getattr(camera, 'simulate_gil_block', False))
         else:
             self.check_gil_block.setVisible(False)
 
         # 현재 카메라 값 읽어 UI 반영
         try:
-            self.spin_exposure.setValue(cam.get_exposure_ms())
+            self.spin_exposure.setValue(camera.get_exposure_ms())
         except Exception:
             pass
 
@@ -688,7 +688,7 @@ class CameraControlPanel(QWidget):
                 pass
             # setpoint 읽기: SDK가 25°C로 리셋했으면 저장된 마지막값 복원
             try:
-                reading, setpoint, status = cam.get_temperature()
+                reading, setpoint, status = camera.get_temperature()
                 saved_sp = QSettings("SpeAnalyze", "CameraPanel").value(
                     "last_temp_setpoint", None, type=float
                 )
@@ -699,7 +699,7 @@ class CameraControlPanel(QWidget):
                         f"🌡 온도 Setpoint 복원: {saved_sp:.1f}°C → 적용 중..."
                     )
                     self._run_sdk(
-                        lambda sp=saved_sp: cam.set_temperature(sp),
+                        lambda sp=saved_sp: camera.set_temperature(sp),
                         lambda _: None,
                         "온도 복원 오류",
                     )
@@ -707,7 +707,7 @@ class CameraControlPanel(QWidget):
                     self.spin_temp.setValue(float(setpoint))
             except Exception:
                 pass
-            self._temp_thread = TempPollerThread(cam, 3000)
+            self._temp_thread = TempPollerThread(camera, 3000)
             self._temp_thread.temp_read.connect(self._on_temp_read)
             self._temp_thread.start()
 
@@ -715,7 +715,7 @@ class CameraControlPanel(QWidget):
             try:
                 mn, mx = self._caps.fps_range
                 self.spin_fps.setRange(mn, mx)
-                current_fps = cam.get_fps()
+                current_fps = camera.get_fps()
                 self.spin_fps.setValue(current_fps)
             except Exception:
                 pass
@@ -735,7 +735,7 @@ class CameraControlPanel(QWidget):
             )
             # 현재 카메라에 적용된 ADC 값으로 콤보박스 선택
             try:
-                current_adc = cam.get_adc_settings()
+                current_adc = camera.get_adc_settings()
                 for key, val in current_adc.items():
                     cb = self._adc_combos.get(key)
                     if cb is None or val is None:
@@ -750,7 +750,7 @@ class CameraControlPanel(QWidget):
         if self._temp_thread is not None:
             self._temp_thread.stop()
             self._temp_thread = None
-        self._cam = None
+        self._camera = None
         self._caps = None
         self._set_connected(False)
         self.lbl_temp_status.setText("Reading: —")
@@ -766,7 +766,7 @@ class CameraControlPanel(QWidget):
         if btn:
             btn.setEnabled(False)
         t = QThread()
-        w = _CamCommandWorker(fn)
+        w = _CameraCommandWorker(fn)
         self._cmd_thread, self._cmd_worker = t, w
         w.moveToThread(t)
         t.started.connect(w.run)
@@ -776,7 +776,7 @@ class CameraControlPanel(QWidget):
         w.success.connect(lambda _: t.quit())
         w.error.connect(lambda _: t.quit())
         if btn:
-            t.finished.connect(lambda: btn.setEnabled(self._cam is not None))
+            t.finished.connect(lambda: btn.setEnabled(self._camera is not None))
         t.start()
 
     def _apply_capabilities(self, caps: CameraCapabilities):
@@ -815,12 +815,12 @@ class CameraControlPanel(QWidget):
         self.btn_start.setEnabled(not grabbing)
         self.btn_stop.setEnabled(grabbing)
         # 라이브 중에는 snap 비활성 (라이브 정지 후 사용)
-        self.btn_snap.setEnabled(not grabbing and self._cam is not None)
+        self.btn_snap.setEnabled(not grabbing and self._camera is not None)
 
     # ── UI → Processor / Camera 적용 ─────────────────────────────────
 
     def _apply_exposure(self):
-        if self._cam is None:
+        if self._camera is None:
             return
         ms = self.spin_exposure.value()
         def _ok(actual):
@@ -830,11 +830,11 @@ class CameraControlPanel(QWidget):
             else:
                 self.exposure_applied.emit(float(ms))
             self.log_message.emit(f"Exposure → {ms:.2f} ms")
-        self._run_sdk(lambda: self._cam.set_exposure_ms(ms),
+        self._run_sdk(lambda: self._camera.set_exposure_ms(ms),
                       _ok, "Exposure 오류", self.btn_apply_exp)
 
     def _apply_fps(self):
-        if self._cam is None:
+        if self._camera is None:
             return
         if self.check_fps_lock.isChecked():
             fps_val = self.spin_fps.value()
@@ -842,10 +842,10 @@ class CameraControlPanel(QWidget):
                 if actual is not None:
                     self.spin_fps.setValue(actual)
                 self.log_message.emit(f"FPS → {fps_val:.1f}")
-            self._run_sdk(lambda: self._cam.set_fps(fps_val),
+            self._run_sdk(lambda: self._camera.set_fps(fps_val),
                           _ok, "FPS 오류", self.btn_apply_fps)
         else:
-            self._run_sdk(lambda: self._cam.disable_fps_lock(),
+            self._run_sdk(lambda: self._camera.disable_fps_lock(),
                           lambda _: self.log_message.emit("FPS 고정 해제"),
                           "FPS 오류", self.btn_apply_fps)
 
@@ -927,12 +927,12 @@ class CameraControlPanel(QWidget):
             self._proc.display_max = self.spin_man_max.value()
 
     def _apply_temperature(self):
-        if self._cam is None:
+        if self._camera is None:
             return
         requested = self.spin_temp.value()
         def _do():
-            self._cam.set_temperature(requested)
-            return self._cam.get_temperature()   # (reading, setpoint, status)
+            self._camera.set_temperature(requested)
+            return self._camera.get_temperature()   # (reading, setpoint, status)
         def _ok(result):
             reading, setpoint, status = result
             if setpoint is None:
@@ -954,12 +954,12 @@ class CameraControlPanel(QWidget):
         self._run_sdk(_do, _ok, "Temperature 오류", self.btn_apply_temp)
 
     def _apply_adc(self):
-        if self._cam is None:
+        if self._camera is None:
             return
         kwargs = {key: cb.currentText() for key, cb in self._adc_combos.items()
                   if cb.currentText()}
         self._run_sdk(
-            lambda: self._cam.set_adc_settings(**kwargs),
+            lambda: self._camera.set_adc_settings(**kwargs),
             lambda _: self.log_message.emit(f"ADC 설정 적용: {list(kwargs.keys())}"),
             "ADC 오류", self.btn_apply_adc
         )

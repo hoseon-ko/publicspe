@@ -64,13 +64,13 @@ class _SnapWorker(QObject):
     success = pyqtSignal(object)   # np.ndarray
     error   = pyqtSignal(str)
 
-    def __init__(self, cam: BaseCamera):
+    def __init__(self, camera: BaseCamera):
         super().__init__()
-        self._cam = cam
+        self._camera = camera
 
     def run(self):
         try:
-            frame = self._cam.snap()
+            frame = self._camera.snap()
             self.success.emit(np.asarray(frame))
         except Exception as e:
             self.error.emit(str(e))
@@ -80,17 +80,17 @@ class _DisconnectWorker(QObject):
     """stop_live() + disconnect()를 백그라운드에서 순차 실행."""
     done = pyqtSignal()
 
-    def __init__(self, cam: BaseCamera):
+    def __init__(self, camera: BaseCamera):
         super().__init__()
-        self._cam = cam
+        self._camera = camera
 
     def run(self):
         try:
-            self._cam.stop_live()
+            self._camera.stop_live()
         except Exception:
             pass
         try:
-            self._cam.disconnect()
+            self._camera.disconnect()
         except Exception:
             pass
         self.done.emit()
@@ -101,14 +101,14 @@ class _ConnectWorker(QObject):
     success = pyqtSignal(object)   # BaseCamera
     error   = pyqtSignal(str)
 
-    def __init__(self, cam: BaseCamera):
+    def __init__(self, camera: BaseCamera):
         super().__init__()
-        self._cam = cam
+        self._camera = camera
 
     def run(self):
         try:
-            self._cam.connect()
-            self.success.emit(self._cam)
+            self._camera.connect()
+            self.success.emit(self._camera)
         except Exception as e:
             self.error.emit(str(e))
 
@@ -240,8 +240,9 @@ class LiveTab(QMainWindow):
             self._last_display_t = 0.0  # 스냅/정지 상태에서도 즉시 redraw
             self._proc_worker.submit(self._last_raw)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, acs_ctrl: AcsStageController = None):
         super().__init__(parent)
+        self.acs_ctrl = acs_ctrl
         self.setWindowFlags(Qt.WindowType.Widget)
         self.menuBar().setVisible(False)
 
@@ -253,7 +254,7 @@ class LiveTab(QMainWindow):
             }
         """)
 
-        self._cam: Optional[BaseCamera] = None
+        self._camera: Optional[BaseCamera] = None
         self._proc = ImageProcessor()
         self._last_raw: Optional[np.ndarray] = None
         self._last_display: Optional[np.ndarray] = None
@@ -305,7 +306,7 @@ class LiveTab(QMainWindow):
             self._proc_worker.stop()
             
         # 자식 패널들 정지
-        for panel in [self.cam_panel, self.motor_panel, self.kimm_z_panel, self.acs_stage_panel]:
+        for panel in [self.camera_panel, self.motor_panel, self.kimm_z_panel, self.acs_stage_panel]:
             if hasattr(panel, "stop_polling"):
                 try:
                     panel.stop_polling()
@@ -389,8 +390,8 @@ class LiveTab(QMainWindow):
 
         # Camera 섹션
         self._sec_cam = CollapsibleSection("📷  CAMERA CONTROL", accent=C_ACCENT)
-        self.cam_panel = CameraControlPanel(self._proc)
-        self._sec_cam.add_widget(self.cam_panel)
+        self.camera_panel = CameraControlPanel(self._proc)
+        self._sec_cam.add_widget(self.camera_panel)
         sidebar_v.addWidget(self._sec_cam)
 
         # Motors 섹션
@@ -407,7 +408,7 @@ class LiveTab(QMainWindow):
 
         # ACS 6축 키네마틱 스테이지 섹션 (기본 접힘)
         self._sec_acs = CollapsibleSection("⬡  ACS 6-AXIS KINEMATIC", accent="#7a6aaa", collapsed=True)
-        self.acs_stage_panel = AcsStagePanel()
+        self.acs_stage_panel = AcsStagePanel(ctrl=self.acs_ctrl)
         self._sec_acs.add_widget(self.acs_stage_panel)
         sidebar_v.addWidget(self._sec_acs)
 
@@ -644,15 +645,15 @@ class LiveTab(QMainWindow):
         tb.addAction(act_reset)
 
     def _connect_signals(self):
-        self.cam_panel.camera_scan_requested.connect(self._scan_cameras)
-        self.cam_panel.camera_connect_requested.connect(self._connect_camera)
-        self.cam_panel.camera_disconnect_requested.connect(self._disconnect_camera)
-        self.cam_panel.camera_start_requested.connect(self._start_camera)
-        self.cam_panel.camera_stop_requested.connect(self._stop_camera)
-        self.cam_panel.snap_requested.connect(self._snap_image)
-        self.cam_panel.bg_capture_requested.connect(self._capture_bg)
-        self.cam_panel.log_message.connect(lambda m: self._log(m, "cam"))
-        self.cam_panel.exposure_applied.connect(self.exposure_applied)
+        self.camera_panel.camera_scan_requested.connect(self._scan_cameras)
+        self.camera_panel.camera_connect_requested.connect(self._connect_camera)
+        self.camera_panel.camera_disconnect_requested.connect(self._disconnect_camera)
+        self.camera_panel.camera_start_requested.connect(self._start_camera)
+        self.camera_panel.camera_stop_requested.connect(self._stop_camera)
+        self.camera_panel.snap_requested.connect(self._snap_image)
+        self.camera_panel.bg_capture_requested.connect(self._capture_bg)
+        self.camera_panel.log_message.connect(lambda m: self._log(m, "camera"))
+        self.camera_panel.exposure_applied.connect(self.exposure_applied)
 
         self.motor_panel.log_message.connect(lambda m: self._log(m, "dev"))
         self.kimm_z_panel.log_message.connect(lambda m: self._log(m, "dev"))
@@ -685,16 +686,16 @@ class LiveTab(QMainWindow):
 
     def sync_exposure_ui(self, ms: float):
         """다른 탭에서 노출값 변경 시 UI만 업데이트 (카메라 재적용 안 함)."""
-        self.cam_panel.spin_exposure.blockSignals(True)
-        self.cam_panel.spin_exposure.setValue(ms)
-        self.cam_panel.spin_exposure.blockSignals(False)
+        self.camera_panel.spin_exposure.blockSignals(True)
+        self.camera_panel.spin_exposure.setValue(ms)
+        self.camera_panel.spin_exposure.blockSignals(False)
 
     # ── 카메라 제어 ───────────────────────────────────────────────────
 
     def _scan_cameras(self):
         """#9 스캔 결과 힌트 포함. SDK 스레드 제약으로 메인 스레드에서 실행."""
-        cam_type = self.cam_panel.get_selected_camera_type()
-        self._log(f"🔄 {cam_type} 스캔 중...", "cam")
+        cam_type = self.camera_panel.get_selected_camera_type()
+        self._log(f"🔄 {cam_type} 스캔 중...", "camera")
         try:
             if cam_type == "HIKVISION":
                 items = hik_devices()
@@ -703,60 +704,60 @@ class LiveTab(QMainWindow):
             else:
                 items = picam_devices()
         except Exception as e:
-            self._log(f"❌ 스캔 오류: {e}", "cam")
+            self._log(f"❌ 스캔 오류: {e}", "camera")
             items = []
         if items:
-            self.cam_panel.populate_camera_list(items)
-            self._log(f"✅ {len(items)}개 발견 ({cam_type})", "cam")
+            self.camera_panel.populate_camera_list(items)
+            self._log(f"✅ {len(items)}개 발견 ({cam_type})", "camera")
         else:
-            self.cam_panel.populate_camera_list([])
+            self.camera_panel.populate_camera_list([])
             hints = {
                 "HIKVISION":  "USB/네트워크 연결 확인",
                 "SIMULATED":  "simulated.py 임포트 오류",
                 "Picam":      "Picam 라이브러리/하드웨어 확인",
             }
-            self._log(f"⚠️ 카메라 없음 — {hints.get(cam_type, '연결 확인')}", "cam")
+            self._log(f"⚠️ 카메라 없음 — {hints.get(cam_type, '연결 확인')}", "camera")
 
     def _connect_camera(self, index: int):
         """#6 카메라 연결을 백그라운드 스레드에서 실행 — UI 응답 유지."""
         if self._conn_thread is not None and self._conn_thread.isRunning():
-            self._log("⚠️ 연결 중...", "cam"); return
+            self._log("⚠️ 연결 중...", "camera"); return
 
         # 다른 카메라가 연결되어 있으면 먼저 해제 후 재연결
-        if self._cam is not None:
-            new_type = self.cam_panel.get_selected_camera_type()
-            cur_cls  = type(self._cam)
+        if self._camera is not None:
+            new_type = self.camera_panel.get_selected_camera_type()
+            cur_cls  = type(self._camera)
             _same_map = {
                 "HIKVISION":  HikvisionCamera,
                 "SIMULATED":  SimulatedCamera,
                 "Picam":      PicamCamera,
             }
             if cur_cls is _same_map.get(new_type):
-                self._log("⚠️ 이미 동일 카메라 연결됨", "cam"); return
-            self._log(f"🔄 카메라 변경 — 기존 연결 해제 후 재연결...", "cam")
+                self._log("⚠️ 이미 동일 카메라 연결됨", "camera"); return
+            self._log(f"🔄 카메라 변경 — 기존 연결 해제 후 재연결...", "camera")
             self._pending_connect_index = index
             self._disconnect_camera()   # 완료 후 _on_disconnect_done → _connect_pending
             return
 
-        cam_type = self.cam_panel.get_selected_camera_type()
+        cam_type = self.camera_panel.get_selected_camera_type()
         try:
             if cam_type == "HIKVISION":
-                cam = HikvisionCamera(device_index=max(0, index))
+                camera = HikvisionCamera(device_index=max(0, index))
             elif cam_type == "SIMULATED":
-                cam = SimulatedCamera()
+                camera = SimulatedCamera()
             else:
-                cam = PicamCamera()
+                camera = PicamCamera()
         except Exception as e:
-            self._log(f"❌ 카메라 생성 실패: {e}", "cam"); return
+            self._log(f"❌ 카메라 생성 실패: {e}", "camera"); return
 
         # 로딩 상태 표시
-        self._log(f"🔄 {cam_type} 연결 중...", "cam")
+        self._log(f"🔄 {cam_type} 연결 중...", "camera")
         self._sec_cam._title_lbl.setText("📷  CAMERA  [ 연결 중… ]")
-        self.cam_panel.setEnabled(False)
+        self.camera_panel.setEnabled(False)
 
         # 백그라운드 연결
         self._conn_thread = QThread()
-        self._conn_worker = _ConnectWorker(cam)
+        self._conn_worker = _ConnectWorker(camera)
         self._conn_worker.moveToThread(self._conn_thread)
         self._conn_thread.started.connect(self._conn_worker.run)
         self._conn_worker.success.connect(self._on_connect_success)
@@ -765,35 +766,35 @@ class LiveTab(QMainWindow):
         self._conn_worker.error.connect(lambda _: self._conn_thread.quit())
         self._conn_thread.start()
 
-    def _on_connect_success(self, cam: BaseCamera):
+    def _on_connect_success(self, camera: BaseCamera):
         """연결 성공 — 메인 스레드에서 실행됨."""
-        self._cam = cam
-        self.cam_panel.setEnabled(True)
-        self.cam_panel.attach_camera(cam)
-        cam_type = type(cam).__name__.replace("Camera", "")
+        self._camera = camera
+        self.camera_panel.setEnabled(True)
+        self.camera_panel.attach_camera(camera)
+        cam_type = type(camera).__name__.replace("Camera", "")
         self._sec_cam._title_lbl.setText(f"📷  {cam_type.upper()}  ● LIVE")
-        self._log(f"✅ {cam_type} 연결 완료", "cam")
+        self._log(f"✅ {cam_type} 연결 완료", "camera")
         self.status_message.emit(f"{cam_type} 연결됨")
-        self.camera_connected.emit(cam)
+        self.camera_connected.emit(camera)
 
     def _on_connect_error(self, msg: str):
         """연결 실패 — 메인 스레드에서 실행됨."""
-        self.cam_panel.setEnabled(True)
+        self.camera_panel.setEnabled(True)
         self._sec_cam._title_lbl.setText("📷  CAMERA CONTROL")
-        self._log(f"❌ 연결 실패: {msg}", "cam")
+        self._log(f"❌ 연결 실패: {msg}", "camera")
 
     def _disconnect_camera(self):
         """DISCONNECT 버튼 — stop_live + disconnect를 백그라운드에서 실행."""
-        cam = self._cam
-        if cam is None:
+        camera = self._camera
+        if camera is None:
             return
-        self._cam = None                    # 즉시 참조 해제 — 새 프레임 무시
-        self.cam_panel.setEnabled(False)
-        self.cam_panel.set_grabbing(False)
-        self._log("🔄 연결 해제 중...", "cam")
+        self._camera = None                    # 즉시 참조 해제 — 새 프레임 무시
+        self.camera_panel.setEnabled(False)
+        self.camera_panel.set_grabbing(False)
+        self._log("🔄 연결 해제 중...", "camera")
 
         self._disc_thread = QThread()
-        self._disc_worker = _DisconnectWorker(cam)
+        self._disc_worker = _DisconnectWorker(camera)
         self._disc_worker.moveToThread(self._disc_thread)
         self._disc_thread.started.connect(self._disc_worker.run)
         self._disc_worker.done.connect(self._on_disconnect_done)
@@ -802,11 +803,11 @@ class LiveTab(QMainWindow):
 
     def _on_disconnect_done(self):
         """_DisconnectWorker 완료 후 메인 스레드에서 UI 정리."""
-        self.cam_panel.setEnabled(True)
-        self.cam_panel.detach_camera()
+        self.camera_panel.setEnabled(True)
+        self.camera_panel.detach_camera()
         self._proc.reset_buffer()
         self._sec_cam._title_lbl.setText("📷  CAMERA CONTROL")
-        self._log("카메라 연결 해제", "cam")
+        self._log("카메라 연결 해제", "camera")
         self.status_message.emit("카메라 해제")
         self.camera_disconnected.emit()
         # 카메라 변경 시 해제 완료 → 새 카메라로 바로 연결
@@ -816,19 +817,19 @@ class LiveTab(QMainWindow):
             self._connect_camera(idx)
 
     def _start_camera(self):
-        if self._cam is None: return
+        if self._camera is None: return
         try:
             self._first_frame = True
-            self._cam.start_live(self._on_new_frame)
-            self.cam_panel.set_grabbing(True)
-            self._log("▶ 카메라 시작", "cam")
+            self._camera.start_live(self._on_new_frame)
+            self.camera_panel.set_grabbing(True)
+            self._log("▶ 카메라 시작", "camera")
             
             # [Phase] 라이브 프로그레스 타이머 설정 (노출이 길 경우)
             try:
-                if hasattr(self._cam, '_get_frame_total_s'):
-                    exp_ms = self._cam._get_frame_total_s() * 1000.0
+                if hasattr(self._camera, '_get_frame_total_s'):
+                    exp_ms = self._camera._get_frame_total_s() * 1000.0
                 else:
-                    exp_ms = self._cam.get_exposure_ms()
+                    exp_ms = self._camera.get_exposure_ms()
             except: exp_ms = 0
             
             if exp_ms > 100:
@@ -841,45 +842,45 @@ class LiveTab(QMainWindow):
                 self._live_timer_anim.timeout.connect(self._on_live_progress_tick)
                 self._live_timer_anim.start()
             else:
-                self.cam_panel.bar_snap_progress.setValue(100)
+                self.camera_panel.bar_snap_progress.setValue(100)
         except Exception as e:
-            self._log(f"❌ 시작 실패: {e}", "cam")
+            self._log(f"❌ 시작 실패: {e}", "camera")
 
     def _stop_camera(self):
         """STOP 버튼 — stop_live()를 백그라운드에서 실행, UI는 즉시 갱신."""
-        if self._cam is None: return
-        self.cam_panel.set_grabbing(False)
-        cam = self._cam
+        if self._camera is None: return
+        self.camera_panel.set_grabbing(False)
+        camera = self._camera
         
         if hasattr(self, '_live_timer_anim') and self._live_timer_anim.isActive():
             self._live_timer_anim.stop()
-        self.cam_panel.bar_snap_progress.setValue(0)
+        self.camera_panel.bar_snap_progress.setValue(0)
 
         def _do_stop():
             try:
-                cam.stop_live()
+                camera.stop_live()
             except Exception: pass
 
         import threading
         t = threading.Thread(target=_do_stop, daemon=True, name="StopLive")
         t.start()
-        self._log("■ 카메라 정지", "cam")
+        self._log("■ 카메라 정지", "camera")
 
     def stop_live(self):
         """외부(Acquisition/Scan 탭) 호출 — 동기적으로 완료 보장."""
-        if self._cam is None:
+        if self._camera is None:
             self._was_live = False
             return
-        self._was_live = self.cam_panel.btn_stop.isEnabled()  # grabbing 중이면 True
+        self._was_live = self.camera_panel.btn_stop.isEnabled()  # grabbing 중이면 True
         try:
-            self._cam.stop_live()
+            self._camera.stop_live()
         except Exception:
             pass
-        self.cam_panel.set_grabbing(False)
+        self.camera_panel.set_grabbing(False)
 
     def resume_live(self):
         """Acquisition/Scan 완료 후 — stop_live() 직전에 grabbing 중이었으면 재개."""
-        if getattr(self, "_was_live", False) and self._cam is not None:
+        if getattr(self, "_was_live", False) and self._camera is not None:
             self._start_camera()
 
     def _on_live_progress_tick(self):
@@ -887,10 +888,10 @@ class LiveTab(QMainWindow):
         """라이브 모드 중 프로그레스바를 노출 주기에 맞춰 채움."""
         self._live_elapsed += self._live_timer_anim.interval()
         if self._live_elapsed >= self._live_total:
-            self.cam_panel.bar_snap_progress.setValue(99)
+            self.camera_panel.bar_snap_progress.setValue(99)
         else:
             pct = int(100 * self._live_elapsed / max(self._live_total, 1))
-            self.cam_panel.bar_snap_progress.setValue(pct)
+            self.camera_panel.bar_snap_progress.setValue(pct)
 
     def _on_new_frame(self, raw: np.ndarray):
         """카메라로부터 새 프레임 수신 (백그라운드 스레드에서 호출됨)."""
@@ -903,24 +904,24 @@ class LiveTab(QMainWindow):
 
     def _snap_image(self):
         """단일 프레임 촬영 — 백그라운드 스레드에서 실행."""
-        if self._cam is None: return
+        if self._camera is None: return
         if self._snap_thread is not None and self._snap_thread.isRunning():
-            self._log("⚠️ 촬영 중...", "cam"); return
+            self._log("⚠️ 촬영 중...", "camera"); return
 
-        self.cam_panel.btn_snap.setEnabled(False)
-        self._log("📷 SNAP 촬영 중...", "cam")
+        self.camera_panel.btn_snap.setEnabled(False)
+        self._log("📷 SNAP 촬영 중...", "camera")
         
         # [Progress Bar] LightField 스타일 노출 게이지 애니메이션 시작
         try:
-            if hasattr(self._cam, '_get_frame_total_s'):
-                exp_ms = self._cam._get_frame_total_s() * 1000.0
+            if hasattr(self._camera, '_get_frame_total_s'):
+                exp_ms = self._camera._get_frame_total_s() * 1000.0
             else:
-                exp_ms = self._cam.get_exposure_ms()
+                exp_ms = self._camera.get_exposure_ms()
         except Exception:
             exp_ms = 1000.0
             
         if exp_ms > 100:
-            self.cam_panel.bar_snap_progress.setValue(0)
+            self.camera_panel.bar_snap_progress.setValue(0)
             self._snap_elapsed = 0
             self._snap_total = exp_ms
             if hasattr(self, '_snap_timer_anim') and self._snap_timer_anim.isActive():
@@ -930,45 +931,45 @@ class LiveTab(QMainWindow):
             self._snap_timer_anim.timeout.connect(self._on_snap_progress_tick)
             self._snap_timer_anim.start()
         else:
-            self.cam_panel.bar_snap_progress.setValue(100)
+            self.camera_panel.bar_snap_progress.setValue(100)
 
         self._snap_thread = QThread()
-        self._snap_worker = _SnapWorker(self._cam)
+        self._snap_worker = _SnapWorker(self._camera)
         self._snap_worker.moveToThread(self._snap_thread)
         self._snap_thread.started.connect(self._snap_worker.run)
         self._snap_worker.success.connect(self._on_snap_success)
         self._snap_worker.error.connect(self._on_snap_error)
         self._snap_worker.success.connect(lambda _: self._snap_thread.quit())
         self._snap_worker.error.connect(lambda _: self._snap_thread.quit())
-        self._snap_thread.finished.connect(lambda: self.cam_panel.btn_snap.setEnabled(self._cam is not None))
+        self._snap_thread.finished.connect(lambda: self.camera_panel.btn_snap.setEnabled(self._camera is not None))
         self._snap_thread.start()
 
     def _on_snap_progress_tick(self):
         """단일 촬영 중 프로그레스바를 부드럽게 채움."""
         self._snap_elapsed += self._snap_timer_anim.interval()
         if self._snap_elapsed >= self._snap_total:
-            self.cam_panel.bar_snap_progress.setValue(100)
+            self.camera_panel.bar_snap_progress.setValue(100)
             self._snap_timer_anim.stop()
         else:
             pct = int(100 * self._snap_elapsed / max(self._snap_total, 1))
-            self.cam_panel.bar_snap_progress.setValue(pct)
+            self.camera_panel.bar_snap_progress.setValue(pct)
 
     def _on_snap_success(self, raw: np.ndarray):
         if hasattr(self, '_snap_timer_anim') and self._snap_timer_anim.isActive():
             self._snap_timer_anim.stop()
-        self.cam_panel.bar_snap_progress.setValue(100)
+        self.camera_panel.bar_snap_progress.setValue(100)
         self._last_raw = raw
         self._viewer_raw = raw
         self._first_frame = True
         self._last_display_t = 0.0
-        self._log("✅ SNAP 완료", "cam")
+        self._log("✅ SNAP 완료", "camera")
         self._proc_worker.submit(raw)
 
     def _on_snap_error(self, msg: str):
         if hasattr(self, '_snap_timer_anim') and self._snap_timer_anim.isActive():
             self._snap_timer_anim.stop()
-        self.cam_panel.bar_snap_progress.setValue(0)
-        self._log(f"❌ SNAP 실패: {msg}", "cam")
+        self.camera_panel.bar_snap_progress.setValue(0)
+        self._log(f"❌ SNAP 실패: {msg}", "camera")
 
 
     def _capture_bg(self):
@@ -977,9 +978,9 @@ class LiveTab(QMainWindow):
         if self._proc.capture_background(raw):
             if raw is not None:
                 BackgroundManager.instance().set_frame(raw)
-            self._log("📸 배경 캡처됨 (전체 탭 공유)", "cam")
+            self._log("📸 배경 캡처됨 (전체 탭 공유)", "camera")
         else:
-            self._log("⚠ 버퍼 없음 — 카메라 실행 후 배경 캡처", "cam")
+            self._log("⚠ 버퍼 없음 — 카메라 실행 후 배경 캡처", "camera")
 
     # ── 프레임 처리 ───────────────────────────────────────────────────
 
@@ -1038,7 +1039,7 @@ class LiveTab(QMainWindow):
 
     def _refresh_centroid_labels(self):
         cx, cy, br, fps, snr, mean, sat, sat_r = self._last_centroid
-        self.cam_panel.update_centroid(
+        self.camera_panel.update_centroid(
             cx, cy, br, fps,
             snr=snr, mean=mean,
             saturated=sat, sat_ratio=sat_r,
@@ -1128,7 +1129,7 @@ class LiveTab(QMainWindow):
         from core.logger import sys_logger, dev_logger, cam_logger, calc_logger
         logger = sys_logger
         if category == "dev": logger = dev_logger
-        elif category == "cam": logger = cam_logger
+        elif category == "camera": logger = cam_logger
         elif category == "calc": logger = calc_logger
         
         logger.info(msg)
@@ -1190,18 +1191,18 @@ class LiveTab(QMainWindow):
         save_dir = "Live_Captures"
         os.makedirs(save_dir, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        cam_name = (type(self._cam).__name__.replace("Camera", "")
-                    if self._cam else "Live")
+        cam_name = (type(self._camera).__name__.replace("Camera", "")
+                    if self._camera else "Live")
         path = os.path.join(save_dir, f"live_{cam_name}_{ts}.spe")
         try:
             exp_ms = 0.0
-            if self._cam is not None:
+            if self._camera is not None:
                 try:
-                    exp_ms = self._cam.get_exposure_ms()
+                    exp_ms = self._camera.get_exposure_ms()
                 except Exception:
                     pass
-            if isinstance(self._cam, PicamCamera):
-                self._cam.save_as_spe(path, [raw], exposure_ms=exp_ms)
+            if isinstance(self._camera, PicamCamera):
+                self._camera.save_as_spe(path, [raw], exposure_ms=exp_ms)
             else:
                 save_spe(
                     path, [raw],
@@ -1296,12 +1297,12 @@ class LiveTab(QMainWindow):
     def cleanup(self):
         self._centroid_timer.stop()
         # 앱 종료 시 — 비동기 워커를 기다리지 않고 직접 동기 정리
-        if self._cam:
-            try: self._cam.stop_live()
+        if self._camera:
+            try: self._camera.stop_live()
             except Exception: pass
-            try: self._cam.disconnect()
+            try: self._camera.disconnect()
             except Exception: pass
-            self._cam = None
+            self._camera = None
         self._proc_worker.stop()
         for t in (self._conn_thread, self._disc_thread):
             if t and t.isRunning():

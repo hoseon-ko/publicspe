@@ -3,8 +3,8 @@ ui/acquisition/acquisition_tab.py
 Picam 배치 획득 탭.
 
 카메라 인스턴스는 LiveTab에서 공유받는다 (자체 연결/해제 없음).
-- set_shared_camera(cam) : LiveTab 연결 완료 시 호출
-- clear_shared_camera()  : LiveTab 연결 해제 시 호출
+- set_shared_cameraera(camera) : LiveTab 연결 완료 시 호출
+- clear_shared_cameraera()  : LiveTab 연결 해제 시 호출
 
 획득 시작 시 acquisition_starting 시그널 → MainWindow → LiveTab.stop_live().
 획득 완료 시 spe_saved(path) 시그널 → MainWindow → Analysis 탭 자동 오픈.
@@ -70,13 +70,13 @@ class _AcqWorker(QObject):
     error       = pyqtSignal(str)
     log_message = pyqtSignal(str)        # 워커 → UI 로그
 
-    def __init__(self, cam: PicamCamera, n_frames: int, timeout_s: float,
+    def __init__(self, camera: PicamCamera, n_frames: int, timeout_s: float,
                  setup_exposure_ms: Optional[float] = None,
                  setup_temp_c: Optional[float] = None,
                  wait_temp_lock: bool = False,
                  adc_kwargs: Optional[dict] = None):
         super().__init__()
-        self._cam             = cam
+        self._camera             = camera
         self._n               = n_frames
         self._timeout         = timeout_s
         self._setup_exposure  = setup_exposure_ms
@@ -89,20 +89,20 @@ class _AcqWorker(QObject):
             # ── 1. 설정 적용 (백그라운드 — 메인 스레드 차단 없음) ───────
             if self._setup_exposure is not None:
                 try:
-                    self._cam.set_exposure_ms(self._setup_exposure)
+                    self._camera.set_exposure_ms(self._setup_exposure)
                 except Exception as e:
                     self.log_message.emit(f"⚠️ 노출 설정 실패: {e}")
 
             if self._adc_kwargs:
                 try:
-                    self._cam.set_adc_settings(**self._adc_kwargs)
+                    self._camera.set_adc_settings(**self._adc_kwargs)
                     self.log_message.emit(f"ADC 설정: {list(self._adc_kwargs.keys())}")
                 except Exception as e:
                     self.log_message.emit(f"⚠️ ADC 설정 실패: {e}")
 
             if self._setup_temp is not None:
                 try:
-                    self._cam.set_temperature(self._setup_temp)
+                    self._camera.set_temperature(self._setup_temp)
                     self.log_message.emit(f"온도 setpoint: {self._setup_temp:.1f}°C")
                 except Exception as e:
                     self.log_message.emit(f"⚠️ 온도 설정 실패: {e}")
@@ -111,7 +111,7 @@ class _AcqWorker(QObject):
             if self._wait_temp_lock:
                 self.log_message.emit("🌡 온도 Lock 대기 중… (최대 120초)")
                 try:
-                    self._cam._wrapper.wait_temperature_lock(timeout_s=120)
+                    self._camera._wrapper.wait_temperature_lock(timeout_s=120)
                     self.log_message.emit("✅ 온도 Lock 완료")
                 except Exception as e:
                     self.error.emit(f"온도 Lock 실패: {e}")
@@ -120,7 +120,7 @@ class _AcqWorker(QObject):
             # ── 3. 프레임 획득 ─────────────────────────────────────────
             frames = []
             for i in range(self._n):
-                batch = self._cam._wrapper.acquire_images(1, timeout_s=self._timeout)
+                batch = self._camera._wrapper.acquire_images(1, timeout_s=self._timeout)
                 if not batch:
                     raise RuntimeError(f"프레임 {i+1} 획득 실패 (빈 결과)")
                 frame = batch[0]
@@ -149,7 +149,7 @@ class AcquisitionTab(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._cam: Optional[BaseCamera] = None
+        self._camera: Optional[BaseCamera] = None
         self._worker: Optional[_AcqWorker] = None
         self._thread: Optional[QThread] = None
         self._acq_start_time: float = 0.0                     # ETA 계산용
@@ -179,9 +179,9 @@ class AcquisitionTab(QWidget):
         exp_s = max(float(exposure_ms) / 1000.0, 0.0)
         readout_s = 0.0
 
-        if isinstance(self._cam, PicamCamera):
+        if isinstance(self._camera, PicamCamera):
             try:
-                total_s = float(self._cam._wrapper._get_frame_total_s())
+                total_s = float(self._camera._wrapper._get_frame_total_s())
                 readout_s = max(total_s - exp_s, 0.0)
             except Exception:
                 readout_s = 0.0
@@ -241,12 +241,12 @@ class AcquisitionTab(QWidget):
         left.addWidget(title)
 
         # ── 공유 카메라 상태 배너 ──────────────────────────────────────
-        self._cam_banner = QFrame()
-        self._cam_banner.setFrameShape(QFrame.Shape.StyledPanel)
-        self._cam_banner.setStyleSheet(
+        self._camera_banner = QFrame()
+        self._camera_banner.setFrameShape(QFrame.Shape.StyledPanel)
+        self._camera_banner.setStyleSheet(
             "QFrame { background: #080e1e; border: 1px solid #0f3460; border-radius: 4px; padding: 2px; }"
         )
-        banner_row = QHBoxLayout(self._cam_banner)
+        banner_row = QHBoxLayout(self._camera_banner)
         banner_row.setContentsMargins(8, 4, 8, 4)
         lbl_cam_icon = QLabel("📷")
         banner_row.addWidget(lbl_cam_icon)
@@ -262,7 +262,7 @@ class AcquisitionTab(QWidget):
         )
         self.lbl_temp_live.setVisible(False)
         banner_row.addWidget(self.lbl_temp_live)
-        left.addWidget(self._cam_banner)
+        left.addWidget(self._camera_banner)
 
         # Picam 전용 경고 (HIKVISION 연결 시 표시)
         self.lbl_picam_warn = QLabel("⚠️  Acquisition은 Picam 전용입니다")
@@ -520,16 +520,16 @@ class AcquisitionTab(QWidget):
 
     # ── 공유 카메라 수신 ──────────────────────────────────────────────
 
-    def set_shared_camera(self, cam: BaseCamera):
+    def set_shared_cameraera(self, camera: BaseCamera):
         """LiveTab에서 카메라 연결 완료 시 MainWindow가 호출."""
-        self._cam = cam
-        is_picam = isinstance(cam, PicamCamera)
+        self._camera = camera
+        is_picam = isinstance(camera, PicamCamera)
 
         # 배너 갱신
         try:
-            name = cam.camera_name()
+            name = camera.camera_name()
         except Exception:
-            name = type(cam).__name__
+            name = type(camera).__name__
         self.lbl_cam_status.setText(f"● {name}")
         self.lbl_cam_status.setStyleSheet(
             f"color: #4ecdc4; font-family: '{_FC}'; font-size: {_FS_CTRL};"
@@ -543,7 +543,7 @@ class AcquisitionTab(QWidget):
             return
 
         # Picam 전용: caps 읽어 온도/ADC 표시
-        caps = cam.capabilities
+        caps = camera.capabilities
         self.grp_temp.setVisible(caps.has_temperature)
         self.grp_adc.setVisible(caps.has_adc)
 
@@ -555,14 +555,14 @@ class AcquisitionTab(QWidget):
                 self.spin_temp.setMaximum(mx)
             # 현재 setpoint를 읽어 스핀박스 초기화
             try:
-                reading, setpoint, status = cam.get_temperature()
+                reading, setpoint, status = camera.get_temperature()
                 if setpoint is not None:
                     self.spin_temp.setValue(float(setpoint))
             except Exception:
                 pass
             # 온도 실시간 폴링 (백그라운드 스레드)
             self.lbl_temp_live.setVisible(True)
-            self._temp_thread = TempPollerThread(cam, 3000)
+            self._temp_thread = TempPollerThread(camera, 3000)
             self._temp_thread.temp_read.connect(self._on_temp_read)
             self._temp_thread.start()
 
@@ -579,20 +579,20 @@ class AcquisitionTab(QWidget):
                 cb.addItems([str(x) for x in opts])
 
         try:
-            self.spin_exposure.setValue(cam.get_exposure_ms())
+            self.spin_exposure.setValue(camera.get_exposure_ms())
         except Exception:
             pass
 
         self._log(f"✅ 공유 카메라: {name}")
 
-    def clear_shared_camera(self):
+    def clear_shared_cameraera(self):
         """LiveTab에서 카메라 해제 시 MainWindow가 호출."""
         if self._temp_thread is not None:
             self._temp_thread.stop()
             self._temp_thread = None
         self.lbl_temp_live.setVisible(False)
         self.lbl_temp_live.setText("🌡 —")
-        self._cam = None
+        self._camera = None
         self.lbl_cam_status.setText("카메라 미연결 — Live 탭에서 먼저 연결하세요")
         self.lbl_cam_status.setStyleSheet(
             f"color: #e94560; font-family: '{_FC}'; font-size: {_FS_CTRL};"
@@ -610,7 +610,7 @@ class AcquisitionTab(QWidget):
     # ── 획득 ─────────────────────────────────────────────────────────
 
     def _start_acquisition(self):
-        if self._cam is None or not isinstance(self._cam, PicamCamera):
+        if self._camera is None or not isinstance(self._camera, PicamCamera):
             return
 
         # [Phase 4] 디스크 용량 체크 (세이프가드)
@@ -631,7 +631,7 @@ class AcquisitionTab(QWidget):
         # 라이브 스트림 먼저 정지
         self.acquisition_starting.emit()
 
-        caps        = self._cam.capabilities
+        caps        = self._camera.capabilities
         n_frames    = self.spin_frames.value()
         timeout     = self.spin_timeout.value()
         exposure_ms = self.spin_exposure.value()
@@ -686,7 +686,7 @@ class AcquisitionTab(QWidget):
 
         self._thread = QThread()
         self._worker = _AcqWorker(
-            self._cam, n_frames, timeout,
+            self._camera, n_frames, timeout,
             setup_exposure_ms=exposure_ms,
             setup_temp_c=setup_temp,
             wait_temp_lock=wait_lock,
@@ -713,7 +713,7 @@ class AcquisitionTab(QWidget):
         self._thread.wait()
         self.progress_bar.setValue(1000)
         self.progress_bar.setVisible(False)
-        self.btn_acquire.setEnabled(self._cam is not None and isinstance(self._cam, PicamCamera))
+        self.btn_acquire.setEnabled(self._camera is not None and isinstance(self._camera, PicamCamera))
         self.acquisition_done.emit()
 
         # #7 총 소요 시간 표시
@@ -742,7 +742,7 @@ class AcquisitionTab(QWidget):
         self.acquisition_done.emit()
         elapsed = time.monotonic() - self._acq_start_time
         self.lbl_eta.setText(f"❌ 오류  |  {elapsed:.1f}초 후 중단")
-        self.btn_acquire.setEnabled(self._cam is not None and isinstance(self._cam, PicamCamera))
+        self.btn_acquire.setEnabled(self._camera is not None and isinstance(self._camera, PicamCamera))
         self._log(f"❌ 획득 오류: {msg}")
 
     # ── #15 프리뷰 ────────────────────────────────────────────────────
@@ -792,11 +792,11 @@ class AcquisitionTab(QWidget):
             self.check_bg_sub.setChecked(False)
 
     def _capture_bg(self):
-        if self._cam is None:
+        if self._camera is None:
             self._log("❌ 카메라 미연결")
             return
         try:
-            frame = np.asarray(self._cam.snap()).astype(np.float32)
+            frame = np.asarray(self._camera.snap()).astype(np.float32)
             save_dir = Path(self.edit_save_dir.text().strip() or "acquisitions")
             save_dir.mkdir(parents=True, exist_ok=True)
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -868,9 +868,9 @@ class AcquisitionTab(QWidget):
         filename = f"picam_{ts}_{len(frames)}frames.spe"
         out_path = save_dir / filename
 
-        if self._cam is not None and isinstance(self._cam, PicamCamera):
+        if self._camera is not None and isinstance(self._camera, PicamCamera):
             try:
-                return self._cam.save_as_spe(
+                return self._camera.save_as_spe(
                     out_path, frames,
                     exposure_ms=self.spin_exposure.value(),
                 )
@@ -880,7 +880,7 @@ class AcquisitionTab(QWidget):
         return save_spe(
             out_path, frames,
             exposure_ms=self.spin_exposure.value(),
-            camera_name=self._cam.camera_name() if self._cam else "Picam",
+            camera_name=self._camera.camera_name() if self._camera else "Picam",
             software="SpeAnalyze-Acquisition",
         )
 

@@ -80,7 +80,7 @@ class ScanTab(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._cam          = None
+        self._camera          = None
         self._motor_panel  = None
         self._sim_cam      = None
         self._sim_motor    = None
@@ -119,27 +119,27 @@ class ScanTab(QWidget):
 
     # ── Public API ────────────────────────────────────────────────────
 
-    def set_shared_camera(self, cam):
+    def set_shared_cameraera(self, camera):
         # 카메라가 바뀌면 이전 스캔 결과 초기화 (스캔 중이 아닐 때만)
-        if self._cam is not cam:
+        if self._camera is not camera:
             if not (self._worker and self._worker.isRunning()):
                 self._reset_scan_results()
-        self._cam = cam
-        cam_name = type(cam).__name__.replace("Camera", "")
+        self._camera = camera
+        cam_name = type(camera).__name__.replace("Camera", "")
         self._lbl_cam.setText(f"📷 {cam_name}  ● CONNECTED")
         self._lbl_cam.setStyleSheet(f"color: #4ecdc4; font-family: '{_F}'; font-size: {_FS_LBL};")
         self.btn_start.setEnabled(True)
         self.btn_calibrate.setEnabled(True)
         try:
-            exp = cam.get_exposure_ms()
+            exp = camera.get_exposure_ms()
             self.spin_exposure.setValue(exp)
         except Exception:
             pass
 
-    def clear_shared_camera(self):
+    def clear_shared_cameraera(self):
         if not (self._worker and self._worker.isRunning()):
             self._reset_scan_results()
-        self._cam = None
+        self._camera = None
         self._lbl_cam.setText("📷 카메라 없음")
         self._lbl_cam.setStyleSheet(f"color: #e94560; font-family: '{_F}'; font-size: {_FS_LBL};")
         self.btn_start.setEnabled(False)
@@ -669,11 +669,11 @@ class ScanTab(QWidget):
     # ── 노출 제어 ─────────────────────────────────────────────────────
 
     def _apply_scan_exposure(self):
-        if self._cam is None:
+        if self._camera is None:
             return
         ms = self.spin_exposure.value()
         try:
-            actual = self._cam.set_exposure_ms(ms)
+            actual = self._camera.set_exposure_ms(ms)
             self.spin_exposure.setValue(actual)
             self._log(f"노출 설정: {actual:.2f} ms")
             self.exposure_changed.emit(actual)
@@ -706,11 +706,11 @@ class ScanTab(QWidget):
             self.chk_bg_active.setChecked(False)
 
     def _capture_background(self):
-        if self._cam is None:
+        if self._camera is None:
             self._log("❌ 카메라 연결 필요")
             return
         try:
-            raw = np.asarray(self._cam.snap())
+            raw = np.asarray(self._camera.snap())
             self._bm.set_frame(raw)              # ← BackgroundManager에 등록
             self._log(f"📸 배경 획득: {raw.shape[1]}×{raw.shape[0]}")
         except Exception as e:
@@ -734,7 +734,7 @@ class ScanTab(QWidget):
     def _set_controls_locked(self, locked: bool):
         """동작 중 모든 파라미터/시작 버튼 잠금, 정지만 활성."""
         idle = not locked
-        cam_ok = self._cam is not None
+        cam_ok = self._camera is not None
         motor_ok = self._motor_panel is not None and self._motor_panel.is_connected
 
         self.btn_start.setEnabled(idle and cam_ok)
@@ -808,7 +808,7 @@ class ScanTab(QWidget):
     # ── 스캔 제어 ─────────────────────────────────────────────────────
 
     def _start_scan(self):
-        if self._cam is None:
+        if self._camera is None:
             self._log("❌ 카메라 연결 필요")
             return
         if self._worker and self._worker.isRunning():
@@ -856,7 +856,7 @@ class ScanTab(QWidget):
         # 마스크는 워커가 첫 스냅 후 크기에 맞게 빌드하므로 여기서 리셋
         self._proc.ignore_mask = None
         self._scan_start_time = time.monotonic()
-        self._worker = _ScanWorker(self._cam, self._motor_panel, params, proc=self._proc)
+        self._worker = _ScanWorker(self._camera, self._motor_panel, params, proc=self._proc)
         self._worker.step_done.connect(self._on_step_done)
         self._worker.progress.connect(self._on_progress)
         self._worker.log_message.connect(self._log)
@@ -1104,9 +1104,9 @@ class ScanTab(QWidget):
     def _edit_mask(self):
         """스냅 또는 마지막 프레임을 불러와 MaskEditorDialog를 열고 결과를 저장."""
         img = None
-        if self._cam is not None:
+        if self._camera is not None:
             try:
-                img = np.asarray(self._cam.snap())
+                img = np.asarray(self._camera.snap())
             except Exception as e:
                 self._log(f"⚠️ 스냅 실패 — 마지막 프레임으로 대체: {e}")
         if img is None and self._image_list:
@@ -1143,7 +1143,7 @@ class ScanTab(QWidget):
     # ── 캘리브레이션 ──────────────────────────────────────────────────
 
     def _start_calibration(self):
-        if self._cam is None:
+        if self._camera is None:
             self._log("❌ 카메라 연결 필요")
             return
         if self._motor_panel is None or not self._motor_panel.is_connected:
@@ -1172,7 +1172,7 @@ class ScanTab(QWidget):
         self._lbl_progress.setText(f"0 / {total_steps}")
 
         self.scan_starting.emit()   # Live 스트림 정지 (Picam 리소스 충돌 방지)
-        self._calib_worker = _CalibWorker(self._cam, self._motor_panel, params)
+        self._calib_worker = _CalibWorker(self._camera, self._motor_panel, params)
         self._calib_worker.log_message.connect(self._log)
         self._calib_worker.progress.connect(self._on_progress)
         self._calib_worker.result_ready.connect(self._on_calib_result)
@@ -1207,12 +1207,12 @@ class ScanTab(QWidget):
             return
         if checked:
             # 실제 카메라/모터 보관 (SIM 해제 시 복원)
-            self._real_cam   = self._cam
+            self._real_cam   = self._camera
             self._real_motor = self._motor_panel
             from core.simulator import SimCamera, SimMotorPanel
             self._sim_cam   = SimCamera()
             self._sim_motor = SimMotorPanel(self._sim_cam)
-            self.set_shared_camera(self._sim_cam)
+            self.set_shared_cameraera(self._sim_cam)
             self._motor_panel = self._sim_motor
             self._lbl_cam.setText("🟡 SIM  ● Gaussian Beam  512×512")
             self._lbl_cam.setStyleSheet(
@@ -1229,9 +1229,9 @@ class ScanTab(QWidget):
             self._real_cam   = None
             self._real_motor = None
             if real_cam is not None:
-                self.set_shared_camera(real_cam)
+                self.set_shared_cameraera(real_cam)
             else:
-                self.clear_shared_camera()
+                self.clear_shared_cameraera()
             self._motor_panel = real_motor
             self.btn_sim.setText("▷  SIM MODE")
             self._log("⬛ SIM MODE 해제" + ("" if real_cam is None else " — 실제 카메라 복원"))

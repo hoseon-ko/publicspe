@@ -107,7 +107,7 @@ class AutoFocusTab(QWidget):
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
-        self._cam  = None          # Live 탭에서 공유받는 카메라
+        self._camera  = None          # Live 탭에서 공유받는 카메라
         self._kimm = None          # KIMMZController (공유)
         self._running = False
         self._worker = None        # AutoFocusWorker
@@ -128,23 +128,23 @@ class AutoFocusTab(QWidget):
 
     # ── Public API (MainWindow에서 연결) ──────────────────────────────
 
-    def set_shared_camera(self, cam):
+    def set_shared_cameraera(self, camera):
         if self._sim_active:
-            self._real_cam = cam   # SIM 중: 나중에 복원용으로만 보관
+            self._real_cam = camera   # SIM 중: 나중에 복원용으로만 보관
             return
-        self._cam = cam
-        name = type(cam).__name__.replace("Camera", "")
+        self._camera = camera
+        name = type(camera).__name__.replace("Camera", "")
         self._lbl_cam.setText(f"● {name}  CONNECTED")
         self._lbl_cam.setStyleSheet(
             f"color: #4ecdc4; font-family: '{_FC}'; font-size: {_FSS};"
         )
         self.btn_run.setEnabled(True)
 
-    def clear_shared_camera(self):
+    def clear_shared_cameraera(self):
         if self._sim_active:
             self._real_cam = None
             return
-        self._cam = None
+        self._camera = None
         self._lbl_cam.setText("● 카메라 없음")
         self._lbl_cam.setStyleSheet(
             f"color: {C_DANGER}; font-family: '{_FC}'; font-size: {_FSS};"
@@ -811,7 +811,7 @@ class AutoFocusTab(QWidget):
         self._sim_options.setVisible(checked)
 
         if checked:
-            self._real_cam = self._cam
+            self._real_cam = self._camera
             self._build_sim_camera()
             self.btn_sim.setText("■  SIM OFF")
             self._log("🟡 SIM MODE 활성")
@@ -821,13 +821,13 @@ class AutoFocusTab(QWidget):
             real = self._real_cam
             self._real_cam = None
             if real is not None:
-                self.set_shared_camera(real)
+                self.set_shared_cameraera(real)
             else:
-                self.clear_shared_camera()
+                self.clear_shared_cameraera()
             self._log("⬛ SIM MODE 해제")
 
     def _build_sim_camera(self):
-        """SIM 카메라 인스턴스 생성 후 self._cam에 설정."""
+        """SIM 카메라 인스턴스 생성 후 self._camera에 설정."""
         from core.simulator import SimAFCamera
         center = self.spin_center.value()
         step   = self.spin_step.value()
@@ -836,17 +836,17 @@ class AutoFocusTab(QWidget):
         if self.rb_sim_imgs.isChecked() and self._sim_images:
             n = int(2 * half / max(step, 0.001)) + 1
             z_seq = [center - half + i * step for i in range(n)]
-            cam = SimAFCamera(mode="images", images=self._sim_images)
-            cam.set_z_sequence(z_seq)
+            camera = SimAFCamera(mode="images", images=self._sim_images)
+            camera.set_z_sequence(z_seq)
         else:
             # 수학 모델: defocus sigma = range / 4 (포커스 곡선이 선명하게)
-            cam = SimAFCamera(
+            camera = SimAFCamera(
                 mode="math",
                 best_z=center,
                 z_sigma=max(half / 4.0, 1.0),
             )
 
-        self._cam = cam
+        self._camera = camera
         self._lbl_cam.setText("🟡 SIM  ● ACTIVE")
         self._lbl_cam.setStyleSheet(
             f"color: #ffe66d; font-family: '{_FC}'; font-size: {_FSS};"
@@ -1016,7 +1016,7 @@ class AutoFocusTab(QWidget):
             self._lbl_roi_rect.setText(f"영역: ({x0}, {y0}) ~ ({x1}, {y1})")
 
     def _on_run(self):
-        if self._cam is None:
+        if self._camera is None:
             self._log("❌ 카메라 없음")
             return
 
@@ -1040,8 +1040,8 @@ class AutoFocusTab(QWidget):
         metric = metric_map.get(self.combo_metric.currentText(), "laplacian")
 
         # SIM 이미지 모드: Z 시퀀스를 카메라에도 전달
-        if self._sim_active and hasattr(self._cam, "set_z_sequence"):
-            self._cam.set_z_sequence(z_positions)
+        if self._sim_active and hasattr(self._camera, "set_z_sequence"):
+            self._camera.set_z_sequence(z_positions)
 
         roi_info = ""
         if self.cb_use_roi.isChecked() and self._roi_rect:
@@ -1078,7 +1078,7 @@ class AutoFocusTab(QWidget):
 
         from ui.autofocus.af_worker import AutoFocusWorker
         self._worker = AutoFocusWorker(
-            camera       = self._cam,
+            camera       = self._camera,
             kimm_ctrl    = None if self._sim_active else self._kimm,
             z_positions  = z_positions,
             metric       = metric,
@@ -1290,7 +1290,7 @@ class AutoFocusTab(QWidget):
 
     def _set_running(self, running: bool):
         self._running = running
-        self.btn_run.setEnabled(not running and self._cam is not None)
+        self.btn_run.setEnabled(not running and self._camera is not None)
         self.btn_stop.setEnabled(running)
         self.btn_sim.setEnabled(not running)
         for w in (self.spin_center, self.spin_range,
