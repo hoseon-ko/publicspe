@@ -8,6 +8,9 @@ ACS SPiiPlus 6축 키네마틱 스테이지 컨트롤러.
 
 from __future__ import annotations
 
+
+import System  # 상단에 추가 필요
+from System import Enum
 import sys
 import os
 import builtins
@@ -191,7 +194,7 @@ class AcsWorker(QObject):
 
     @pyqtSlot()
     def set_enable_all(self):
-        self._is_polling = False
+        #self._is_polling = False
         try:
             self._do_enable_all()
         finally:
@@ -200,7 +203,8 @@ class AcsWorker(QObject):
     def _do_enable_all(self):
         # KillAll → MOVE/ACC 소멸 대기 → FaultClear → Enable
         try:
-            self._api.KillAll()
+            #self._api.KillAll()
+            pass
         except:
             pass
 
@@ -214,28 +218,37 @@ class AcsWorker(QObject):
                 break
             time.sleep(0.05)
 
-        for i in range(6):
-            try:
-                self._api.FaultClear(_axis_enum(i))
-            except:
-                pass
+     # 1. 6개 축 + 종결자(NONE) 1개 = 총 7개 크기 배열 생성
+        raw_indices = [0, 1, 4, 5, 8, 9]
+        axis_array = System.Array.CreateInstance(_AxisEnum, len(raw_indices) + 1)
+        
+        # 2. 실제 축 데이터 채우기
+        for i, val in enumerate(raw_indices):
+            ax_obj = Enum.ToObject(_AxisEnum, val)
+            axis_array.SetValue(ax_obj, i)
+            
+        # 3. 핵심: 마지막 칸에 ACSC_NONE (-1) 주입
+        # C# 코드의 result[result.Length - 1] = Axis.ACSC_NONE; 부분
+        none_obj = Enum.ToObject(_AxisEnum, -1) # 보통 ACSC_NONE은 -1입니다.
+        axis_array.SetValue(none_obj, len(raw_indices))
 
-        for i in range(6):
-            self.set_enable(i, True)
+        log.info(f"[ACS Worker] Attempting EnableM with type-safe array")
+        time.sleep(0.1)  # EnableM 직전 잠시 대기
+        self._api.EnableM(axis_array)
 
         # _poll()이 꺼진 동안 상태를 직접 emit
-        try:
-            states = []
-            for i in range(6):
-                mst = int(self._api.GetMotorState(_axis_enum(i)))
-                states.append({
-                    "enabled": bool(mst & _MST_ENABLE),
-                    "moving":  bool(mst & _MST_ANY_MOTION),
-                    "in_pos":  bool(mst & _MST_INPOS)
-                })
-            self.states_updated.emit(states)
-        except Exception as e:
-            log.debug(f"[ACS Worker] Post-enable state emit error: {e}")
+        # try:
+        #     states = []
+        #     for i in range(6):
+        #         mst = int(self._api.GetMotorState(_axis_enum(i)))
+        #         states.append({
+        #             "enabled": bool(mst & _MST_ENABLE),
+        #             "moving":  bool(mst & _MST_ANY_MOTION),
+        #             "in_pos":  bool(mst & _MST_INPOS)
+        #         })
+        #     self.states_updated.emit(states)
+        # except Exception as e:
+        #     log.debug(f"[ACS Worker] Post-enable state emit error: {e}")
 
     @pyqtSlot()
     def set_disable_all(self):
