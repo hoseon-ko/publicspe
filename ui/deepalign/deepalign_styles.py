@@ -1,0 +1,126 @@
+"""DeepAlign 공통 스타일 보조 파일.
+
+이 파일은 DeepAlign UI 전반에서 공통으로 쓰는 가벼운 표시 보조 함수를 모아둡니다.
+주요 역할은 다음과 같습니다.
+- 진행률 바 시각 갱신
+- 카메라 액션 버튼의 enabled/disabled 상태 표현
+- 대시보드 버튼/라벨 생성 보조
+- 섹션 및 그리드 라벨의 공통 스타일 보조
+"""
+
+from __future__ import annotations
+
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QFrame
+
+
+class DeepAlignStylesMixin:
+    def _set_master_progress(self, value: int):
+        pct = max(0, min(100, int(value)))
+        self.prog_grid.setColumnStretch(0, pct)
+        self.prog_grid.setColumnStretch(1, max(0, 100 - pct))
+        self.lbl_prog_text.setText(f"{pct}% COMPLETE")
+
+    def _set_camera_action_state(self, connected: bool):
+        self.btn_connect.setEnabled(not connected)
+        self.btn_disconnect.setEnabled(connected)
+        self.btn_apply_exp.setEnabled(connected)
+        self.btn_live_air.setEnabled(connected)
+        self.btn_acquire.setEnabled(connected)
+        self.btn_stop_main.setEnabled(connected)
+        self.btn_snap.setEnabled(connected)
+
+        if not connected:
+            self._update_dash_label(self.btn_live_air, "LIVE", "READY")
+            self._update_dash_label(self.btn_acquire, "ACQUIRE", "READY")
+
+    def _update_dash_label(self, btn: QPushButton, title: str, sub: str):
+        layout = btn.layout()
+        if layout and layout.count() >= 2:
+            sub_lbl = layout.itemAt(1).widget()
+            if isinstance(sub_lbl, QLabel):
+                sub_lbl.setText(sub)
+                sub_lbl.setVisible(bool(sub))
+
+    def _make_section(self, title: str, color: str, collapsed: bool = False):
+        panel = QFrame()
+        panel.setObjectName("subPanel")
+        panel.setStyleSheet("QFrame#subPanel { background: transparent; }")
+        lay = QVBoxLayout(panel)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        header = QPushButton(title)
+        header.setCheckable(True)
+        header.setChecked(not collapsed)
+        header.setFixedHeight(28)
+        header.setStyleSheet(
+            f"""
+            QPushButton {{ background: #0f172a; color: {color}; font-weight: 900; font-size: 11px;
+                           text-align: left; padding: 4px 8px; border: 1px solid #1e293b;
+                           }}
+            QPushButton:checked {{ border-bottom: none; }}
+        """
+        )
+        lay.addWidget(header)
+        panel.content_widget = QWidget()
+        panel.content_widget.setVisible(not collapsed)
+        lay.addWidget(panel.content_widget)
+        header.toggled.connect(panel.content_widget.setVisible)
+        return panel
+
+    def _grid_lbl(self, txt: str) -> QLabel:
+        l = QLabel(txt)
+        l.setFixedWidth(90)
+        l.setStyleSheet(
+            "color: #94a3b8; font-size: 12px; font-weight: bold;"
+            " border-right: 1px solid #1e293b; padding: 0 6px;"
+            " background: rgba(30,41,59,0.2);"
+        )
+        return l
+
+    def _style_btn(self, txt: str, color: str) -> QPushButton:
+        btn = QPushButton(txt)
+        btn.setStyleSheet(
+            f"""
+            QPushButton {{ background: transparent; color: {color}; border: 1px solid {color};
+                           border-radius: 4px; font-weight: bold; font-size: 11px; padding: 5px; }}
+            QPushButton:hover {{ background: {color}22; }}
+        """
+        )
+        return btn
+
+    def _dash_btn(self, title: str, sub: str, color: str) -> QPushButton:
+        btn = QPushButton()
+        btn.setFixedSize(90, 48)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setStyleSheet(
+            f"""
+            QPushButton {{ background: {color}; color: white; border-radius: 6px;
+                           border: none; font-weight: 900; padding: 0; }}
+            QPushButton:hover {{ background: {color}cc; }}
+            QPushButton:pressed {{ background: {color}aa; margin-top: 1px; }}
+        """
+        )
+        lay = QVBoxLayout(btn)
+        lay.setContentsMargins(0, 6, 0, 6)
+        lay.setSpacing(0)
+        t = QLabel(title)
+        t.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        t.setStyleSheet("font-size: 13px; font-weight: 900; background: transparent; border: none; color: white; letter-spacing: 0.5px;")
+        lay.addWidget(t)
+        if sub:
+            s = QLabel(sub)
+            s.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            s.setStyleSheet("font-size: 8px; font-weight: 800; background: transparent; border: none; color: rgba(255,255,255,0.9);")
+            lay.addWidget(s)
+        return btn
+
+    def _apply_global_styles(self):
+        self.setStyleSheet(
+            """
+            QWidget#deepAlignStack { background-color: #05080c; }
+            QScrollArea { border: none; background: transparent; }
+            QScrollBar:vertical { border: none; background: #05080c; width: 6px; }
+            QScrollBar::handle:vertical { background: #1e293b; border-radius: 3px; }
+        """
+        )

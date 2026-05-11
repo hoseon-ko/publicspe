@@ -1,0 +1,266 @@
+"""DeepAlign 구성 루트 파일.
+
+이 파일은 DeepAlign 탭의 최상위 위젯과 탭 전체 공통 상태를 관리합니다.
+주요 역할은 다음과 같습니다.
+- 내부 5개 페이지 스택 생성
+- mirror/focus/align 페이지에서 재사용하는 패널 인스턴스 생성
+- layout, frame pipeline, styles, camera controller mixin 결합
+- MainWindow 및 다른 탭에서 호출하는 공개 bind/set API 제공
+"""
+
+from __future__ import annotations
+
+from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget, QSplitter
+from PyQt6.QtCore import Qt, QThread, QTimer, QSettings
+from typing import Optional
+
+from ui.live.motor_panel import MotorPanel
+from ui.live.autofocus_panel import AutoFocusPanel
+from ui.live.acs_stage_panel import AcsStagePanel
+from ui.deepalign.deepalign_camera_controller import CameraControllerMixin
+from ui.deepalign.deepalign_frame_pipeline import FramePipelineMixin
+from ui.deepalign.deepalign_layout import LayoutBuilderMixin
+from ui.deepalign.deepalign_styles import DeepAlignStylesMixin
+from ui.deepalign.deepalign_workers import _AcquireWorker, _SnapWorker, _LiveWorker
+
+
+class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMixin, CameraControllerMixin, QWidget):
+    """
+    DeepAlign Industrial Dashboard
+    - 5-탭 아이콘 사이드바
+    - 각 탭은 기존 완성된 패널을 ScrollArea로 감싸서 직접 임베드
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("deepAlignTab")
+        self._camera = None
+        self._live_tab: Optional[object] = None
+        self._session_hub: Optional[object] = None
+        self._scanned_devices: list[object] = []
+        self._viewer_first_frame = True
+        self._acq_thread: Optional[QThread] = None
+        self._acq_worker: Optional[_AcquireWorker] = None
+        self._snap_thread: Optional[QThread] = None
+        self._snap_worker: Optional[_SnapWorker] = None
+        self._live_worker_thread: Optional[QThread] = None
+        self._live_worker: Optional[_LiveWorker] = None
+        self._acq_running = False
+        self._acq_cur = 0
+        self._acq_total = 0
+        self._acq_started_at = 0.0
+        self._acq_frame_expected_s = 0.0
+        self._acq_avg_frame_s = 0.0
+        self._acq_frame_started_at = 0.0
+        self._acq_frame_idx = 0
+        self._acq_stop_requested = False
+        self._hub_live_progress_timer = QTimer(self)
+        self._hub_live_progress_timer.setInterval(20)
+        self._hub_live_progress_timer.timeout.connect(self._on_hub_live_progress_tick)
+        self._hub_live_progress_started_at = 0.0
+        self._hub_live_progress_cycle_s = 0.05
+        self._snap_progress_timer = QTimer(self)
+        self._snap_progress_timer.setInterval(20)
+        self._snap_progress_timer.timeout.connect(self._on_snap_progress_tick)
+        self._snap_started_at = 0.0
+        self._snap_expected_s = 0.05
+        self._snap_in_progress = False
+        
+        # ACQUIRE 진행률 타이머 (부드러운 애니메이션)
+        self._acq_progress_timer = QTimer(self)
+        self._acq_progress_timer.setInterval(20)
+        self._acq_progress_timer.timeout.connect(self._on_acquire_progress_tick)
+
+        # ── 기존 패널 인스턴스 생성 (단 1회) ──────────────────────────
+        self.mirror_panel = MotorPanel()
+        self.af_panel     = AutoFocusPanel()
+        self.align_panel  = AcsStagePanel()
+        self._settings = QSettings("SpeAnalyze", "DeepAlignTab")
+
+        self._init_ui()
+        self._restore_settings()
+        self._wire_camera_actions()
+        self._apply_camera_capabilities(None)
+        self._set_camera_action_state(False)
+        self._apply_global_styles()
+
+    # ─────────────────────────────────────────────────────────────────
+    # UI 초기화
+    # ─────────────────────────────────────────────────────────────────
+
+    def _init_ui(self):
+        main_lay = QHBoxLayout(self)
+        main_lay.setContentsMargins(0, 0, 0, 0)
+        main_lay.setSpacing(0)
+
+        # 1. 아이콘 사이드바 (좌측)
+        sidebar = self._create_icon_sidebar()
+        main_lay.addWidget(sidebar)
+
+        # 2. 중앙 패널 스택
+        self.central_stack = QStackedWidget()
+        self.central_stack.setObjectName("deepAlignStack")
+        self.central_stack.setMinimumWidth(260)
+        self.central_stack.setMaximumWidth(440)
+        self.central_stack.setStyleSheet(
+            "background-color: #0d121d; border-right: 1px solid #1e293b;"
+        )
+
+        self.central_stack.addWidget(self._create_cam_page())       # 0
+        self.central_stack.addWidget(self._wrap_panel(self.mirror_panel))  # 1
+        self.central_stack.addWidget(self._wrap_panel(self.af_panel))      # 2
+        self.central_stack.addWidget(self._wrap_panel(self.align_panel))   # 3
+        self.central_stack.addWidget(self._create_analysis_page())  # 4
+
+        # 3. 우측 작업영역: 도킹(QDockWidget) + 마스터바
+        dock_workspace = self._create_docking_workspace()
+
+        right_splitter = QSplitter(Qt.Orientation.Vertical)
+        right_splitter.setChildrenCollapsible(False)
+        right_splitter.addWidget(dock_workspace)
+        self.master_bar = self._create_master_bar()
+        right_splitter.addWidget(self.master_bar)
+        right_splitter.setStretchFactor(0, 1)
+        right_splitter.setStretchFactor(1, 0)
+        right_splitter.setSizes([900, 95])
+
+        # 4. 메인 그리드: 스플리터 필수 적용
+        main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        main_splitter.setObjectName("deepAlignMainSplitter")
+        main_splitter.setChildrenCollapsible(False)
+        main_splitter.setHandleWidth(6)
+        main_splitter.setOpaqueResize(True)
+        main_splitter.addWidget(self.central_stack)
+        main_splitter.addWidget(right_splitter)
+        main_splitter.setStretchFactor(0, 1)
+        main_splitter.setStretchFactor(1, 1)
+        main_splitter.setSizes([340, 1240])
+        main_lay.addWidget(main_splitter, 1)
+
+        # 시그널 연결
+        self.mirror_panel.log_message.connect(self._on_sub_panel_log)
+        self.align_panel.log_message.connect(self._on_sub_panel_log)
+
+    def _wire_camera_actions(self):
+        # Camera page controls
+        self.btn_scan.clicked.connect(self._on_scan_clicked)
+        self.btn_connect.clicked.connect(self._on_connect_clicked)
+        self.btn_disconnect.clicked.connect(self._on_disconnect_clicked)
+        self.btn_apply_exp.clicked.connect(self._on_apply_exposure_clicked)
+        self.btn_apply_fps.clicked.connect(self._on_apply_fps_clicked)
+        self.btn_apply_temp.clicked.connect(self._on_apply_temp_clicked)
+        self.btn_apply_adc.clicked.connect(self._on_apply_adc_clicked)
+
+        # Master bar controls (camera index)
+        self.btn_snap.clicked.connect(self._on_snap_clicked)
+        self.btn_live_air.clicked.connect(self._on_start_live_clicked)
+        self.btn_acquire.clicked.connect(self._on_acquire_clicked)
+        self.btn_stop_main.clicked.connect(self._on_stop_live_clicked)
+
+    def bind_live_tab(self, live_tab):
+        self._live_tab = live_tab
+        if self._live_tab is None:
+            return
+        if hasattr(self._live_tab, "exposure_applied"):
+            self._live_tab.exposure_applied.connect(self._on_live_exposure_applied)
+        if hasattr(self._live_tab, "live_progress_changed"):
+            self._live_tab.live_progress_changed.connect(self._on_live_progress_changed)
+        if hasattr(self._live_tab, "frame_ready"):
+            self._live_tab.frame_ready.connect(self._on_live_frame_ready)
+            
+        # [Sync] Colormap sync: DeepAlign에서 cmap 바꾸면 LiveTab(Worker)도 바뀜
+        self.cam_viewer.colormap_changed.connect(self._on_cmap_changed_sync)
+        # [Sync] Range sync: DeepAlign에서 밝기 범위 바꾸면 LiveTab(Worker)도 바뀜
+        self.cam_viewer.range_changed.connect(self._live_tab.on_range_changed)
+        # [Sync] ROI List sync: Viewer의 ROI가 변하면 독(dock) 목록 갱신
+        self.cam_viewer.roi_list_changed.connect(self._update_roi_list_from_viewer)
+        
+        self._sync_vendor_to_live()
+        self._copy_camera_list_from_live()
+
+        if hasattr(self._live_tab, "camera_panel"):
+            try:
+                self._set_master_progress(int(self._live_tab.camera_panel.bar_snap_progress.value()))
+            except Exception:
+                pass
+
+        live_camera = getattr(self._live_tab, "_camera", None)
+        if live_camera is not None:
+            self.set_shared_cameraera(live_camera)
+
+    def bind_session_hub(self, session_hub):
+        self._session_hub = session_hub
+
+    def _on_live_progress_changed(self, value: int):
+        self._set_master_progress(value)
+
+    def _save_settings(self):
+        self._settings.setValue("camera/vendor", self.cb_vendor.currentText())
+        self._settings.setValue("camera/exposure_ms", float(self.spin_exposure.value()))
+        self._settings.setValue("save/frame_to_save", int(self.spin_frame_to_save.value()))
+
+    def _restore_settings(self):
+        vendor = str(self._settings.value("camera/vendor", "Simulation"))
+        exposure = self._settings.value("camera/exposure_ms", 20.0, type=float)
+        frame_to_save = self._settings.value("save/frame_to_save", 10, type=int)
+
+        vendor_index = self.cb_vendor.findText(vendor)
+        if vendor_index >= 0:
+            self.cb_vendor.setCurrentIndex(vendor_index)
+
+        self.spin_exposure.setValue(float(exposure))
+        self.spin_frame_to_save.setValue(int(frame_to_save))
+
+    # ─────────────────────────────────────────────────────────────────
+    # 공개 API (main_window 에서 호출)
+    # ─────────────────────────────────────────────────────────────────
+
+    def set_shared_cameraera(self, camera):
+        self._camera = camera
+        self._viewer_first_frame = True
+        caps = getattr(camera, "capabilities", None) if camera is not None else None
+        self._apply_camera_capabilities(caps)
+        self._set_camera_action_state(camera is not None)
+        if camera is not None:
+            try:
+                self.spin_exposure.setValue(float(camera.get_exposure_ms()))
+            except Exception:
+                pass
+
+    def clear_shared_cameraera(self):
+        self._camera = None
+        self._viewer_first_frame = True
+        self._apply_camera_capabilities(None)
+        self._set_camera_action_state(False)
+
+    def set_kimm_ctrl(self, ctrl):
+        self._kimm = ctrl
+
+    def clear_kimm_ctrl(self):
+        self._kimm = None
+
+    def set_acs_ctrl(self, ctrl):
+        self._acs = ctrl
+        if hasattr(self, 'align_panel') and ctrl is not None:
+            # 컨트롤러를 align_panel에 직접 주입
+            self.align_panel._ctrl_ref[0] = ctrl
+            if ctrl.is_connected:
+                from theme.styles import C_ACCENT
+                from theme.styles import lbl as lbl_style
+                self.align_panel.lbl_status.setText(f"● CONNECTED")
+                self.align_panel.lbl_status.setStyleSheet(lbl_style(C_ACCENT, mono=True, bold=True))
+                self.align_panel.btn_connect.setEnabled(False)
+                self.align_panel.btn_disconnect.setEnabled(True)
+                for b in self.align_panel._move_btns:
+                    b.setEnabled(True)
+
+    def clear_acs_ctrl(self):
+        self._acs = None
+
+    def set_picos_ctrl(self, ctrl):
+        self._picos = ctrl
+        if hasattr(self, 'mirror_panel') and ctrl is not None:
+            self.mirror_panel.set_controller(ctrl)
+
+    def _on_sub_panel_log(self, msg: str):
+        print(f"[DeepAlign] {msg}")

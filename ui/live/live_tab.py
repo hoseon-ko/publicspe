@@ -1,4 +1,4 @@
-"""
+﻿"""
 ui/live/live_tab.py
 Live Control 탭 — QMainWindow 기반 도킹 레이아웃.
 
@@ -34,6 +34,8 @@ from core.camera.hikvision import HikvisionCamera, list_devices as hik_devices
 from core.camera.picamp import PicamCamera, list_devices as picam_devices
 from core.camera.simulated import SimulatedCamera, list_devices as sim_devices
 from core.image_processor import ImageProcessor
+from core.logger import dev_logger
+from core.motor.acs_stage import AcsStageController
 from core.spe_writer import save_spe   # #14 라이브 SPE 저장
 from ui.image_viewer import ImageViewer
 from ui.plot_panel import PlotPanel, HistogramPanel
@@ -73,6 +75,7 @@ class _SnapWorker(QObject):
             frame = self._camera.snap()
             self.success.emit(np.asarray(frame))
         except Exception as e:
+            dev_logger.exception("[_SnapWorker] snap failed")
             self.error.emit(str(e))
 
 
@@ -88,10 +91,12 @@ class _DisconnectWorker(QObject):
         try:
             self._camera.stop_live()
         except Exception:
+            dev_logger.exception("[_DisconnectWorker] stop_live failed")
             pass
         try:
             self._camera.disconnect()
         except Exception:
+            dev_logger.exception("[_DisconnectWorker] disconnect failed")
             pass
         self.done.emit()
 
@@ -110,6 +115,7 @@ class _ConnectWorker(QObject):
             self._camera.connect()
             self.success.emit(self._camera)
         except Exception as e:
+            dev_logger.exception("[_ConnectWorker] connect failed")
             self.error.emit(str(e))
 
 
@@ -196,7 +202,7 @@ class _ProcessWorker(QObject):
                     rgb = _build_rgb(result, self._cmap, show_binary, self._vmin, self._vmax)
                     self.result_ready.emit(result, rgb)
                 except Exception as e:
-                    print(f"[ProcessWorker] {e}")
+                    dev_logger.exception(f"[_ProcessWorker] processing failed: {e}")
 
     def stop(self):
         """정지 요청 — daemon thread이므로 join 실패해도 앱 종료에 지장 없음."""
@@ -218,6 +224,8 @@ class LiveTab(QMainWindow):
     camera_disconnected = pyqtSignal()
     exposure_applied    = pyqtSignal(float)
     frame_stats_updated = pyqtSignal(float, int, int)  # fps, width, height
+    frame_ready         = pyqtSignal(object, object)   # rgb, raw
+    live_progress_changed = pyqtSignal(int)
 
     def on_range_changed(self, vmin, vmax):
         # None = auto range (ROI Range 해제 시 등)
@@ -690,6 +698,11 @@ class LiveTab(QMainWindow):
         self.camera_panel.spin_exposure.setValue(ms)
         self.camera_panel.spin_exposure.blockSignals(False)
 
+    def _set_live_progress(self, value: int):
+        val = max(0, min(100, int(value)))
+        self.camera_panel.bar_snap_progress.setValue(val)
+        self.live_progress_changed.emit(val)
+
     # ── 카메라 제어 ───────────────────────────────────────────────────
 
     def _scan_cameras(self):
@@ -842,7 +855,7 @@ class LiveTab(QMainWindow):
                 self._live_timer_anim.timeout.connect(self._on_live_progress_tick)
                 self._live_timer_anim.start()
             else:
-                self.camera_panel.bar_snap_progress.setValue(100)
+                self._set_live_progress(100)
         except Exception as e:
             self._log(f"❌ 시작 실패: {e}", "camera")
 
@@ -854,7 +867,7 @@ class LiveTab(QMainWindow):
         
         if hasattr(self, '_live_timer_anim') and self._live_timer_anim.isActive():
             self._live_timer_anim.stop()
-        self.camera_panel.bar_snap_progress.setValue(0)
+        self._set_live_progress(0)
 
         def _do_stop():
             try:
@@ -888,10 +901,10 @@ class LiveTab(QMainWindow):
         """라이브 모드 중 프로그레스바를 노출 주기에 맞춰 채움."""
         self._live_elapsed += self._live_timer_anim.interval()
         if self._live_elapsed >= self._live_total:
-            self.camera_panel.bar_snap_progress.setValue(99)
+            self._set_live_progress(99)
         else:
             pct = int(100 * self._live_elapsed / max(self._live_total, 1))
-            self.camera_panel.bar_snap_progress.setValue(pct)
+            self._set_live_progress(pct)
 
     def _on_new_frame(self, raw: np.ndarray):
         """카메라로부터 새 프레임 수신 (백그라운드 스레드에서 호출됨)."""
@@ -921,7 +934,7 @@ class LiveTab(QMainWindow):
             exp_ms = 1000.0
             
         if exp_ms > 100:
-            self.camera_panel.bar_snap_progress.setValue(0)
+            self._set_live_progress(0)
             self._snap_elapsed = 0
             self._snap_total = exp_ms
             if hasattr(self, '_snap_timer_anim') and self._snap_timer_anim.isActive():
@@ -931,7 +944,7 @@ class LiveTab(QMainWindow):
             self._snap_timer_anim.timeout.connect(self._on_snap_progress_tick)
             self._snap_timer_anim.start()
         else:
-            self.camera_panel.bar_snap_progress.setValue(100)
+            self._set_live_progress(100)
 
         self._snap_thread = QThread()
         self._snap_worker = _SnapWorker(self._camera)
@@ -948,16 +961,16 @@ class LiveTab(QMainWindow):
         """단일 촬영 중 프로그레스바를 부드럽게 채움."""
         self._snap_elapsed += self._snap_timer_anim.interval()
         if self._snap_elapsed >= self._snap_total:
-            self.camera_panel.bar_snap_progress.setValue(100)
+            self._set_live_progress(100)
             self._snap_timer_anim.stop()
         else:
             pct = int(100 * self._snap_elapsed / max(self._snap_total, 1))
-            self.camera_panel.bar_snap_progress.setValue(pct)
+            self._set_live_progress(pct)
 
     def _on_snap_success(self, raw: np.ndarray):
         if hasattr(self, '_snap_timer_anim') and self._snap_timer_anim.isActive():
             self._snap_timer_anim.stop()
-        self.camera_panel.bar_snap_progress.setValue(100)
+        self._set_live_progress(100)
         self._last_raw = raw
         self._viewer_raw = raw
         self._first_frame = True
@@ -968,7 +981,7 @@ class LiveTab(QMainWindow):
     def _on_snap_error(self, msg: str):
         if hasattr(self, '_snap_timer_anim') and self._snap_timer_anim.isActive():
             self._snap_timer_anim.stop()
-        self.camera_panel.bar_snap_progress.setValue(0)
+        self._set_live_progress(0)
         self._log(f"❌ SNAP 실패: {msg}", "camera")
 
 
@@ -1035,6 +1048,7 @@ class LiveTab(QMainWindow):
         else:
             self.image_viewer.set_source_image(rgb)
         self.image_viewer.set_live_frame(rgb, fit=self._first_frame)
+        self.frame_ready.emit(rgb, raw_display if raw_display is not None else rgb)
         self._first_frame = False
 
     def _refresh_centroid_labels(self):

@@ -28,10 +28,13 @@ from ui.analysis.analysis_tab import AnalysisTab
 from ui.scan.scan_tab import ScanTab
 from ui.autofocus.autofocus_tab import AutoFocusTab
 from ui.kinematic.kinematic_tab import KinematicTab
-from ui.deepalign.deep_align_main import DeepAlignMainTab
+from ui.deepalign.deepalign_main_tab import DeepAlignMainTab
+from core.hal.adapters import HikvisionCameraAdapter, PicamCameraAdapter, SimulatedCameraAdapter
 from core.motor.acs_stage import AcsStageController
+from core.session.device_session_hub import DeviceSessionHub
 from theme.styles import Fonts, Sizes, C_ACCENT, C_TEXT_DIM, C_BG_MED, C_BORDER
 from core.logger import app_logger, register_ui_callback
+from ui.bridge.hub_bindings import bind_live_signals_to_hub, bind_status_to_main_window
 
 
 # ── 헤더 바 색상 (LightField 다크 헤더) ──────────────────────────
@@ -48,6 +51,11 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._spe_class = spe_class
         self.acs_ctrl = AcsStageController()
+        self.session_hub = DeviceSessionHub(self)
+        self.session_hub.register_camera_hal("hikvision", HikvisionCameraAdapter)
+        self.session_hub.register_camera_hal("picam", PicamCameraAdapter)
+        self.session_hub.register_camera_hal("simulated", SimulatedCameraAdapter)
+        self.session_hub.select_camera_vendor("simulated")
         self.setWindowTitle("SpeAnalyze — Integrated Lab Control")
         self.setMinimumSize(1300, 850)
         self.resize(1700, 1000)
@@ -141,6 +149,8 @@ class MainWindow(QMainWindow):
         self.live_tab.camera_disconnected.connect(self._on_camera_disconnected)
         self.live_tab.camera_panel.exposure_applied.connect(self._on_exposure_changed)
         self.live_tab.frame_stats_updated.connect(self._on_frame_stats)
+        bind_status_to_main_window(self.session_hub, self)
+        bind_live_signals_to_hub(self.session_hub, self.live_tab)
 
         self.acq_tab = AcquisitionTab()
         self.acq_tab.spe_saved.connect(self._on_spe_saved)
@@ -163,6 +173,8 @@ class MainWindow(QMainWindow):
         self.kin_tab.kin_done.connect(self.live_tab.resume_live)
 
         self.deep_align_tab = DeepAlignMainTab()
+        self.deep_align_tab.bind_session_hub(self.session_hub)
+        self.deep_align_tab.bind_live_tab(self.live_tab)
 
         # 탭 버튼 + 스택 등록
         _modes = [
@@ -331,11 +343,11 @@ class MainWindow(QMainWindow):
             if last_raw is not None:
                 viewer = None
                 if active_tab == self.af_tab:
-                    viewer = self.af_tab.image_viewer
-                elif active_tab == getattr(self, 'kin_tab', None):
-                    viewer = self.kin_tab.image_viewer
+                    viewer = getattr(self.af_tab, "image_viewer", None)
+                elif active_tab == getattr(self, "kin_tab", None):
+                    viewer = getattr(self.kin_tab, "image_viewer", None)
                 elif active_tab == self.acq_tab:
-                    viewer = self.acq_tab.preview_viewer
+                    viewer = getattr(self.acq_tab, "preview_viewer", None)
                 
                 if viewer is not None and hasattr(viewer, 'set_source_image'):
                     viewer.set_source_image(last_raw)
@@ -444,7 +456,7 @@ class MainWindow(QMainWindow):
         s.setValue("active_tab", self.stack.currentIndex())
 
         # 2. 서브 탭 설정 저장 및 하드웨어/워커 정리
-        for tab in (self.live_tab, self.acq_tab, self.scan_tab, self.af_tab, self.kin_tab, self.analysis_tab):
+        for tab in (self.live_tab, self.acq_tab, self.scan_tab, self.af_tab, self.kin_tab, self.analysis_tab, self.deep_align_tab):
             if hasattr(tab, "_save_settings"):
                 try: tab._save_settings()
                 except Exception: pass
@@ -551,7 +563,7 @@ class MainWindow(QMainWindow):
             print(f"MainWindow settings restore error: {e}")
 
         # Restore sub‑tab settings
-        for tab in (self.live_tab, self.acq_tab, self.scan_tab, self.af_tab, self.kin_tab, self.analysis_tab):
+        for tab in (self.live_tab, self.acq_tab, self.scan_tab, self.af_tab, self.kin_tab, self.analysis_tab, self.deep_align_tab):
             if hasattr(tab, "_restore_settings"):
                 try:
                     tab._restore_settings()

@@ -634,6 +634,7 @@ class CameraControlPanel(QWidget):
         self.btn_flat_toggle.toggled.connect(self._apply_flat)
         self.btn_apply_temp.clicked.connect(self._apply_temperature)
         self.btn_apply_adc.clicked.connect(self._apply_adc)
+        self.combo_cam_type.currentTextChanged.connect(lambda _: self._save_settings())
         # 시간 축 모드 — 기본값: Live (Single)
         self.combo_temporal.setCurrentIndex(5)   # TemporalMode.SINGLE
         self._apply_temporal_mode(5)             # proc에 즉시 반영
@@ -1010,6 +1011,7 @@ class CameraControlPanel(QWidget):
         for sec in self._sections:
             key = f"sec/{sec._title_lbl.text()}_collapsed"
             self._settings.setValue(key, sec.is_collapsed())
+        self._settings.setValue("camera/type", self.combo_cam_type.currentText())
 
     def _load_settings(self):
         for sec in self._sections:
@@ -1019,3 +1021,10 @@ class CameraControlPanel(QWidget):
                 # QSettings에서 가져올 때 bool 타입 명시
                 collapsed = str(val).lower() == 'true'
                 sec.set_collapsed(collapsed)
+
+        saved_type = self._settings.value("camera/type", "SIMULATED")
+        idx = self.combo_cam_type.findText(str(saved_type))
+        if idx < 0:
+            idx = self.combo_cam_type.findText("SIMULATED")
+        if idx >= 0:
+            self.combo_cam_type.setCurrentIndex(idx)
