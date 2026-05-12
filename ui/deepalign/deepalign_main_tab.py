@@ -10,8 +10,12 @@
 
 from __future__ import annotations
 
+import os
+from datetime import datetime
+from pathlib import Path
+
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget, QSplitter
-from PyQt6.QtCore import Qt, QThread, QTimer, QSettings
+from PyQt6.QtCore import Qt, QThread, QTimer, QSettings, pyqtSignal
 from typing import Optional
 
 from ui.live.motor_panel import MotorPanel
@@ -22,9 +26,13 @@ from ui.deepalign.deepalign_frame_pipeline import FramePipelineMixin
 from ui.deepalign.deepalign_layout import LayoutBuilderMixin
 from ui.deepalign.deepalign_styles import DeepAlignStylesMixin
 from ui.deepalign.deepalign_workers import _AcquireWorker, _SnapWorker, _LiveWorker
+from core.session.session_state import CameraConnectionState
+from core.spe_writer import save_spe
 
 
 class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMixin, CameraControllerMixin, QWidget):
+    spe_saved = pyqtSignal(str)
+
     """
     DeepAlign Industrial Dashboard
     - 5-탭 아이콘 사이드바
@@ -156,8 +164,25 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self.btn_live_air.clicked.connect(self._on_start_live_clicked)
         self.btn_acquire.clicked.connect(self._on_acquire_clicked)
         self.btn_stop_main.clicked.connect(self._on_stop_live_clicked)
+        self.cam_viewer.roi_list_changed.connect(self._update_roi_list_from_viewer)
+
+        # Settings persistence
+        self.cb_vendor.currentTextChanged.connect(self._save_settings)
+        self.spin_exposure.valueChanged.connect(self._save_settings)
+        self.spin_frame_to_save.valueChanged.connect(self._save_settings)
+        self.edit_folder.textChanged.connect(self._save_settings)
+        self.edit_file_base.textChanged.connect(self._save_settings)
+        self.check_inc_name.toggled.connect(self._save_settings)
+        self.check_add_date.toggled.connect(self._save_settings)
+        self.check_add_time.toggled.connect(self._save_settings)
+        self.cb_date_fmt.currentTextChanged.connect(self._save_settings)
+        self.cb_time_fmt.currentTextChanged.connect(self._save_settings)
+        self.cb_place.currentTextChanged.connect(self._save_settings)
 
     def bind_live_tab(self, live_tab):
+        """Deprecated compatibility hook; DeepAlign camera I/O is hub-only."""
+        self._live_tab = None
+        return
         self._live_tab = live_tab
         if self._live_tab is None:
             return
@@ -190,6 +215,19 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
 
     def bind_session_hub(self, session_hub):
         self._session_hub = session_hub
+        if self._session_hub is None:
+            self._set_camera_action_state(False)
+            return
+        try:
+            self._session_hub.select_camera_vendor(self._vendor_key())
+        except Exception:
+            pass
+        try:
+            state = self._session_hub.get_camera_state()
+            connected = getattr(state, "connection", None) == CameraConnectionState.CONNECTED
+        except Exception:
+            connected = False
+        self._set_camera_action_state(bool(connected))
 
     def _on_live_progress_changed(self, value: int):
         self._set_master_progress(value)
@@ -198,11 +236,27 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self._settings.setValue("camera/vendor", self.cb_vendor.currentText())
         self._settings.setValue("camera/exposure_ms", float(self.spin_exposure.value()))
         self._settings.setValue("save/frame_to_save", int(self.spin_frame_to_save.value()))
+        self._settings.setValue("save/folder", self.edit_folder.text())
+        self._settings.setValue("save/file_base", self.edit_file_base.text())
+        self._settings.setValue("save/inc_name", bool(self.check_inc_name.isChecked()))
+        self._settings.setValue("save/add_date", bool(self.check_add_date.isChecked()))
+        self._settings.setValue("save/add_time", bool(self.check_add_time.isChecked()))
+        self._settings.setValue("save/date_fmt", self.cb_date_fmt.currentText())
+        self._settings.setValue("save/time_fmt", self.cb_time_fmt.currentText())
+        self._settings.setValue("save/place", self.cb_place.currentText())
 
     def _restore_settings(self):
         vendor = str(self._settings.value("camera/vendor", "Simulation"))
         exposure = self._settings.value("camera/exposure_ms", 20.0, type=float)
         frame_to_save = self._settings.value("save/frame_to_save", 10, type=int)
+        save_folder = str(self._settings.value("save/folder", "Live_Captures"))
+        file_base = str(self._settings.value("save/file_base", "Capture"))
+        inc_name = self._settings.value("save/inc_name", False, type=bool)
+        add_date = self._settings.value("save/add_date", True, type=bool)
+        add_time = self._settings.value("save/add_time", True, type=bool)
+        date_fmt = str(self._settings.value("save/date_fmt", "YYYY-Month-DD"))
+        time_fmt = str(self._settings.value("save/time_fmt", "hh:mm:ss (24h)"))
+        place = str(self._settings.value("save/place", "Suffix"))
 
         vendor_index = self.cb_vendor.findText(vendor)
         if vendor_index >= 0:
@@ -210,6 +264,24 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
 
         self.spin_exposure.setValue(float(exposure))
         self.spin_frame_to_save.setValue(int(frame_to_save))
+        self.edit_folder.setText(save_folder)
+        self.edit_file_base.setText(file_base)
+        self.check_inc_name.setChecked(bool(inc_name))
+        self.check_add_date.setChecked(bool(add_date))
+        self.check_add_time.setChecked(bool(add_time))
+
+        idx_date = self.cb_date_fmt.findText(date_fmt)
+        if idx_date >= 0:
+            self.cb_date_fmt.setCurrentIndex(idx_date)
+        idx_time = self.cb_time_fmt.findText(time_fmt)
+        if idx_time >= 0:
+            self.cb_time_fmt.setCurrentIndex(idx_time)
+        idx_place = self.cb_place.findText(place)
+        if idx_place >= 0:
+            self.cb_place.setCurrentIndex(idx_place)
+
+        self._update_save_control_state()
+        self._update_save_preview()
 
     # ─────────────────────────────────────────────────────────────────
     # 공개 API (main_window 에서 호출)

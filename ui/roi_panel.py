@@ -141,6 +141,12 @@ class RoiPanel(QWidget):
                 self.list_widget.blockSignals(False)
                 break
 
+    def clear_selection(self):
+        self.list_widget.blockSignals(True)
+        self.list_widget.clearSelection()
+        self.list_widget.setCurrentRow(-1)
+        self.list_widget.blockSignals(False)
+
     def set_active_roi(self, roi_id: int, role: str):
         """
         role='profile' 또는 'hist' 로 지정한 ROI 아이템을 강조 표시.

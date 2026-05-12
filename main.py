@@ -11,6 +11,7 @@ main.py
 import os
 import sys
 import signal
+import threading
 import traceback
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtGui import QFont
@@ -23,30 +24,45 @@ from core.logger import app_logger, sys_logger
 
 _FATAL_ERROR_SHOWN = False
 
+
+def _show_fatal_dialog(err_msg: str):
+    msg_box = QMessageBox()
+    msg_box.setIcon(QMessageBox.Icon.Critical)
+    msg_box.setWindowTitle("Fatal Error")
+    msg_box.setText("치명적인 오류가 발생했습니다.\n아래 상세 정보를 확인해 주세요.")
+    msg_box.setInformativeText("확인을 누르면 프로그램이 종료됩니다.")
+    msg_box.setDetailedText(err_msg)
+    msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
+    msg_box.exec()
+
+
 def _global_exception_handler(exc_type, exc_value, exc_traceback):
     global _FATAL_ERROR_SHOWN
     if issubclass(exc_type, KeyboardInterrupt) or _FATAL_ERROR_SHOWN:
         return
-    
+
     _FATAL_ERROR_SHOWN = True
     err_msg = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
     sys_logger.critical(f"FATAL Uncaught Exception:\n{err_msg}")
-    
+
     app = QApplication.instance()
     if app:
-        # 모든 타이머/이벤트 중지 시도
-        app.quit()
-        
-        msg_box = QMessageBox()
-        msg_box.setIcon(QMessageBox.Icon.Critical)
-        msg_box.setWindowTitle("Fatal Error")
-        msg_box.setText("치명적인 오류가 발생하여 프로그램을 종료합니다.")
-        msg_box.setDetailedText(err_msg)
-        msg_box.exec()
-        
-    sys.exit(1)
+        # 메시지 박스를 먼저 보여준 뒤 종료한다.
+        try:
+            _show_fatal_dialog(err_msg)
+        except Exception:
+            pass
+        return
+
+    return
+
+
+def _thread_exception_handler(args: threading.ExceptHookArgs):
+    _global_exception_handler(args.exc_type, args.exc_value, args.exc_traceback)
+
 
 sys.excepthook = _global_exception_handler
+threading.excepthook = _thread_exception_handler
 
 
 def main():

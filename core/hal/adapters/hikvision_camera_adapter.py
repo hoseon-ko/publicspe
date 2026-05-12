@@ -106,22 +106,22 @@ class HikvisionCameraAdapter(CameraHal):
             cam_logger.exception("[HikvisionCameraAdapter] get_frame_total_s failed")
             raise HalCommandError(f"Hikvision get frame total time failed: {exc}", cause=exc) from exc
 
-    def start_stream(self) -> None:
-        cam_logger.debug("[HikvisionCameraAdapter] start_stream requested")
+    def start_stream(self, frame_cb=None) -> None:
+        cam_logger.info("[HikvisionCameraAdapter] grab/live start requested")
         cam = self._require_connected()
         try:
-            cam.start_live(lambda _frame: None)
-            cam_logger.debug("[HikvisionCameraAdapter] start_stream succeeded")
+            cam.start_live(frame_cb or (lambda _frame: None))
+            cam_logger.info("[HikvisionCameraAdapter] grab/live started")
         except Exception as exc:
             cam_logger.exception("[HikvisionCameraAdapter] start_stream failed")
             raise HalCommandError(f"Hikvision start stream failed: {exc}", cause=exc) from exc
 
     def stop_stream(self) -> None:
-        cam_logger.debug("[HikvisionCameraAdapter] stop_stream requested")
+        cam_logger.info("[HikvisionCameraAdapter] grab/live stop requested")
         cam = self._require_connected()
         try:
             cam.stop_live()
-            cam_logger.debug("[HikvisionCameraAdapter] stop_stream succeeded")
+            cam_logger.info("[HikvisionCameraAdapter] grab/live stopped")
         except Exception as exc:
             cam_logger.exception("[HikvisionCameraAdapter] stop_stream failed")
             raise HalCommandError(f"Hikvision stop stream failed: {exc}", cause=exc) from exc
@@ -138,12 +138,12 @@ class HikvisionCameraAdapter(CameraHal):
             raise HalCommandError(f"Hikvision snap failed: {exc}", cause=exc) from exc
 
     def acquire(self, frame_count: int) -> list[np.ndarray]:
-        cam_logger.debug(f"[HikvisionCameraAdapter] acquire requested frame_count={frame_count}")
+        cam_logger.info(f"[HikvisionCameraAdapter] acquire start frame_count={frame_count}")
         count = max(1, int(frame_count))
         frames: list[np.ndarray] = []
         for _ in range(count):
             frames.append(self.snap())
-        cam_logger.debug(f"[HikvisionCameraAdapter] acquire succeeded frames={len(frames)}")
+        cam_logger.info(f"[HikvisionCameraAdapter] acquire finished frames={len(frames)}")
         return frames
 
     def set_range(self, vmin: float | None, vmax: float | None) -> None:

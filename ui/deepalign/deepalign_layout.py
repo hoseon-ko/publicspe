@@ -11,16 +11,19 @@
 
 from __future__ import annotations
 
+import os
 from datetime import datetime
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QAbstractSpinBox,
     QButtonGroup,
     QCheckBox,
     QComboBox,
-    QDockWidget,
     QDoubleSpinBox,
     QFrame,
+    QFileDialog,
+    QGroupBox,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -36,7 +39,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ui.image_viewer import ImageViewer
+from ui.viewer_v2.deepalign_adapter import DeepAlignViewerV2Adapter
 
 
 class LayoutBuilderMixin:
@@ -114,53 +117,76 @@ class LayoutBuilderMixin:
         )
         host.setStyleSheet("QMainWindow { background: #060d19; }")
 
-        self.cam_viewer = ImageViewer()
+        self.cam_viewer = DeepAlignViewerV2Adapter()
         self.cam_viewer.set_external_render_control(True)
         host.setCentralWidget(self.cam_viewer)
 
-        roi_dock = QDockWidget("ROI LIST", host)
-        roi_dock.setAllowedAreas(Qt.DockWidgetArea.RightDockWidgetArea)
-        roi_dock.setFeatures(
-            QDockWidget.DockWidgetFeature.DockWidgetMovable |
-            QDockWidget.DockWidgetFeature.DockWidgetFloatable
-        )
-        roi_body = QWidget()
-        roi_lay = QVBoxLayout(roi_body)
-        roi_lay.setContentsMargins(8, 8, 8, 8)
-        roi_lay.setSpacing(6)
-        roi_row = QHBoxLayout()
-        roi_row.setContentsMargins(0, 0, 0, 0)
-        roi_row.setSpacing(6)
-        lbl_roi = QLabel("ROI LIST")
-        lbl_roi.setStyleSheet("color:#8ca8cc;font-size:12px;font-weight:900;")
-        btn_roi_del = self._style_btn("DEL", "#64748b")
-        btn_roi_all = self._style_btn("ALL", "#64748b")
-        btn_roi_del.setFixedHeight(24)
-        btn_roi_all.setFixedHeight(24)
-        roi_row.addWidget(lbl_roi)
-        roi_row.addStretch()
-        roi_row.addWidget(btn_roi_del)
-        roi_row.addWidget(btn_roi_all)
-        roi_lay.addLayout(roi_row)
-
-        self.roi_list = QListWidget()
-        self.roi_list.setMinimumWidth(260)
-        self.roi_list.setStyleSheet("background:#020b17;border:1px solid #123252;color:#8ca8cc;")
-        self.roi_list.itemClicked.connect(self._on_roi_item_clicked)
-        roi_lay.addWidget(self.roi_list)
-        roi_dock.setWidget(roi_body)
-        host.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, roi_dock)
-
-        btn_roi_del.clicked.connect(self._on_roi_del_clicked)
-        btn_roi_all.clicked.connect(self._on_roi_clear_clicked)
-
-        host.resizeDocks([roi_dock], [280], Qt.Orientation.Horizontal)
         return host
 
     def _create_cam_page(self):
         page = QWidget()
         lay = QVBoxLayout(page)
         lay.setContentsMargins(0, 0, 0, 0)
+
+        editor_combo_style = """
+            QComboBox {
+                background: #0b1220;
+                color: #22d3ee;
+                border: 1px solid #475569;
+                border-radius: 4px;
+                padding: 2px 8px;
+                min-height: 24px;
+                font-size: 12px;
+                font-weight: 800;
+            }
+            QComboBox:hover {
+                border-color: #22d3ee;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+        """
+        editor_spin_style = """
+            QAbstractSpinBox {
+                background: #0b1220;
+                color: #22d3ee;
+                border: 1px solid #475569;
+                border-radius: 4px;
+                padding: 2px 8px;
+                min-height: 24px;
+                font-size: 12px;
+                font-weight: 800;
+            }
+            QAbstractSpinBox:hover {
+                border-color: #22d3ee;
+            }
+            QAbstractSpinBox::up-button,
+            QAbstractSpinBox::down-button {
+                width: 16px;
+                background: #0f172a;
+                border-left: 1px solid #334155;
+            }
+            QAbstractSpinBox::up-button:hover,
+            QAbstractSpinBox::down-button:hover {
+                background: #172036;
+            }
+        """
+        editor_line_style = """
+            QLineEdit {
+                background: #0b1220;
+                color: #22d3ee;
+                border: 1px solid #475569;
+                border-radius: 4px;
+                padding: 2px 8px;
+                min-height: 24px;
+                font-size: 12px;
+                font-weight: 800;
+            }
+            QLineEdit:hover {
+                border-color: #22d3ee;
+            }
+        """
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -194,9 +220,7 @@ class LayoutBuilderMixin:
         vg.addWidget(lbl_vendor)
         self.cb_vendor = QComboBox()
         self.cb_vendor.addItems(["HIKVISION", "Picam", "Simulation"])
-        self.cb_vendor.setStyleSheet(
-            "color: #14b8a6; font-size: 12px; font-weight: bold; border: none; padding: 2px 6px;"
-        )
+        self.cb_vendor.setStyleSheet(editor_combo_style)
         self.cb_vendor.setCurrentIndex(2)
         vg.addWidget(self.cb_vendor, 1)
         cl.addWidget(vg_frame)
@@ -236,8 +260,10 @@ class LayoutBuilderMixin:
         self.spin_exposure.setRange(0.01, 1_000_000.0)
         self.spin_exposure.setDecimals(2)
         self.spin_exposure.setValue(20.0)
-        self.spin_exposure.setStyleSheet("color: #14b8a6; font-size: 12px; font-weight: bold;")
+        self.spin_exposure.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.PlusMinus)
+        self.spin_exposure.setStyleSheet(editor_spin_style)
         self.btn_apply_exp = self._style_btn("APPLY", "#14b8a6")
+        self.btn_apply_exp.setMinimumWidth(86)
         exp_row.addWidget(lbl_exp)
         exp_row.addWidget(self.spin_exposure, 1)
         exp_row.addWidget(self.btn_apply_exp)
@@ -252,8 +278,10 @@ class LayoutBuilderMixin:
         self.spin_fps.setRange(0.1, 1000.0)
         self.spin_fps.setValue(30.0)
         self.spin_fps.setSuffix(" fps")
-        self.spin_fps.setStyleSheet("color: #14b8a6; font-size: 12px; font-weight: bold;")
+        self.spin_fps.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.PlusMinus)
+        self.spin_fps.setStyleSheet(editor_spin_style)
         self.btn_apply_fps = self._style_btn("APPLY", "#14b8a6")
+        self.btn_apply_fps.setMinimumWidth(86)
         fps_lay.addWidget(self.check_fps_lock)
         fps_lay.addWidget(self.spin_fps, 1)
         fps_lay.addWidget(self.btn_apply_fps)
@@ -277,7 +305,7 @@ class LayoutBuilderMixin:
             row = QHBoxLayout()
             lbl = QLabel(lbl_text)
             lbl.setStyleSheet("color: #94a3b8; font-size: 12px; font-weight: bold;")
-            cb.setStyleSheet("color: #14b8a6; font-size: 12px; font-weight: bold;")
+            cb.setStyleSheet(editor_combo_style)
             row.addWidget(lbl)
             row.addWidget(cb, 1)
             adl.addLayout(row)
@@ -296,8 +324,10 @@ class LayoutBuilderMixin:
         self.spin_temp.setRange(-100.0, 50.0)
         self.spin_temp.setValue(-70.0)
         self.spin_temp.setDecimals(2)
-        self.spin_temp.setStyleSheet("color: #14b8a6; font-size: 12px; font-weight: bold;")
+        self.spin_temp.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.PlusMinus)
+        self.spin_temp.setStyleSheet(editor_spin_style)
         self.btn_apply_temp = self._style_btn("SET", "#14b8a6")
+        self.btn_apply_temp.setMinimumWidth(72)
         trow.addWidget(lbl_temp)
         trow.addWidget(self.spin_temp, 1)
         trow.addWidget(self.btn_apply_temp)
@@ -321,20 +351,45 @@ class LayoutBuilderMixin:
         self.spin_frame_to_save = QSpinBox()
         self.spin_frame_to_save.setRange(1, 100000)
         self.spin_frame_to_save.setValue(10)
-        self.spin_frame_to_save.setStyleSheet("color: #14b8a6; font-size: 12px; font-weight: bold;")
+        self.spin_frame_to_save.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.PlusMinus)
+        self.spin_frame_to_save.setStyleSheet(editor_spin_style)
         save_count_row.addWidget(lbl_count)
         save_count_row.addWidget(self.spin_frame_to_save, 1)
         sl.addLayout(save_count_row)
 
         self.edit_file_base = QLineEdit("Capture")
-        self.edit_folder = QLineEdit("C:/Data/Captures")
+        self.edit_folder = QLineEdit("Live_Captures")
+        self.btn_browse_folder = QPushButton("...")
+        self.btn_browse_folder.setFixedWidth(34)
+        self.btn_browse_folder.setToolTip("저장 폴더 선택")
         self.check_inc_name = QCheckBox("Increment File Name")
         self.check_add_date = QCheckBox("Add Date")
         self.check_add_date.setChecked(True)
         self.check_add_time = QCheckBox("Add Time")
         self.check_add_time.setChecked(True)
         for chk in (self.check_inc_name, self.check_add_date, self.check_add_time):
-            chk.setStyleSheet("color: #94a3b8; font-size: 12px;")
+            chk.setStyleSheet("""
+                QCheckBox {
+                    color: #e2e8f0;
+                    font-size: 13px;
+                    font-weight: 700;
+                    spacing: 8px;
+                }
+                QCheckBox::indicator {
+                    width: 16px;
+                    height: 16px;
+                    border-radius: 3px;
+                    border: 1px solid #64748b;
+                    background: #020617;
+                }
+                QCheckBox::indicator:hover {
+                    border-color: #22d3ee;
+                }
+                QCheckBox::indicator:checked {
+                    border-color: #22d3ee;
+                    background: #22d3ee;
+                }
+            """)
 
         self.cb_date_fmt = QComboBox(); self.cb_date_fmt.addItems(["YYYY-Month-DD", "YYYY-MM-DD"])
         self.cb_time_fmt = QComboBox(); self.cb_time_fmt.addItems(["hh:mm:ss (24h)", "hh:mm:ss (12h)"])
@@ -342,30 +397,102 @@ class LayoutBuilderMixin:
         for cb in (self.cb_date_fmt, self.cb_time_fmt, self.cb_place):
             cb.setStyleSheet("color: #14b8a6; font-size: 12px; font-weight: bold;")
 
-        for lbl_text, widget in [("File Name:", self.edit_file_base), ("Folder:", self.edit_folder)]:
-            row = QHBoxLayout()
-            lbl = QLabel(lbl_text)
-            lbl.setStyleSheet("color: #94a3b8; font-size: 12px; font-weight: bold;")
-            widget.setStyleSheet("color: #14b8a6; font-size: 12px; font-weight: bold;")
-            row.addWidget(lbl)
-            row.addWidget(widget, 1)
-            sl.addLayout(row)
+        self.btn_browse_folder.setStyleSheet(
+            """
+            QPushButton {
+                background: #0f172a;
+                color: #e2e8f0;
+                border: 1px solid #334155;
+                border-radius: 4px;
+                font-weight: 900;
+            }
+            QPushButton:hover {
+                border-color: #22d3ee;
+                color: #22d3ee;
+            }
+        """
+        )
 
-        sl.addWidget(self.check_inc_name)
-        sl.addWidget(self.check_add_date)
+        self.edit_file_base.setStyleSheet(editor_line_style)
+        self.edit_folder.setStyleSheet(editor_line_style)
+
+        row_folder = QHBoxLayout()
+        lbl_folder = QLabel("Save In:")
+        lbl_folder.setStyleSheet("color: #94a3b8; font-size: 12px; font-weight: bold;")
+        row_folder.addWidget(lbl_folder)
+        row_folder.addWidget(self.edit_folder, 1)
+        row_folder.addWidget(self.btn_browse_folder)
+        sl.addLayout(row_folder)
+
+        row_name = QHBoxLayout()
+        lbl_name = QLabel("File Name:")
+        lbl_name.setStyleSheet("color: #94a3b8; font-size: 12px; font-weight: bold;")
+        row_name.addWidget(lbl_name)
+        row_name.addWidget(self.edit_file_base, 1)
+        sl.addLayout(row_name)
+
+        naming_box = QGroupBox("Naming Options")
+        naming_box.setStyleSheet(
+            """
+            QGroupBox {
+                color: #e2e8f0;
+                font-size: 13px;
+                font-weight: 800;
+                background: #020817;
+                border: 1px solid #475569;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 6px;
+                color: #e2e8f0;
+                background: #020817;
+            }
+            QGroupBox QLabel {
+                color: #cbd5e1;
+                font-size: 12px;
+                font-weight: 700;
+            }
+            QGroupBox QComboBox {
+                background: #0b1220;
+                color: #22d3ee;
+                border: 1px solid #475569;
+                border-radius: 4px;
+                padding: 2px 8px;
+                min-height: 24px;
+            }
+            QGroupBox QComboBox:disabled {
+                color: #64748b;
+                border-color: #334155;
+                background: #0a0f1a;
+            }
+        """
+        )
+        nl = QVBoxLayout(naming_box)
+        nl.setSpacing(6)
+        nl.setContentsMargins(10, 10, 10, 10)
+
+        nl.addWidget(self.check_inc_name)
+        nl.addWidget(self.check_add_date)
         row_df = QHBoxLayout(); row_df.addWidget(QLabel("Date Format:")); row_df.addWidget(self.cb_date_fmt, 1)
         row_df.itemAt(0).widget().setStyleSheet("color: #94a3b8; font-size: 12px; font-weight: bold;")
-        sl.addLayout(row_df)
-        sl.addWidget(self.check_add_time)
+        nl.addLayout(row_df)
+        nl.addWidget(self.check_add_time)
         row_tf = QHBoxLayout(); row_tf.addWidget(QLabel("Time Format:")); row_tf.addWidget(self.cb_time_fmt, 1)
         row_tf.itemAt(0).widget().setStyleSheet("color: #94a3b8; font-size: 12px; font-weight: bold;")
-        sl.addLayout(row_tf)
+        nl.addLayout(row_tf)
         row_pl = QHBoxLayout(); row_pl.addWidget(QLabel("Place Date/Time:")); row_pl.addWidget(self.cb_place, 1)
         row_pl.itemAt(0).widget().setStyleSheet("color: #94a3b8; font-size: 12px; font-weight: bold;")
-        sl.addLayout(row_pl)
+        nl.addLayout(row_pl)
+        sl.addWidget(naming_box)
 
-        self.lbl_save_preview = QLabel("Preview: Capture_2026-May-10_00:00:00.spe")
-        self.lbl_save_full = QLabel("Full Path: C:/Data/Captures/Capture_2026-May-10_00:00:00.spe")
+        self.lbl_save_preview = QLabel("Example File Name: Capture_2026-May-10_00_00_00.spe")
+        self.lbl_save_full = QLabel("Full Path: Live_Captures/Capture_2026-May-10_00_00_00.spe")
+        self.lbl_save_preview.setWordWrap(True)
+        self.lbl_save_full.setWordWrap(True)
         self.lbl_save_preview.setStyleSheet("color: #4ecdc4; font-size: 12px; font-weight: 900;")
         self.lbl_save_full.setStyleSheet("color: #7dd3fc; font-size: 12px; font-weight: 900;")
         sl.addWidget(self.lbl_save_preview)
@@ -375,8 +502,12 @@ class LayoutBuilderMixin:
             widget.textChanged.connect(self._update_save_preview)
         for widget in [self.check_inc_name, self.check_add_date, self.check_add_time]:
             widget.toggled.connect(self._update_save_preview)
+            widget.toggled.connect(self._update_save_control_state)
         for widget in [self.cb_date_fmt, self.cb_time_fmt, self.cb_place]:
             widget.currentTextChanged.connect(self._update_save_preview)
+        self.btn_browse_folder.clicked.connect(self._on_browse_save_folder)
+
+        self._update_save_control_state()
         self._update_save_preview()
         p_lay.addWidget(save_grp)
 
@@ -385,23 +516,36 @@ class LayoutBuilderMixin:
         lay.addWidget(scroll)
         return page
 
+    def _on_browse_save_folder(self):
+        current_dir = self.edit_folder.text().strip() or os.getcwd()
+        selected = QFileDialog.getExistingDirectory(self, "Save In", current_dir)
+        if selected:
+            self.edit_folder.setText(selected)
+
+    def _update_save_control_state(self):
+        has_date = self.check_add_date.isChecked()
+        has_time = self.check_add_time.isChecked()
+        self.cb_date_fmt.setEnabled(has_date)
+        self.cb_time_fmt.setEnabled(has_time)
+        self.cb_place.setEnabled(has_date or has_time)
+
     def _update_save_preview(self):
         now = datetime.now()
         base = self.edit_file_base.text().strip() or "Capture"
-        folder = self.edit_folder.text().strip() or "C:/Data/Captures"
+        folder = self.edit_folder.text().strip() or "Live_Captures"
         tokens = []
 
         if self.check_add_date.isChecked():
             if self.cb_date_fmt.currentText() == "YYYY-MM-DD":
                 tokens.append(now.strftime("%Y-%m-%d"))
             else:
-                tokens.append(now.strftime("%Y-%b-%d"))
+                tokens.append(now.strftime("%Y-%B-%d"))
 
         if self.check_add_time.isChecked():
             if self.cb_time_fmt.currentText() == "hh:mm:ss (12h)":
-                tokens.append(now.strftime("%I:%M:%S%p"))
+                tokens.append(now.strftime("%I_%M_%S%p"))
             else:
-                tokens.append(now.strftime("%H:%M:%S"))
+                tokens.append(now.strftime("%H_%M_%S"))
 
         if self.check_inc_name.isChecked():
             tokens.append("0001")
@@ -415,8 +559,9 @@ class LayoutBuilderMixin:
             filename = base
 
         full_name = f"{filename}.spe"
-        self.lbl_save_preview.setText(f"Preview: {full_name}")
-        self.lbl_save_full.setText(f"Full Path: {folder}/{full_name}")
+        full_path = os.path.normpath(os.path.join(folder, full_name))
+        self.lbl_save_preview.setText(f"Example File Name: {full_name}")
+        self.lbl_save_full.setText(f"Full Path: {full_path}")
 
     def _apply_camera_capabilities(self, caps):
         has_fps = bool(caps and getattr(caps, "has_fps_control", False))
@@ -486,7 +631,7 @@ class LayoutBuilderMixin:
         cam_w = QWidget(); cbl = QHBoxLayout(cam_w); cbl.setContentsMargins(0, 0, 0, 0); cbl.setSpacing(8)
         self.btn_snap = self._dash_btn("SNAP", "", "#3b82f6")
         self.btn_live_air = self._dash_btn("LIVE", "ON AIR", "#14b8a6")
-        self.btn_acquire = self._dash_btn("ACQUIRE", "RECORDING", "#e11d48")
+        self.btn_acquire = self._dash_btn("ACQUIRE", "SAVE", "#e11d48")
         self.btn_stop_main = self._dash_btn("STOP", "", "#ef4444")
         for button in (self.btn_snap, self.btn_live_air, self.btn_acquire, self.btn_stop_main):
             cbl.addWidget(button)

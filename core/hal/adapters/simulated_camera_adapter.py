@@ -104,22 +104,22 @@ class SimulatedCameraAdapter(CameraHal):
             cam_logger.exception("[SimulatedCameraAdapter] get_frame_total_s failed")
             raise HalCommandError(f"Simulated get frame total time failed: {exc}", cause=exc) from exc
 
-    def start_stream(self) -> None:
-        cam_logger.debug("[SimulatedCameraAdapter] start_stream requested")
+    def start_stream(self, frame_cb=None) -> None:
+        cam_logger.info("[SimulatedCameraAdapter] grab/live start requested")
         cam = self._require_connected()
         try:
-            cam.start_live(lambda _frame: None)
-            cam_logger.debug("[SimulatedCameraAdapter] start_stream succeeded")
+            cam.start_live(frame_cb or (lambda _frame: None))
+            cam_logger.info("[SimulatedCameraAdapter] grab/live started")
         except Exception as exc:
             cam_logger.exception("[SimulatedCameraAdapter] start_stream failed")
             raise HalCommandError(f"Simulated start stream failed: {exc}", cause=exc) from exc
 
     def stop_stream(self) -> None:
-        cam_logger.debug("[SimulatedCameraAdapter] stop_stream requested")
+        cam_logger.info("[SimulatedCameraAdapter] grab/live stop requested")
         cam = self._require_connected()
         try:
             cam.stop_live()
-            cam_logger.debug("[SimulatedCameraAdapter] stop_stream succeeded")
+            cam_logger.info("[SimulatedCameraAdapter] grab/live stopped")
         except Exception as exc:
             cam_logger.exception("[SimulatedCameraAdapter] stop_stream failed")
             raise HalCommandError(f"Simulated stop stream failed: {exc}", cause=exc) from exc
@@ -136,12 +136,12 @@ class SimulatedCameraAdapter(CameraHal):
             raise HalCommandError(f"Simulated snap failed: {exc}", cause=exc) from exc
 
     def acquire(self, frame_count: int) -> list[np.ndarray]:
-        cam_logger.debug(f"[SimulatedCameraAdapter] acquire requested frame_count={frame_count}")
+        cam_logger.info(f"[SimulatedCameraAdapter] acquire start frame_count={frame_count}")
         count = max(1, int(frame_count))
         frames: list[np.ndarray] = []
         for _ in range(count):
             frames.append(self.snap())
-        cam_logger.debug(f"[SimulatedCameraAdapter] acquire succeeded frames={len(frames)}")
+        cam_logger.info(f"[SimulatedCameraAdapter] acquire finished frames={len(frames)}")
         return frames
 
     def set_range(self, vmin: float | None, vmax: float | None) -> None:

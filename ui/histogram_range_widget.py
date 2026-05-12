@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import numpy as np
+import traceback
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QRect
 from PyQt6.QtGui import (
     QColor, QLinearGradient, QPainter, QPen, QBrush, QFont,
@@ -428,35 +429,51 @@ class HistogramRangeWidget(QWidget):
         self.range_changed.emit(self._vmin, self._vmax)
 
     def _recompute_histogram(self):
-        if self._image is None:
-            return
-        flat = self._image.ravel().astype(np.float64)
-        lo = self._slider_min
-        hi = self._slider_max
-        if hi <= lo:
-            hi = lo + 1.0
-        counts, _ = np.histogram(flat, bins=256, range=(lo, hi))
-        self._slider.set_histogram(counts)
+        try:
+            if self._image is None:
+                return
+            flat = self._image.ravel().astype(np.float32)
+            lo = self._slider_min
+            hi = self._slider_max
+            if hi <= lo:
+                hi = lo + 1.0
+            
+            counts, _ = np.histogram(flat, bins=256, range=(lo, hi))
+            self._slider.set_histogram(counts)
+        except Exception as e:
+            print(f"[HistogramRangeWidget:Error] _recompute_histogram failed: {e}")
+            traceback.print_exc()
 
     def _update_labels(self):
         self._lbl_min.setText(f"{self._vmin:.0f}")
         self._lbl_max.setText(f"{self._vmax:.0f}")
 
     def _optimal_scale(self):
-        if self._image is None:
-            return
-        flat = self._image.ravel().astype(np.float64)
-        opt_lo = float(np.percentile(flat, 0.5))
-        opt_hi = float(np.percentile(flat, 99.5))
-        # 슬라이더 구간을 optimal 범위로 줌인 → 더 세밀한 조작 가능
-        self._slider_min = opt_lo
-        self._slider_max = opt_hi
-        self._vmin = opt_lo
-        self._vmax = opt_hi
-        self._recompute_histogram()
-        self._slider.set_fracs(0.0, 1.0)
-        self._update_labels()
-        self.range_changed.emit(self._vmin, self._vmax)
+        try:
+            if self._image is None:
+                return
+            print(f"[HistogramRangeWidget] Calculating Optimal Scale...")
+            flat = self._image.ravel().astype(np.float32)
+            opt_lo = float(np.percentile(flat, 0.5))
+            opt_hi = float(np.percentile(flat, 99.5))
+            
+            if opt_hi <= opt_lo:
+                opt_hi = opt_lo + 1.0
+                
+            print(f"[HistogramRangeWidget] Optimal: {opt_lo:.1f} ~ {opt_hi:.1f}")
+            
+            self._slider_min = opt_lo
+            self._slider_max = opt_hi
+            self._vmin = opt_lo
+            self._vmax = opt_hi
+            
+            self._recompute_histogram()
+            self._slider.set_fracs(0.0, 1.0)
+            self._update_labels()
+            self.range_changed.emit(float(self._vmin), float(self._vmax))
+        except Exception as e:
+            print(f"[HistogramRangeWidget:Error] _optimal_scale failed: {e}")
+            traceback.print_exc()
 
     def _full_scale(self):
         # 슬라이더 구간을 전체 데이터 범위로 복원

@@ -53,6 +53,7 @@ class ImageViewer(QWidget):
     pixel_info_updated   = pyqtSignal(int, int, float)
     range_changed        = pyqtSignal(object, object)   # (vmin|None, vmax|None)
     colormap_changed     = pyqtSignal(str)
+    roi_list_changed     = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1019,6 +1020,7 @@ class ImageViewer(QWidget):
             self._roi_list_widget.addItem(item)
             if roi_id == self._view._selected_roi_id:
                 self._roi_list_widget.setCurrentItem(item)
+        self.roi_list_changed.emit()
 
     def _delete_selected_roi(self):
         item = self._roi_list_widget.currentItem()

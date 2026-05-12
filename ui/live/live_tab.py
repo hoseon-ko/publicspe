@@ -330,7 +330,7 @@ class LiveTab(QMainWindow):
             if sidebar is not None:
                 hint_w = sidebar.sizeHint().width() + 24   # 여유 padding
                 hint_w = max(hint_w, self.dock_left.minimumWidth())
-                hint_w = min(hint_w, self.dock_left.maximumWidth())
+                hint_w = min(hint_w, self.dock_left.MaximumWidth())
                 self.resizeDocks(
                     [self.dock_left], [hint_w], Qt.Orientation.Horizontal
                 )
@@ -606,10 +606,25 @@ class LiveTab(QMainWindow):
             QPushButton:pressed {{ background: #2a6048; }}
         """
         btn_save_tb = QPushButton("📍 SAVE")
-        btn_save_tb.setToolTip("Image + Centroid + Motor Position 저장 (S)")
+        btn_save_tb.setToolTip("이미지 + 중심점 + 모터 위치 저장 (S)")
         btn_save_tb.setStyleSheet(_save_style)
         btn_save_tb.clicked.connect(self._save_bundle)
         tb.addWidget(btn_save_tb)
+
+        # Add live preview for file name
+        self.file_name_preview = QLabel("Example File Name: ")
+        tb.addWidget(self.file_name_preview)
+
+        # Update file name preview on changes
+        def update_file_name_preview():
+            date_format = "YYYY-MM-DD"  # Example: Add more formats as needed
+            time_format = "hh:mm:ss (24h)"
+            suffix = "Suffix"
+            example_name = f"20260512_100kHz_exp10s_PD_M2011_LNS_018_0_000_blankarea_{date_format}_{time_format}_{suffix}"
+            self.file_name_preview.setText(f"Example File Name: {example_name}")
+
+        # Connect preview update to relevant signals
+        btn_save_tb.clicked.connect(update_file_name_preview)
 
         # #14 라이브 SPE 저장
         btn_spe_tb = QPushButton("🔬 SPE")
@@ -835,7 +850,8 @@ class LiveTab(QMainWindow):
             self._first_frame = True
             self._camera.start_live(self._on_new_frame)
             self.camera_panel.set_grabbing(True)
-            self._log("▶ 카메라 시작", "camera")
+            cam_name = self._camera.camera_name() if hasattr(self._camera, "camera_name") else type(self._camera).__name__
+            self._log(f"🟢 [LIVE/GRAB START] {cam_name}  |  상태: RUNNING", "camera")
             
             # [Phase] 라이브 프로그레스 타이머 설정 (노출이 길 경우)
             try:
@@ -848,6 +864,7 @@ class LiveTab(QMainWindow):
             if exp_ms > 100:
                 self._live_total = exp_ms
                 self._live_elapsed = 0
+                self._log(f"   └ 예상 프레임 주기: {exp_ms:.1f} ms/frame", "camera")
                 if hasattr(self, '_live_timer_anim') and self._live_timer_anim.isActive():
                     self._live_timer_anim.stop()
                 self._live_timer_anim = QTimer()
@@ -877,7 +894,7 @@ class LiveTab(QMainWindow):
         import threading
         t = threading.Thread(target=_do_stop, daemon=True, name="StopLive")
         t.start()
-        self._log("■ 카메라 정지", "camera")
+        self._log("🟠 [LIVE/GRAB STOP] 사용자 요청으로 정지", "camera")
 
     def stop_live(self):
         """외부(Acquisition/Scan 탭) 호출 — 동기적으로 완료 보장."""
@@ -890,10 +907,13 @@ class LiveTab(QMainWindow):
         except Exception:
             pass
         self.camera_panel.set_grabbing(False)
+        if self._was_live:
+            self._log("🟠 [LIVE/GRAB STOP] 외부 작업 시작으로 정지", "camera")
 
     def resume_live(self):
         """Acquisition/Scan 완료 후 — stop_live() 직전에 grabbing 중이었으면 재개."""
         if getattr(self, "_was_live", False) and self._camera is not None:
+            self._log("🔵 [LIVE/GRAB RESUME] 외부 작업 완료, 라이브 재개", "camera")
             self._start_camera()
 
     def _on_live_progress_tick(self):

@@ -9,6 +9,7 @@ This hub is intentionally minimal in phase-1:
 from __future__ import annotations
 
 from dataclasses import asdict
+from threading import RLock
 from typing import Callable
 
 from PyQt6.QtCore import QObject, pyqtSignal
@@ -42,6 +43,7 @@ class DeviceSessionHub(QObject):
         self._kimm_hal: KimmHal | None = None
         self._pico_hal: PicoHal | None = None
         self._last_frame = None
+        self._camera_lock = RLock()
 
     def register_camera_hal(self, vendor: str, factory: Callable[[], CameraHal]) -> None:
         key = vendor.strip().lower()
@@ -72,44 +74,46 @@ class DeviceSessionHub(QObject):
             return []
 
     def connect_camera(self, device_id: str) -> None:
-        key = self._state.camera.vendor.strip().lower()
-        if not key:
-            raise ValueError("Camera vendor is not selected")
+        with self._camera_lock:
+            key = self._state.camera.vendor.strip().lower()
+            if not key:
+                raise ValueError("Camera vendor is not selected")
 
-        factory = self._camera_factories.get(key)
-        if factory is None:
-            raise ValueError(f"Camera vendor is not registered: {key}")
+            factory = self._camera_factories.get(key)
+            if factory is None:
+                raise ValueError(f"Camera vendor is not registered: {key}")
 
-        if self._camera_hal is not None:
-            self.disconnect_camera(reason="switching camera")
+            if self._camera_hal is not None:
+                self.disconnect_camera(reason="switching camera")
 
-        self._state.camera.connection = CameraConnectionState.CONNECTING
-        self.set_camera_device(device_id)
-        self.publish_status(f"Connecting camera: vendor={key}, device={device_id}", source="hub")
+            self._state.camera.connection = CameraConnectionState.CONNECTING
+            self.set_camera_device(device_id)
+            self.publish_status(f"Connecting camera: vendor={key}, device={device_id}", source="hub")
 
-        hal = factory()
-        try:
-            hal.connect(device_id)
-            self._camera_hal = hal
-            self.mark_camera_connected(source="hub")
-        except Exception as exc:
-            dev_logger.exception(f"[DeviceSessionHub] connect_camera failed vendor={key}, device_id={device_id}")
-            self._state.camera.connection = CameraConnectionState.ERROR
-            self.publish_error("camera", f"connect failed: {exc}", source="hub")
-            raise
+            hal = factory()
+            try:
+                hal.connect(device_id)
+                self._camera_hal = hal
+                self.mark_camera_connected(source="hub")
+            except Exception as exc:
+                dev_logger.exception(f"[DeviceSessionHub] connect_camera failed vendor={key}, device_id={device_id}")
+                self._state.camera.connection = CameraConnectionState.ERROR
+                self.publish_error("camera", f"connect failed: {exc}", source="hub")
+                raise
 
     def disconnect_camera(self, reason: str = "") -> None:
-        hal = self._camera_hal
-        self._camera_hal = None
-        if hal is not None:
-            try:
-                hal.disconnect()
-            except Exception as exc:
-                dev_logger.exception("[DeviceSessionHub] disconnect_camera failed")
-                self.publish_error("camera", f"disconnect failed: {exc}", source="hub")
-        self.mark_camera_disconnected(reason=reason, source="hub")
+        with self._camera_lock:
+            hal = self._camera_hal
+            self._camera_hal = None
+            if hal is not None:
+                try:
+                    hal.disconnect()
+                except Exception as exc:
+                    dev_logger.exception("[DeviceSessionHub] disconnect_camera failed")
+                    self.publish_error("camera", f"disconnect failed: {exc}", source="hub")
+            self.mark_camera_disconnected(reason=reason, source="hub")
 
-    def start_stream(self, owner: str) -> None:
+    def start_stream(self, owner: str, frame_cb: Callable[[object], None] | None = None) -> None:
         normalized = validate_owner(owner)
         hal = self._require_camera_hal()
 
@@ -119,7 +123,12 @@ class DeviceSessionHub(QObject):
             raise HalCommandError("Cannot start stream during acquisition by another owner")
 
         try:
-            hal.start_stream()
+            if frame_cb is None:
+                def _default_frame_cb(frame):
+                    self.publish_frame(frame, frame, source="hub")
+                hal.start_stream(_default_frame_cb)
+            else:
+                hal.start_stream(frame_cb)
             self.mark_stream_started(normalized, source="hub")
         except Exception as exc:
             dev_logger.exception(f"[DeviceSessionHub] start_stream failed owner={normalized}")
@@ -140,17 +149,18 @@ class DeviceSessionHub(QObject):
             raise
 
     def snap(self, owner: str):
-        _ = validate_owner(owner)
-        hal = self._require_camera_hal()
-        try:
-            raw = hal.snap()
-            self._last_frame = raw
-            self.publish_frame(raw, raw, source="hub")
-            return raw
-        except Exception as exc:
-            dev_logger.exception(f"[DeviceSessionHub] snap failed owner={owner}")
-            self.publish_error("camera", f"snap failed: {exc}", source="hub")
-            raise
+        with self._camera_lock:
+            _ = validate_owner(owner)
+            hal = self._require_camera_hal()
+            try:
+                raw = hal.snap()
+                self._last_frame = raw
+                self.publish_frame(raw, raw, source="hub")
+                return raw
+            except Exception as exc:
+                dev_logger.exception(f"[DeviceSessionHub] snap failed owner={owner}")
+                self.publish_error("camera", f"snap failed: {exc}", source="hub")
+                raise
 
     def acquire_with_progress(
         self,
@@ -159,43 +169,44 @@ class DeviceSessionHub(QObject):
         on_frame: Callable[[int, int, object], None] | None = None,
         should_stop: Callable[[], bool] | None = None,
     ) -> list:
-        normalized = validate_owner(owner)
-        hal = self._require_camera_hal()
+        with self._camera_lock:
+            normalized = validate_owner(owner)
+            hal = self._require_camera_hal()
 
-        count = max(1, int(frame_count))
-        if not self.request_exclusive_mode(normalized, mode="acquire"):
-            raise HalCommandError("Cannot acquire: exclusive owner conflict")
+            count = max(1, int(frame_count))
+            if not self.request_exclusive_mode(normalized, mode="acquire"):
+                raise HalCommandError("Cannot acquire: exclusive owner conflict")
 
-        self.mark_acquisition_started(normalized, source="hub")
-        self.publish_status(
-            f"acquisition started: owner={normalized}, frames={count}",
-            source="hub",
-        )
-
-        try:
-            frames = []
-            for idx in range(count):
-                if should_stop is not None and should_stop():
-                    break
-                frame = hal.snap()
-                frames.append(frame)
-                if on_frame is not None:
-                    on_frame(idx + 1, count, frame)
-            if frames:
-                self._last_frame = frames[-1]
-                self.publish_frame(frames[-1], frames[-1], source="hub")
+            self.mark_acquisition_started(normalized, source="hub")
             self.publish_status(
-                f"acquisition finished: owner={normalized}, frames={len(frames)}",
+                f"acquisition started: owner={normalized}, frames={count}",
                 source="hub",
             )
-            return frames
-        except Exception as exc:
-            dev_logger.exception(f"[DeviceSessionHub] acquire failed owner={normalized}, frames={count}")
-            self.publish_error("acquisition", f"acquire failed: {exc}", source="hub")
-            raise
-        finally:
-            self.mark_acquisition_finished(normalized, source="hub")
-            self.release_exclusive_mode(normalized, mode="acquire")
+
+            try:
+                frames = []
+                for idx in range(count):
+                    if should_stop is not None and should_stop():
+                        break
+                    frame = hal.snap()
+                    frames.append(frame)
+                    if on_frame is not None:
+                        on_frame(idx + 1, count, frame)
+                if frames:
+                    self._last_frame = frames[-1]
+                    self.publish_frame(frames[-1], frames[-1], source="hub")
+                self.publish_status(
+                    f"acquisition finished: owner={normalized}, frames={len(frames)}",
+                    source="hub",
+                )
+                return frames
+            except Exception as exc:
+                dev_logger.exception(f"[DeviceSessionHub] acquire failed owner={normalized}, frames={count}")
+                self.publish_error("acquisition", f"acquire failed: {exc}", source="hub")
+                raise
+            finally:
+                self.mark_acquisition_finished(normalized, source="hub")
+                self.release_exclusive_mode(normalized, mode="acquire")
 
     def acquire(self, owner: str, frame_count: int) -> list:
         return self.acquire_with_progress(owner, frame_count)

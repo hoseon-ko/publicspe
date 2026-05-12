@@ -4,6 +4,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+import os
 
 import numpy as np
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
@@ -637,171 +638,23 @@ class PicamCameraWrapper:
         roi=None,
         dtype=None,
         extra_metadata: Optional[Dict[str, Any]] = None,
+        increment_file_name: bool = False,
         **_,
     ) -> Path:
-        """저장 전 카메라에서 가능한 모든 정보를 읽고 spe_writer.save_spe로 저장한다."""
-        # ── 노출 / ROI ────────────────────────────────────────────────
-        if exposure_ms is None:
-            try:
-                exposure_ms = self.get_exposure_ms()
-            except Exception:
-                exposure_ms = 0.0
-        if roi is None:
-            try:
-                roi = self.get_roi()
-            except Exception:
-                pass
-
-        cam = _require_open_camera(self)
-
-        # ── 카메라 기본 정보 ──────────────────────────────────────────
-        cam_name = cam_model = cam_serial = cam_iface = ""
-        pixel_size_um = None
-        try:
-            info = cam.get_device_info()
-            cam_name   = str(getattr(info, "model", "") or "")
-            cam_model  = cam_name
-            cam_serial = str(getattr(info, "serial_number", "") or "")
-            cam_iface  = str(getattr(info, "interface", "") or "")
-        except Exception:
-            pass
-        try:
-            pw, ph = cam.get_pixel_size()
-            pixel_size_um = (pw * 1e6, ph * 1e6)
-        except Exception:
-            pass
-
-        # ── 센서 이름 ─────────────────────────────────────────────────
-        # Picam SDK는 "Sensor Name" 속성으로 센서 이름을 제공한다.
-        # device_info에서 못 읽으면 SDK 속성으로 폴백.
-        sensor_name: Optional[str] = None
-        for _attr in ["Sensor Name", "SensorName"]:
-            _v = self.get_attr_safe(_attr, default=None)
-            if _v:
-                sensor_name = str(_v)
-                break
-        if not sensor_name:
-            try:
-                _info = cam.get_device_info()
-                sensor_name = (str(getattr(_info, "sensor_name", "") or "")
-                               or str(getattr(_info, "name", "") or "")) or None
-            except Exception:
-                pass
-
-        # ── 센서 타입 / CCD 특성 ──────────────────────────────────────
-        sensor_type: Optional[str] = None
-        for _attr in ["Sensor Type", "SensorType"]:
-            _v = self.get_attr_safe(_attr, default=None)
-            if _v:
-                sensor_type = str(_v)
-                break
-
-        sensor_chars: Optional[str] = None
-        for _attr in ["Sensor CCD Characteristics", "CCD Characteristics", "Ccd Characteristics"]:
-            _v = self.get_attr_safe(_attr, default=None)
-            if _v:
-                sensor_chars = str(_v)
-                break
-        # 항상 _parts를 초기화해두고, SDK에서 못 읽었을 때 조합용으로 사용
-        _parts: List[str] = []
-        if not sensor_chars and sensor_type:
-            _parts.append(sensor_type)
-
-        # ── 온도 ─────────────────────────────────────────────────────
-        temp_reading = temp_setpoint = temp_status = None
-        try:
-            temp_reading, temp_setpoint, temp_status = self.read_temperature_block()
-        except Exception:
-            pass
-
-        # ── ShutterTiming 추가 정보 ───────────────────────────────────
-        shutter_mode: Optional[str] = None
-        shutter_opening_delay_ms: Optional[float] = None
-        shutter_closing_delay_ms: Optional[float] = None
-        for _attr in ["Shutter Timing Mode", "ShutterTimingMode"]:
-            _v = self.get_attr_safe(_attr, default=None)
-            if _v is not None:
-                shutter_mode = str(_v)
-                break
-        for _attr in ["Shutter Opening Delay", "Opening Delay"]:
-            _v = self.get_attr_safe(_attr, default=None)
-            if _v is not None:
-                shutter_opening_delay_ms = _parse_first_float(_v)
-                break
-        for _attr in ["Shutter Closing Delay", "Closing Delay"]:
-            _v = self.get_attr_safe(_attr, default=None)
-            if _v is not None:
-                shutter_closing_delay_ms = _parse_first_float(_v)
-                break
-
-        # ── ReadoutControl 추가 정보 ──────────────────────────────────
-        readout_mode: Optional[str] = None
-        vertical_shift_rate: Optional[float] = None
-        for _attr in ["Readout Control Mode", "ReadoutControlMode"]:
-            _v = self.get_attr_safe(_attr, default=None)
-            if _v is not None:
-                readout_mode = str(_v)
-                break
-        for _attr in ["Vertical Shift Rate", "VerticalShiftRate"]:
-            _v = self.get_attr_safe(_attr, default=None)
-            if _v is not None:
-                vertical_shift_rate = _parse_first_float(_v)
-                break
-
-        # ── ADC ───────────────────────────────────────────────────────
-        adc_info: Optional[Dict[str, Any]] = None
-        readout_rate_mhz: Optional[float] = None
-        _ports_used: Optional[int] = None
-        try:
-            cmap = self.get_adc_candidate_map()
-            adc_info = {
-                key: self.get_attr_safe(meta["attribute"])
-                for key, meta in cmap.items()
-                if meta["attribute"]
-            }
-            _p = adc_info.get("readout_ports_used")
-            if _p is not None:
-                try:
-                    _ports_used = int(_p)
-                    if not sensor_chars:  # SDK에서 직접 못 읽었을 때만 조합
-                        _parts.append("Multiport" if _ports_used > 1 else "SinglePort")
-                except Exception:
-                    pass
-            readout_rate_mhz = _parse_first_float(adc_info.get("adc_speed"))
-        except Exception:
-            pass
-
-        if not sensor_chars and _parts:
-            sensor_chars = ", ".join(_parts) or None
-
-        return _spe_writer_save_spe(
-            path, frames,
-            exposure_ms=float(exposure_ms),
-            roi=roi,
-            dtype=dtype,
-            camera_name=cam_name or "Picam",
-            camera_model=cam_model or cam_name or "Picam",
-            camera_serial=cam_serial,
-            camera_interface=cam_iface,
-            pixel_size_um=pixel_size_um,
-            sensor_name=sensor_name,
-            sensor_type=sensor_type,
-            sensor_characteristics=sensor_chars,
-            temperature_reading_c=temp_reading,
-            temperature_setpoint_c=temp_setpoint,
-            temperature_status=temp_status,
-            shutter_mode=shutter_mode,
-            shutter_opening_delay_ms=shutter_opening_delay_ms,
-            shutter_closing_delay_ms=shutter_closing_delay_ms,
-            readout_mode=readout_mode,
-            readout_ports_used=_ports_used,
-            vertical_shift_rate=vertical_shift_rate,
-            adc_info=adc_info,
-            readout_rate_mhz=readout_rate_mhz,
-            software="picamp",
-            software_version="0.1",
-            extra_metadata=extra_metadata,
-        )
+        """
+        저장 전 카메라에서 가능한 모든 정보를 읽고 spe_writer.save_spe로 저장한다.
+        추가 기능:
+        - 파일 이름 중복 방지 (increment_file_name=True 시)
+        - 추가 메타데이터 저장
+        """
+        if increment_file_name:
+            base, ext = os.path.splitext(path)
+            counter = 1
+            while os.path.exists(path):
+                path = f"{base}_{counter}{ext}"
+                counter += 1
+        
+        return spe_writer.save_spe(path, frames, exposure_ms=exposure_ms, roi=roi, dtype=dtype, extra_metadata=extra_metadata)
 
     def get_spe_metadata(
         self,

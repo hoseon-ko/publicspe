@@ -30,24 +30,12 @@ class CameraHubMixin:
             self.cam_list.setCurrentRow(0)
 
     def _sync_vendor_to_live(self):
-        if self._live_tab is None or not hasattr(self._live_tab, "camera_panel"):
-            return
-        vendor = self.cb_vendor.currentText().strip()
-        mapped = "SIMULATED" if vendor.upper() == "SIMULATION" else vendor
-        combo = self._live_tab.camera_panel.combo_cam_type
-        idx = combo.findText(mapped)
-        if idx >= 0:
-            combo.setCurrentIndex(idx)
+        """Deprecated: DeepAlign camera ownership is hub-only."""
+        return
 
     def _copy_camera_list_from_live(self):
-        if self._live_tab is None or not hasattr(self._live_tab, "camera_panel"):
-            return
-        src = self._live_tab.camera_panel.camera_list
-        self.cam_list.clear()
-        for i in range(src.count()):
-            self.cam_list.addItem(src.item(i).text())
-        if self.cam_list.count() > 0:
-            self.cam_list.setCurrentRow(0)
+        """Deprecated: DeepAlign camera ownership is hub-only."""
+        return
 
     def _on_scan_clicked(self):
         if self._session_hub is not None:
@@ -61,13 +49,12 @@ class CameraHubMixin:
             except Exception:
                 dev_logger.exception("[DeepAlign] scan via hub failed")
                 return
-        if self._live_tab is None:
-            return
-        self._sync_vendor_to_live()
-        self._live_tab._scan_cameras()
-        self._copy_camera_list_from_live()
+        dev_logger.debug("[DeepAlign] scan skipped (session hub is not bound)")
 
     def _on_connect_clicked(self):
+        if self._session_hub is not None and not self._scanned_devices:
+            self._on_scan_clicked()
+
         if self._session_hub is not None and self._scanned_devices:
             idx = max(0, self.cam_list.currentRow())
             if idx >= len(self._scanned_devices):
@@ -97,11 +84,7 @@ class CameraHubMixin:
         if self._session_hub is not None:
             dev_logger.debug("[DeepAlign] connect via hub skipped (no scanned device)")
             return
-        if self._live_tab is None:
-            return
-        self._sync_vendor_to_live()
-        idx = max(0, self.cam_list.currentRow())
-        self._live_tab._connect_camera(idx)
+        dev_logger.debug("[DeepAlign] connect skipped (session hub is not bound)")
 
     def _on_disconnect_clicked(self):
         self._stop_hub_live()
@@ -115,6 +98,4 @@ class CameraHubMixin:
             except Exception:
                 dev_logger.exception("[DeepAlign] disconnect via hub failed")
                 return
-        if self._live_tab is None:
-            return
-        self._live_tab._disconnect_camera()
+        dev_logger.debug("[DeepAlign] disconnect skipped (session hub is not bound)")

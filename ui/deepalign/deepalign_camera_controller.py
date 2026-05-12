@@ -11,15 +11,19 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from pathlib import Path
 import time
 
-from PyQt6.QtCore import QThread
+from PyQt6.QtCore import QThread, QTimer
 
 from core.logger import dev_logger
 from core.session.ownership import OWNER_DEEPALIGN
+from core.session.session_state import CameraConnectionState
+from core.spe_writer import save_spe
 from ui.deepalign.deepalign_camera_hub_mixin import CameraHubMixin
 from ui.deepalign.deepalign_timing import clamp_frame_elapsed, overall_progress_ratio, format_hms
-from ui.deepalign.deepalign_workers import _AcquireWorker, _LiveWorker, _SnapWorker
+from ui.deepalign.deepalign_workers import _AcquireWorker, _SnapWorker
 
 
 class CameraControllerMixin(CameraHubMixin):
@@ -28,24 +32,18 @@ class CameraControllerMixin(CameraHubMixin):
             return False
         try:
             state = self._session_hub.get_camera_state()
-            return getattr(state, "connection", None) == "connected"
+            return getattr(state, "connection", None) == CameraConnectionState.CONNECTED
         except Exception:
             return False
 
     def _on_start_live_clicked(self):
+        if not self._is_hub_camera_connected():
+            dev_logger.debug("[DeepAlign] live start ignored (hub camera disconnected)")
+            return
+
         self._update_dash_label(self.btn_live_air, "LIVE", "ON AIR")
         self._update_dash_label(self.btn_acquire, "ACQUIRE", "")
-
-        if self._session_hub is not None:
-            if self._is_hub_camera_connected():
-                self._start_hub_live()
-            else:
-                dev_logger.debug("[DeepAlign] live start ignored (hub camera disconnected)")
-            return
-
-        if self._live_tab is None:
-            return
-        self._live_tab._start_camera()
+        self._start_hub_live()
 
     def _on_stop_live_clicked(self):
         if self._acq_running:
@@ -55,21 +53,14 @@ class CameraControllerMixin(CameraHubMixin):
 
         self._stop_hub_live()
 
-        if self._live_tab is None:
-            return
-        self._live_tab._stop_camera()
-
     def _on_snap_clicked(self):
         if self._snap_in_progress:
             return
 
-        if self._session_hub is not None:
-            snap_fn = lambda: self._session_hub.snap(OWNER_DEEPALIGN)
-        else:
-            cam = getattr(self._live_tab, "_camera", None) if self._live_tab is not None else None
-            if cam is None:
-                return
-            snap_fn = cam.snap
+        if not self._is_hub_camera_connected():
+            dev_logger.debug("[DeepAlign] snap ignored (hub camera disconnected)")
+            return
+        snap_fn = lambda: self._session_hub.snap(OWNER_DEEPALIGN)
 
         self._snap_in_progress = True
         self._snap_expected_s = max(0.02, self._estimate_frame_seconds())
@@ -147,43 +138,33 @@ class CameraControllerMixin(CameraHubMixin):
                     except Exception:
                         return 0.05
 
-        cam = getattr(self._live_tab, "_camera", None) if self._live_tab is not None else None
-        if cam is None:
-            return 0.05
         try:
-            if hasattr(cam, "_get_frame_total_s"):
-                return max(0.005, float(cam._get_frame_total_s()))
-        except Exception:
-            pass
-        try:
-            return max(0.005, float(cam.get_exposure_ms()) / 1000.0)
+            return max(0.005, float(self.spin_exposure.value()) / 1000.0)
         except Exception:
             return 0.05
 
     def _on_acquire_clicked(self):
         if self._acq_running:
             return
-        if self._session_hub is None and self._live_tab is None:
+        if not self._is_hub_camera_connected():
+            dev_logger.debug("[DeepAlign] acquire ignored (hub camera disconnected)")
             return
 
-        use_hub = self._session_hub is not None
-        cam = None
-        if not use_hub:
-            cam = getattr(self._live_tab, "_camera", None)
-            if cam is None:
-                return
-
-        is_live = False
-        if hasattr(self._live_tab, "camera_panel"):
-            is_live = self._live_tab.camera_panel.btn_stop.isEnabled()
-        if self._live_worker_thread is not None and self._live_worker_thread.isRunning():
-            is_live = True
-
-        if is_live:
+        if getattr(self, "_hub_live_active", False):
             try:
-                self._on_stop_live_clicked()
+                self._stop_hub_live(after_stop=self._begin_acquire_if_ready)
             except Exception as exc:
                 print(f"[DeepAlign] Failed to trigger physical stop before acquire: {exc}")
+            return
+
+        self._begin_acquire_if_ready()
+
+    def _begin_acquire_if_ready(self):
+        if self._acq_running:
+            return
+        if not self._is_hub_camera_connected():
+            dev_logger.debug("[DeepAlign] acquire deferred but hub camera disconnected")
+            return
 
         frame_count = max(1, int(self.spin_frame_to_save.value()))
 
@@ -197,7 +178,7 @@ class CameraControllerMixin(CameraHubMixin):
         self._acq_frame_started_at = self._acq_started_at
         self._acq_frame_idx = 1
 
-        self._update_dash_label(self.btn_acquire, "ACQUIRE", "RECORDING")
+        self._update_dash_label(self.btn_acquire, "ACQUIRE", "SAVING")
         self._set_master_progress(0)
         self.lbl_frame_info.setText(f"FRAME: <font color='#f8fafc'>0 / {frame_count}</font>")
         self._update_acquire_times()
@@ -209,19 +190,16 @@ class CameraControllerMixin(CameraHubMixin):
         self.btn_disconnect.setEnabled(False)
 
         self._acq_thread = QThread(self)
-        if use_hub:
-            self._acq_worker = _AcquireWorker(
-                None,
-                frame_count,
-                acquire_fn=lambda n, on_frame, should_stop: self._session_hub.acquire_with_progress(
-                    OWNER_DEEPALIGN,
-                    n,
-                    on_frame=on_frame,
-                    should_stop=should_stop,
-                ),
-            )
-        else:
-            self._acq_worker = _AcquireWorker(cam, frame_count)
+        self._acq_worker = _AcquireWorker(
+            None,
+            frame_count,
+            acquire_fn=lambda n, on_frame, should_stop: self._session_hub.acquire_with_progress(
+                OWNER_DEEPALIGN,
+                n,
+                on_frame=on_frame,
+                should_stop=should_stop,
+            ),
+        )
         self._acq_worker.moveToThread(self._acq_thread)
         self._acq_thread.started.connect(self._acq_worker.run)
         self._acq_worker.frame_started.connect(self._on_acquire_frame_started)
@@ -285,7 +263,14 @@ class CameraControllerMixin(CameraHubMixin):
             self._update_dash_label(self.btn_acquire, "ACQUIRE", "STOPPED")
         else:
             self._update_acquire_times(force_done=True)
-            self._update_dash_label(self.btn_acquire, "ACQUIRE", "DONE")
+            self._update_dash_label(self.btn_acquire, "ACQUIRE", "SAVED")
+            try:
+                path = self._save_acquire_spe(frames)
+                dev_logger.debug(f"[DeepAlign] acquire saved: {path}")
+                if hasattr(self, "spe_saved"):
+                    self.spe_saved.emit(str(path))
+            except Exception as exc:
+                dev_logger.exception(f"[DeepAlign] acquire save failed: {exc}")
         self._restore_after_acquire()
 
     def _on_acquire_error(self, msg: str):
@@ -309,15 +294,103 @@ class CameraControllerMixin(CameraHubMixin):
             self._acq_thread = None
 
     def _restore_after_acquire(self):
-        connected = (self._camera is not None) or self._is_hub_camera_connected()
+        connected = self._is_hub_camera_connected()
         self._set_camera_action_state(connected)
         self.btn_acquire.setEnabled(connected)
 
+    def _build_acquire_save_path(self) -> Path:
+        folder = Path(self.edit_folder.text().strip() or "Live_Captures")
+        folder.mkdir(parents=True, exist_ok=True)
+
+        base = self.edit_file_base.text().strip() or "Capture"
+        tokens: list[str] = []
+        now = datetime.now()
+
+        if self.check_add_date.isChecked():
+            if self.cb_date_fmt.currentText() == "YYYY-MM-DD":
+                tokens.append(now.strftime("%Y-%m-%d"))
+            else:
+                tokens.append(now.strftime("%Y-%B-%d"))
+
+        if self.check_add_time.isChecked():
+            if self.cb_time_fmt.currentText() == "hh:mm:ss (12h)":
+                tokens.append(now.strftime("%I_%M_%S%p"))
+            else:
+                tokens.append(now.strftime("%H_%M_%S"))
+
+        if self.check_inc_name.isChecked():
+            tokens.append("0001")
+
+        if tokens:
+            if self.cb_place.currentText() == "Prefix":
+                stem = f"{'_'.join(tokens)}_{base}"
+            else:
+                stem = f"{base}_{'_'.join(tokens)}"
+        else:
+            stem = base
+
+        path = folder / f"{stem}.spe"
+        if self.check_inc_name.isChecked():
+            counter = 2
+            while path.exists():
+                seq = f"{counter:04d}"
+                if tokens:
+                    token_list = list(tokens)
+                    token_list[-1] = seq
+                    if self.cb_place.currentText() == "Prefix":
+                        stem = f"{'_'.join(token_list)}_{base}"
+                    else:
+                        stem = f"{base}_{'_'.join(token_list)}"
+                else:
+                    stem = f"{base}_{seq}"
+                path = folder / f"{stem}.spe"
+                counter += 1
+        elif path.exists():
+            path = folder / f"{base}_{now.strftime('%Y%m%d_%H%M%S')}.spe"
+
+        return path
+
+    def _save_acquire_spe(self, frames: list) -> Path:
+        if not frames:
+            raise ValueError("No frames to save")
+
+        path = self._build_acquire_save_path()
+        vendor = self.cb_vendor.currentText().strip() or "DeepAlign"
+        camera_name = vendor
+        camera_model = vendor
+        camera_serial = ""
+
+        if self._session_hub is not None:
+            try:
+                state = self._session_hub.get_camera_state()
+                camera_name = getattr(state, "vendor", "") or camera_name
+                camera_model = getattr(state, "device_id", "") or camera_model
+            except Exception:
+                pass
+
+        return save_spe(
+            path,
+            frames,
+            exposure_ms=float(self.spin_exposure.value()),
+            camera_name=camera_name,
+            camera_model=camera_model,
+            camera_serial=camera_serial,
+            creator="DeepAlign",
+            software="SpeAnalyze-DeepAlign",
+            extra_metadata={
+                "DeepAlign": {
+                    "Owner": "DeepAlign",
+                    "Frames": len(frames),
+                    "Vendor": vendor,
+                }
+            },
+        )
+
     def _start_hub_live(self) -> None:
-        if self._live_worker_thread is not None:
-            if self._live_worker_thread.isRunning():
-                return
-            self._cleanup_live_worker()
+        if self._session_hub is None:
+            return
+        if getattr(self, "_hub_live_active", False):
+            return
 
         try:
             exp_ms = max(10.0, float(self.spin_exposure.value()))
@@ -325,32 +398,50 @@ class CameraControllerMixin(CameraHubMixin):
         except Exception:
             self._hub_live_progress_cycle_s = 0.05
 
-        snap_fn = lambda: self._session_hub.snap(OWNER_DEEPALIGN)
-        self._live_worker = _LiveWorker(snap_fn)
-        self._live_worker_thread = QThread(self)
-        self._live_worker.moveToThread(self._live_worker_thread)
+        try:
+            self._session_hub.frame_ready.connect(self._on_hub_live_frame_ready)
+        except Exception:
+            pass
 
-        self._live_worker_thread.started.connect(self._live_worker.run)
-        self._live_worker.frame_ready.connect(self._on_hub_live_frame)
-        self._live_worker.error.connect(self._on_hub_live_error)
-        self._live_worker_thread.finished.connect(self._cleanup_live_worker)
+        try:
+            self._session_hub.start_stream(OWNER_DEEPALIGN)
+            self._hub_live_active = True
+        except Exception as exc:
+            try:
+                self._session_hub.frame_ready.disconnect(self._on_hub_live_frame_ready)
+            except Exception:
+                pass
+            dev_logger.exception(f"[DeepAlign] hub live start failed: {exc}")
+            self._update_dash_label(self.btn_live_air, "LIVE", "")
+            return
 
         self._hub_live_progress_started_at = time.monotonic()
         self._set_master_progress(0)
         self._hub_live_progress_timer.start()
-        self._live_worker_thread.start()
-        dev_logger.debug("[DeepAlign] hub live worker started")
+        dev_logger.debug("[DeepAlign] hub live stream started")
 
-    def _stop_hub_live(self) -> None:
-        if self._live_worker is not None:
-            self._live_worker.stop()
-        if self._live_worker_thread is not None:
-            self._live_worker_thread.quit()
-            self._live_worker_thread.wait()
+    def _stop_hub_live(self, after_stop=None) -> None:
+        if not getattr(self, "_hub_live_active", False):
+            if callable(after_stop):
+                after_stop()
+            return
+        self._hub_live_active = False
+        try:
+            if self._session_hub is not None:
+                self._session_hub.stop_stream(OWNER_DEEPALIGN)
+        except Exception as exc:
+            dev_logger.exception(f"[DeepAlign] hub live stop failed: {exc}")
+        try:
+            if self._session_hub is not None:
+                self._session_hub.frame_ready.disconnect(self._on_hub_live_frame_ready)
+        except Exception:
+            pass
         if self._hub_live_progress_timer.isActive():
             self._hub_live_progress_timer.stop()
         self._set_master_progress(0)
-        dev_logger.debug("[DeepAlign] hub live worker stopped")
+        dev_logger.debug("[DeepAlign] hub live stream stopped")
+        if callable(after_stop):
+            after_stop()
 
     def _on_hub_live_frame(self, raw) -> None:
         if self._acq_running:
@@ -358,22 +449,13 @@ class CameraControllerMixin(CameraHubMixin):
         self._hub_live_progress_started_at = time.monotonic()
         self._push_frame(raw)
 
-    def _on_hub_live_error(self, msg: str) -> None:
-        dev_logger.exception(f"[DeepAlign] hub live worker error: {msg}")
-        self._stop_hub_live()
-
-    def _cleanup_live_worker(self) -> None:
-        if self._live_worker is not None:
-            self._live_worker.deleteLater()
-            self._live_worker = None
-        if self._live_worker_thread is not None:
-            self._live_worker_thread.deleteLater()
-            self._live_worker_thread = None
+    def _on_hub_live_frame_ready(self, rgb, raw) -> None:
+        self._on_hub_live_frame(raw)
 
     def _on_hub_live_progress_tick(self) -> None:
         if not self._hub_live_progress_timer.isActive() or self._acq_running:
             return
-        if self._live_worker_thread is None or not self._live_worker_thread.isRunning():
+        if not getattr(self, "_hub_live_active", False):
             return
         cycle = max(0.02, float(self._hub_live_progress_cycle_s))
         elapsed = max(0.0, time.monotonic() - self._hub_live_progress_started_at)
@@ -384,7 +466,6 @@ class CameraControllerMixin(CameraHubMixin):
         try:
             self._stop_hub_live()
             if self._snap_thread is not None and self._snap_thread.isRunning():
-                self._snap_worker.stop()
                 self._snap_thread.quit()
                 self._snap_thread.wait(1000)
         except Exception as exc:
@@ -447,10 +528,7 @@ class CameraControllerMixin(CameraHubMixin):
             except Exception:
                 dev_logger.exception("[DeepAlign] exposure apply via hub failed")
                 return
-        if self._live_tab is not None and hasattr(self._live_tab, "camera_panel"):
-            panel = self._live_tab.camera_panel
-            panel.spin_exposure.setValue(float(self.spin_exposure.value()))
-            panel._apply_exposure()
+        dev_logger.debug("[DeepAlign] exposure apply ignored (hub camera disconnected)")
 
     def _on_apply_fps_clicked(self):
         if self._session_hub is not None and self._is_hub_camera_connected():
@@ -466,13 +544,7 @@ class CameraControllerMixin(CameraHubMixin):
             except Exception:
                 dev_logger.exception("[DeepAlign] fps apply via hub failed")
                 return
-        if self._camera is None:
-            return
-        try:
-            if self.check_fps_lock.isChecked():
-                self._camera.set_fps(float(self.spin_fps.value()))
-        except Exception:
-            pass
+        dev_logger.debug("[DeepAlign] fps apply ignored (hub camera disconnected)")
 
     def _on_apply_temp_clicked(self):
         if self._session_hub is not None and self._is_hub_camera_connected():
@@ -486,17 +558,7 @@ class CameraControllerMixin(CameraHubMixin):
             except Exception:
                 dev_logger.exception("[DeepAlign] temperature apply via hub failed")
                 return
-        if self._camera is None:
-            return
-        try:
-            target = float(self.spin_temp.value())
-            self._camera.set_temperature(target)
-            reading, setpoint, status = self._camera.get_temperature()
-            self.lbl_temp_read.setText(f"Reading: {reading}")
-            self.lbl_temp_set.setText(f"Setpoint: {setpoint}")
-            self.lbl_temp_state.setText(f"Status: {status}")
-        except Exception:
-            pass
+        dev_logger.debug("[DeepAlign] temperature apply ignored (hub camera disconnected)")
 
     def _on_apply_adc_clicked(self):
         if self._session_hub is not None and self._is_hub_camera_connected():
@@ -515,18 +577,4 @@ class CameraControllerMixin(CameraHubMixin):
             except Exception:
                 dev_logger.exception("[DeepAlign] adc apply via hub failed")
                 return
-        if self._camera is None:
-            return
-        kwargs = {
-            "adc_quality": self.cb_adc_quality.currentText(),
-            "adc_speed": self.cb_adc_speed.currentText(),
-            "adc_analog_gain": self.cb_adc_gain.currentText(),
-            "bit_depth": self.cb_adc_bit.currentText(),
-        }
-        kwargs = {k: v for k, v in kwargs.items() if v}
-        if not kwargs:
-            return
-        try:
-            self._camera.set_adc_settings(**kwargs)
-        except Exception:
-            pass
+        dev_logger.debug("[DeepAlign] adc apply ignored (hub camera disconnected)")

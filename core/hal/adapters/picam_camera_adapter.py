@@ -106,22 +106,22 @@ class PicamCameraAdapter(CameraHal):
             cam_logger.exception("[PicamCameraAdapter] get_frame_total_s failed")
             raise HalCommandError(f"Picam get frame total time failed: {exc}", cause=exc) from exc
 
-    def start_stream(self) -> None:
-        cam_logger.debug("[PicamCameraAdapter] start_stream requested")
+    def start_stream(self, frame_cb=None) -> None:
+        cam_logger.info("[PicamCameraAdapter] grab/live start requested")
         cam = self._require_connected()
         try:
-            cam.start_live(lambda _frame: None)
-            cam_logger.debug("[PicamCameraAdapter] start_stream succeeded")
+            cam.start_live(frame_cb or (lambda _frame: None))
+            cam_logger.info("[PicamCameraAdapter] grab/live started")
         except Exception as exc:
             cam_logger.exception("[PicamCameraAdapter] start_stream failed")
             raise HalCommandError(f"Picam start stream failed: {exc}", cause=exc) from exc
 
     def stop_stream(self) -> None:
-        cam_logger.debug("[PicamCameraAdapter] stop_stream requested")
+        cam_logger.info("[PicamCameraAdapter] grab/live stop requested")
         cam = self._require_connected()
         try:
             cam.stop_live()
-            cam_logger.debug("[PicamCameraAdapter] stop_stream succeeded")
+            cam_logger.info("[PicamCameraAdapter] grab/live stopped")
         except Exception as exc:
             cam_logger.exception("[PicamCameraAdapter] stop_stream failed")
             raise HalCommandError(f"Picam stop stream failed: {exc}", cause=exc) from exc
@@ -138,12 +138,12 @@ class PicamCameraAdapter(CameraHal):
             raise HalCommandError(f"Picam snap failed: {exc}", cause=exc) from exc
 
     def acquire(self, frame_count: int) -> list[np.ndarray]:
-        cam_logger.debug(f"[PicamCameraAdapter] acquire requested frame_count={frame_count}")
+        cam_logger.info(f"[PicamCameraAdapter] acquire start frame_count={frame_count}")
         count = max(1, int(frame_count))
         frames: list[np.ndarray] = []
         for _ in range(count):
             frames.append(self.snap())
-        cam_logger.debug(f"[PicamCameraAdapter] acquire succeeded frames={len(frames)}")
+        cam_logger.info(f"[PicamCameraAdapter] acquire finished frames={len(frames)}")
         return frames
 
     def set_range(self, vmin: float | None, vmax: float | None) -> None:

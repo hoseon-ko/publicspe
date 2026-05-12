@@ -95,6 +95,13 @@ class HandleItem(QGraphicsEllipseItem):
         self.setBrush(QBrush(QColor(COLOR_SEL)))
         self._update_size()
 
+    def set_interaction_mode(self, mode: str | None):
+        """도구 모드일 때는 핸들도 그리기 커서로 바꿈"""
+        if mode is not None:
+            self.setCursor(Qt.CursorShape.CrossCursor)
+        else:
+            self.setCursor(Qt.CursorShape.SizeAllCursor)
+
     def _update_size(self):
         scale = self._scene_scale_fn()
         s = HANDLE_SIZE / max(scale, 0.1)
@@ -169,6 +176,29 @@ class BaseROI(QObject):
     @property
     def is_active(self) -> bool:
         return self._profile_active or self._hist_active
+
+    def set_interaction_mode(self, mode: str | None):
+        """도구 모드에 따라 이동 가능 여부와 커서 모양을 결정"""
+        is_draw_mode = mode is not None
+        # 도구가 켜져 있으면 이동 불가, 커서는 십자선
+        if hasattr(self, '_line_item'):
+            self._line_item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, not is_draw_mode)
+            self._line_item.setCursor(Qt.CursorShape.CrossCursor if is_draw_mode else Qt.CursorShape.SizeAllCursor)
+        if hasattr(self, '_rect_item'):
+            self._rect_item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, not is_draw_mode)
+            self._rect_item.setCursor(Qt.CursorShape.CrossCursor if is_draw_mode else Qt.CursorShape.SizeAllCursor)
+            
+        for h in self._handles:
+            h.set_interaction_mode(mode)
+
+    def setZValue(self, z: float):
+        """모든 내부 아이템의 ZValue 설정"""
+        for item in self._items:
+            item.setZValue(z)
+        for h in self._handles:
+            h.setZValue(z + 1)
+        if self._badge_item:
+            self._badge_item.setZValue(z + 2)
 
     # ── 선택 상태 ──────────────────────────────────────────────────────
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import Callable, Protocol, runtime_checkable
 
 import numpy as np
 
@@ -50,7 +50,7 @@ class CameraHal(Protocol):
         """프레임 한 장 취득에 필요한 총 시간(초): EXPOSURE + READOUT"""
         ...
 
-    def start_stream(self) -> None: ...
+    def start_stream(self, frame_cb: Callable[[np.ndarray], None] | None = None) -> None: ...
 
     def stop_stream(self) -> None: ...
 

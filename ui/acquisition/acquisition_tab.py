@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -696,13 +696,15 @@ class AcquisitionTab(QWidget):
         exp_s, readout_s, delta_s, frame_s = self._estimate_frame_timing(exposure_ms, timeout)
         total_s = n_frames * frame_s
         eta_str = self._format_duration(total_s)
+        eta_end = datetime.now() + timedelta(seconds=total_s)
+        eta_end_str = eta_end.strftime("%H:%M:%S")
 
         self.btn_acquire.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 1000)
         self.progress_bar.setValue(0)
         self.lbl_eta.setText(
-            f"⏱ 예상: {eta_str}  |  0/{n_frames} 완료"
+            f"⏱ 예상: {eta_str}  |  예상 종료: {eta_end_str}  |  0/{n_frames} 완료"
             f"  |  Exp {exp_s*1000:.1f}ms + Read {readout_s*1000:.1f}ms + Δ {delta_s*1000:.1f}ms"
         )
         self.lbl_eta.setVisible(True)
@@ -715,16 +717,15 @@ class AcquisitionTab(QWidget):
         self._frame_model_s = frame_s
         self._acq_expected_total_s = total_s
         self._progress_timer.start()
-        self._log(
-            f"▶ 획득 시작: {n_frames} 프레임, "
-            f"노출 {exposure_ms:.3f} ms"
-        )
+        self._log("🟢 [ACQUIRE START] 배치 획득 시작")
+        self._log(f"   ├ 프레임: {n_frames}장")
+        self._log(f"   ├ 노출: {exposure_ms:.3f} ms")
+        self._log(f"   └ 예상 종료: {eta_end_str} (예상 {eta_str})")
         self._log(
             "⏱ 프레임 시간 모델: "
             f"Exp {exp_s*1000:.1f}ms + Readout {readout_s*1000:.1f}ms + Delta {delta_s*1000:.1f}ms "
             f"= {frame_s*1000:.1f}ms/frame"
         )
-        self._log(f"⏱ 예상 소요 시간: {eta_str}")
 
         self._thread = QThread()
         self._worker = _AcqWorker(
@@ -747,7 +748,10 @@ class AcquisitionTab(QWidget):
         self._acq_cur_frame = cur
         self._acq_total_frames = total
         self._update_progress_ui(cur, total)
-        self._log(f"  Frame {cur}/{total}")
+        step = max(1, total // 20)  # 5% 단위 로그
+        if cur == 1 or cur == total or (cur % step == 0):
+            pct = int((cur / max(total, 1)) * 100)
+            self._log(f"   · 진행: {cur}/{total} ({pct}%)")
 
     def _on_acquired(self, frames: list):
         self._progress_timer.stop()
@@ -766,11 +770,16 @@ class AcquisitionTab(QWidget):
             self._log("❌ 프레임 획득 실패 (빈 결과)")
             return
 
-        self._log(f"✅ {len(frames)} 프레임 획득 완료 (총 {elapsed:.1f}초) → 저장 중...")
+        avg_fps = len(frames) / max(elapsed, 1e-6)
+        self._log("✅ [ACQUIRE END] 배치 획득 완료")
+        self._log(f"   ├ 획득: {len(frames)}장")
+        self._log(f"   ├ 소요: {elapsed:.1f}초")
+        self._log(f"   └ 평균: {avg_fps:.2f} fps")
+        self._log("💾 저장 중...")
         try:
             save_frames = self._subtract_bg_from_list(frames)
             path = self._save_spe(save_frames)
-            self._log(f"💾 저장: {path}")
+            self._log(f"💾 저장 완료: {path}")
             if self.check_auto_open.isChecked():
                 self.spe_saved.emit(str(path))
         except Exception as e:
@@ -785,7 +794,9 @@ class AcquisitionTab(QWidget):
         elapsed = time.monotonic() - self._acq_start_time
         self.lbl_eta.setText(f"❌ 오류  |  {elapsed:.1f}초 후 중단")
         self.btn_acquire.setEnabled(self._camera is not None and isinstance(self._camera, PicamCamera))
-        self._log(f"❌ 획득 오류: {msg}")
+        self._log("❌ [ACQUIRE END] 오류로 중단")
+        self._log(f"   ├ 경과: {elapsed:.1f}초")
+        self._log(f"   └ 사유: {msg}")
 
     # ── #15 프리뷰 ────────────────────────────────────────────────────
 

@@ -34,7 +34,7 @@ from core.motor.acs_stage import AcsStageController
 from core.session.device_session_hub import DeviceSessionHub
 from theme.styles import Fonts, Sizes, C_ACCENT, C_TEXT_DIM, C_BG_MED, C_BORDER
 from core.logger import app_logger, register_ui_callback
-from ui.bridge.hub_bindings import bind_live_signals_to_hub, bind_status_to_main_window
+from ui.bridge.hub_bindings import bind_status_to_main_window
 
 
 # ── 헤더 바 색상 (LightField 다크 헤더) ──────────────────────────
@@ -150,8 +150,6 @@ class MainWindow(QMainWindow):
         self.live_tab.camera_panel.exposure_applied.connect(self._on_exposure_changed)
         self.live_tab.frame_stats_updated.connect(self._on_frame_stats)
         bind_status_to_main_window(self.session_hub, self)
-        bind_live_signals_to_hub(self.session_hub, self.live_tab)
-
         self.acq_tab = AcquisitionTab()
         self.acq_tab.spe_saved.connect(self._on_spe_saved)
         self.acq_tab.log_message.connect(self._on_status)
@@ -174,8 +172,6 @@ class MainWindow(QMainWindow):
 
         self.deep_align_tab = DeepAlignMainTab()
         self.deep_align_tab.bind_session_hub(self.session_hub)
-        self.deep_align_tab.bind_live_tab(self.live_tab)
-
         # 탭 버튼 + 스택 등록
         _modes = [
             ("🌌 DeepAlign", self.deep_align_tab),
@@ -262,8 +258,6 @@ class MainWindow(QMainWindow):
         self.kin_tab.acs_panel.acs_disconnected.connect(lambda: self.live_tab.acs_stage_panel.set_controller(None))
 
         # 하드웨어 공유: Live ↔ DeepAlign
-        self.live_tab.camera_connected.connect(self.deep_align_tab.set_shared_cameraera)
-        self.live_tab.camera_disconnected.connect(self.deep_align_tab.clear_shared_cameraera)
         self.live_tab.kimm_z_panel.kimm_connected.connect(self.deep_align_tab.set_kimm_ctrl)
         self.live_tab.kimm_z_panel.kimm_disconnected.connect(self.deep_align_tab.clear_kimm_ctrl)
         self.live_tab.acs_stage_panel.acs_connected.connect(self.deep_align_tab.set_acs_ctrl)
@@ -437,7 +431,9 @@ class MainWindow(QMainWindow):
 
     def _on_spe_saved(self, path: str):
         self.analysis_tab.open_spe(path)
-        self._switch_mode(5)   # Analysis = index 5 (Kinematic inserted at 4)
+        analysis_idx = self.stack.indexOf(self.analysis_tab)
+        if analysis_idx >= 0:
+            self._switch_mode(analysis_idx)
         self._on_status(f"SPE 열림: {path}")
 
     def _on_status(self, msg: str):

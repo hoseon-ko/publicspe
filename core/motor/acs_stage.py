@@ -9,14 +9,13 @@ ACS SPiiPlus 6축 키네마틱 스테이지 컨트롤러.
 from __future__ import annotations
 
 
-import System  # 상단에 추가 필요
-from System import Enum
 import sys
 import os
 import builtins
 import logging
 import threading
 import time
+import socket
 from pathlib import Path
 from typing import Optional
 
@@ -31,12 +30,16 @@ DLL_PATH = str(Path(__file__).resolve().parent.parent.parent)
 
 _ACS_OK = False
 _ACS_IMPORT_ERROR: Optional[str] = None
+System = None
+Enum = None
 _Api = None
 _AxisEnum = None
 _MotionFlags = None
 
 try:
     import clr
+    import System as _System
+    from System import Enum as _Enum
     if DLL_PATH not in sys.path:
         sys.path.append(DLL_PATH)
     os.add_dll_directory(DLL_PATH)
@@ -46,6 +49,8 @@ try:
         from ACS.SPiiPlusNET import MotionFlags as _MotionFlags
     except:
         pass
+    System = _System
+    Enum = _Enum
     _ACS_OK = True
 except Exception as e:
     _ACS_IMPORT_ERROR = str(e)
@@ -93,13 +98,20 @@ class AcsWorker(QObject):
 
     @pyqtSlot()
     def setup(self):
-        import traceback
         # 1. API 객체 생성 및 연결은 반드시 워커 스레드 내에서 실행!
         try:
             log.info(f"[ACS Worker] setup() start @ thread={int(self.thread().currentThreadId())}")
             self._api = _Api()
             conn_type, ip, port = self._conn_params
             log.info(f"[ACS Worker] Connecting: {conn_type} {ip}:{port}")
+            if conn_type != "simulator" and ip:
+                try:
+                    with socket.create_connection((ip, int(port)), timeout=1.5):
+                        pass
+                except Exception as sock_err:
+                    log.warning(f"[ACS Worker] TCP preflight failed for {ip}:{port}: {sock_err}")
+                    self.connection_lost.emit()
+                    return
             self._api.OpenCommSimulator() if conn_type == "simulator" else self._api.OpenCommEthernetTCP(ip, port)
             log.info(f"[ACS Worker] Connected via {conn_type}")
             
@@ -113,7 +125,7 @@ class AcsWorker(QObject):
             log.info("[ACS Worker] Initial FaultClear all axes done")
 
         except Exception as e:
-            log.error(f"[ACS Worker] Connection failed: {e}\n{traceback.format_exc()}")
+            log.error(f"[ACS Worker] Connection failed: {e}")
             self.connection_lost.emit()
             return
 

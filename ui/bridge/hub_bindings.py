@@ -15,6 +15,8 @@ from core.session.device_session_hub import DeviceSessionHub
 def bind_status_to_main_window(hub: DeviceSessionHub, main_window: Any) -> None:
     if hasattr(main_window, "_on_status"):
         hub.status_message.connect(main_window._on_status)
+    if hasattr(main_window, "_log"):
+        hub.status_message.connect(lambda text: main_window._log(f"[HUB] {text}", "camera"))
 
 
 def bind_live_signals_to_hub(hub: DeviceSessionHub, live_tab: Any) -> None:

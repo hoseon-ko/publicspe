@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Callable, List, Optional
 
 # UI와 연결하기 위한 콜백 리스트
-_ui_callbacks: List[Callable[[str, str], None]] = []
+_ui_callbacks: List[Callable[..., None]] = []
 _logging_lock = False # 재진입 방지용 플래그
 
 class UIBridgeHandler(logging.Handler):
@@ -29,14 +29,34 @@ class UIBridgeHandler(logging.Handler):
             category = parts[-1] if len(parts) > 1 else "sys"
             if category not in ["sys", "dev", "cam", "calc"]:
                 category = "sys"
-            
-            for cb in _ui_callbacks:
-                cb(msg, category)
+
+            dead_callbacks = []
+            for cb in list(_ui_callbacks):
+                try:
+                    try:
+                        cb(msg, category, int(record.levelno))
+                    except TypeError:
+                        # 기존 2-인자 콜백과 하위 호환
+                        cb(msg, category)
+                except Exception:
+                    # Qt 위젯 소멸 후 남은 콜백은 자동 정리
+                    dead_callbacks.append(cb)
+
+            for cb in dead_callbacks:
+                try:
+                    _ui_callbacks.remove(cb)
+                except ValueError:
+                    pass
         finally:
             _logging_lock = False
 
-def register_ui_callback(callback: Callable[[str, str], None]):
-    """UI에서 로그 메시지를 수신할 콜백 등록 (msg, category)."""
+def register_ui_callback(callback: Callable[..., None]):
+    """UI에서 로그 메시지를 수신할 콜백 등록.
+
+    콜백 시그니처:
+    - 신규: (msg, category, levelno)
+    - 하위호환: (msg, category)
+    """
     if callback not in _ui_callbacks:
         _ui_callbacks.append(callback)
 
@@ -88,7 +108,7 @@ def setup_logger() -> logging.Logger:
     
     # 4. UI 브릿지 핸들러
     ui_handler = UIBridgeHandler()
-    ui_handler.setLevel(logging.INFO)
+    ui_handler.setLevel(logging.DEBUG)
     ui_handler.setFormatter(logging.Formatter('%(message)s'))  # UI 포맷은 자체 시간 표시 사용
     root_logger.addHandler(ui_handler)
     
