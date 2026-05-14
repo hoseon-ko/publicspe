@@ -464,10 +464,28 @@ class CameraControllerMixin(CameraHubMixin):
 
     def closeEvent(self, event):
         try:
+            # 1) Live 스트림 먼저 중단
             self._stop_hub_live()
-            if self._snap_thread is not None and self._snap_thread.isRunning():
-                self._snap_thread.quit()
-                self._snap_thread.wait(1000)
+
+            # 2) Acquire 진행 중이면 stop 플래그 세팅
+            if getattr(self, "_acq_running", False):
+                self._acq_stop_requested = True
+                if self._acq_worker is not None:
+                    self._acq_worker.stop()
+
+            # 3) 모든 워커 스레드 순서대로 종료
+            _threads = [
+                (getattr(self, "_snap_thread",        None), "snap"),
+                (getattr(self, "_acq_thread",         None), "acquire"),
+                (getattr(self, "_live_worker_thread", None), "live"),
+            ]
+            for thread, name in _threads:
+                if thread is not None and thread.isRunning():
+                    thread.quit()
+                    if not thread.wait(1500):
+                        dev_logger.warning(
+                            f"[DeepAlign] closeEvent: '{name}' thread did not stop within 1.5s"
+                        )
         except Exception as exc:
             dev_logger.exception(f"[DeepAlign] closeEvent error: {exc}")
         super().closeEvent(event)

@@ -186,39 +186,20 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self.cb_place.currentTextChanged.connect(self._save_settings)
 
     def bind_live_tab(self, live_tab):
-        """Bind shared Live hardware panels for embedded Motion page."""
+        """Live 탭의 공유 하드웨어 패널을 DeepAlign에 연결한다.
+
+        현재 DeepAlign은 카메라를 SessionHub를 통해 독립적으로 소유하므로
+        LiveTab과의 카메라/프레임 직접 동기화는 수행하지 않는다.
+        Motion 패널만 Live 탭 바인딩이 필요하므로 해당 경로만 유지한다.
+
+        NOTE: colormap/range 동기화가 필요해지면 아래 패턴으로 복구한다:
+            self._live_tab = live_tab
+            self.cam_viewer.colormap_changed.connect(self._on_cmap_changed_sync)
+            self.cam_viewer.range_changed.connect(live_tab.on_range_changed)
+        """
         self.motion_panel.bind_live_tab(live_tab)
+        # DeepAlign은 Hub 소유 카메라를 사용하므로 _live_tab 바인딩 불필요
         self._live_tab = None
-        return
-        self._live_tab = live_tab
-        if self._live_tab is None:
-            return
-        if hasattr(self._live_tab, "exposure_applied"):
-            self._live_tab.exposure_applied.connect(self._on_live_exposure_applied)
-        if hasattr(self._live_tab, "live_progress_changed"):
-            self._live_tab.live_progress_changed.connect(self._on_live_progress_changed)
-        if hasattr(self._live_tab, "frame_ready"):
-            self._live_tab.frame_ready.connect(self._on_live_frame_ready)
-            
-        # [Sync] Colormap sync: DeepAlign에서 cmap 바꾸면 LiveTab(Worker)도 바뀜
-        self.cam_viewer.colormap_changed.connect(self._on_cmap_changed_sync)
-        # [Sync] Range sync: DeepAlign에서 밝기 범위 바꾸면 LiveTab(Worker)도 바뀜
-        self.cam_viewer.range_changed.connect(self._live_tab.on_range_changed)
-        # [Sync] ROI List sync: Viewer의 ROI가 변하면 독(dock) 목록 갱신
-        self.cam_viewer.roi_list_changed.connect(self._update_roi_list_from_viewer)
-        
-        self._sync_vendor_to_live()
-        self._copy_camera_list_from_live()
-
-        if hasattr(self._live_tab, "camera_panel"):
-            try:
-                self._set_master_progress(int(self._live_tab.camera_panel.bar_snap_progress.value()))
-            except Exception:
-                pass
-
-        live_camera = getattr(self._live_tab, "_camera", None)
-        if live_camera is not None:
-            self.set_shared_cameraera(live_camera)
 
     def bind_session_hub(self, session_hub):
         self._session_hub = session_hub
