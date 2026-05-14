@@ -56,6 +56,7 @@ class LayoutBuilderMixin:
             ("🪞", "#38bdf8"),
             ("🔍", "#fbbf24"),
             ("🎯", "#ef4444"),
+            ("⚙", "#4ecdc4"),
             ("📊", "#10b981"),
         ]
         self.sidebar_btns = []
@@ -651,6 +652,11 @@ class LayoutBuilderMixin:
         for title, sub, color in [("ENABLE", "ALL", "#4ecdc4"), ("CALC", "KINEM.", "#aa7acc"), ("MOVE", "EXECUTE", "#ef4444"), ("STOP", "ALL", "#64748b")]:
             albl.addWidget(self._dash_btn(title, sub, color))
         self.master_btn_stack.addWidget(al_w)
+
+        mo_w = QWidget(); mol = QHBoxLayout(mo_w); mol.setContentsMargins(0, 0, 0, 0); mol.setSpacing(8)
+        for title, sub, color in [("REFRESH", "", "#4ecdc4"), ("RECONNECT", "ALL", "#fbbf24"), ("STOP", "ALL", "#ef4444")]:
+            mol.addWidget(self._dash_btn(title, sub, color))
+        self.master_btn_stack.addWidget(mo_w)
 
         an_w = QWidget()
         lbl_an = QLabel("ANALYSIS COMMANDS")

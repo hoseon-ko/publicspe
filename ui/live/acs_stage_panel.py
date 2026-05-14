@@ -626,6 +626,15 @@ class AcsStagePanel(QWidget):
 
     # ── 연결 / 해제 ────────────────────────────────────────────────────
 
+    @property
+    def controller(self) -> AcsStageController | None:
+        return self._ctrl_ref[0] if self._ctrl_ref else None
+
+    @property
+    def is_connected(self) -> bool:
+        ctrl = self.controller
+        return bool(ctrl and ctrl.is_connected)
+
     def _on_connect(self):
         ip       = self.edit_ip.text().strip()
         port_str = self.edit_port.text().strip()

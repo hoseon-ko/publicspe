@@ -138,7 +138,7 @@ class AcsWorker(QObject):
             self._is_polling = True
             log.info("[ACS Worker] Polling timer started")
         except Exception as e:
-            log.error(f"[ACS Worker] Timer start failed: {e}\n{traceback.format_exc()}")
+            log.error(f"[ACS Worker] Timer start failed: {e}")
 
     def _poll(self):
         if not self._is_polling: return
@@ -247,20 +247,6 @@ class AcsWorker(QObject):
         log.info(f"[ACS Worker] Attempting EnableM with type-safe array")
         time.sleep(0.1)  # EnableM 직전 잠시 대기
         self._api.EnableM(axis_array)
-
-        # _poll()이 꺼진 동안 상태를 직접 emit
-        # try:
-        #     states = []
-        #     for i in range(6):
-        #         mst = int(self._api.GetMotorState(_axis_enum(i)))
-        #         states.append({
-        #             "enabled": bool(mst & _MST_ENABLE),
-        #             "moving":  bool(mst & _MST_ANY_MOTION),
-        #             "in_pos":  bool(mst & _MST_INPOS)
-        #         })
-        #     self.states_updated.emit(states)
-        # except Exception as e:
-        #     log.debug(f"[ACS Worker] Post-enable state emit error: {e}")
 
     @pyqtSlot()
     def set_disable_all(self):

@@ -654,6 +654,10 @@ class MotorPanel(QWidget):
     def is_connected(self) -> bool:
         return self._ctrl is not None and self._ctrl.is_connected
 
+    @property
+    def controller(self) -> Optional[PicomotorController]:
+        return self._ctrl
+
     def set_controller(self, ctrl: PicomotorController):
         """외부에서 생성된 컨트롤러 주입 (DeepAlign 탭 등에서 공유 용도)."""
         if ctrl is None:

@@ -48,6 +48,7 @@ class KIMMZController:
         # 마지막으로 수신된 각 축 위치
         self._positions: list[float] = [0.0] * 6
         self._servo_on: bool = False
+        self._is_moving: bool = False # V2 비차단용 플래그
 
         self._recv_buf = ""
         self._recv_thread: Optional[threading.Thread] = None
@@ -72,6 +73,10 @@ class KIMMZController:
     def current_z(self) -> float:
         """마지막으로 수신된 Z 위치 (um)."""
         return self._positions[AXIS_Z]
+
+    @property
+    def is_moving(self) -> bool:
+        return self._is_moving
 
     @property
     def servo_on(self) -> bool:
@@ -156,6 +161,19 @@ class KIMMZController:
             log.info(f"[KIMM] Move_to {target_um:.2f} 완료")
         finally:
             self._cmd_lock.release()
+
+    def move_to_z_async(self, target_um: float, velocity: Optional[float] = None) -> None:
+        """Z축 절대 이동 (비차단)."""
+        if not self._connected and not self.dry_run:
+            raise ConnectionError("KIMM Not connected")
+        vel = velocity if velocity is not None else self.default_velocity
+        if target_um > self.z_safety_limit or target_um < self.z_lower_limit:
+            raise ValueError(f"Limit Violation")
+
+        self._is_moving = True
+        self._ack_received.clear()
+        self._done_received.clear()
+        self._send(f"Move({AXIS_Z},Abs,{target_um:.3f},{vel:.0f})\r\n")
 
     def move_by_z(self, delta_um: float, velocity: Optional[float] = None) -> None:
         """Z축 상대 이동."""
@@ -246,6 +264,7 @@ class KIMMZController:
         elif msg == "Move(ack)":
             self._ack_received.set()
         elif msg == "Move(Done)":
+            self._is_moving = False
             self._done_received.set()
         elif msg.startswith("Error"):
             log.error(f"[KIMM] {msg}")

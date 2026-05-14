@@ -109,6 +109,7 @@ class CollapsibleSection(QWidget):
 
         # ── 콘텐츠 래퍼 ──────────────────────────────────────────────
         self._content_wrap = QWidget()
+        self._content_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         self._content_wrap.setStyleSheet(
             f"QWidget {{"
             f"  background: {C_BG_DARK};"
@@ -156,6 +157,7 @@ class CollapsibleSection(QWidget):
         else:
             self._content_wrap.setVisible(not collapsed)
             self._content_wrap.setMaximumHeight(0 if collapsed else 16_777_215)
+            self._refresh_parent_geometry()
 
     def is_collapsed(self) -> bool:
         return self._collapsed
@@ -180,7 +182,19 @@ class CollapsibleSection(QWidget):
         anim.setEndValue(target_h)
 
         if target_h == 0:
-            anim.finished.connect(lambda: self._content_wrap.setVisible(False))
+            def _on_finished():
+                self._content_wrap.setVisible(False)
+                self._refresh_parent_geometry()
+            anim.finished.connect(_on_finished)
+        else:
+            anim.finished.connect(self._refresh_parent_geometry)
 
         anim.start()
         self._anim = anim   # GC 방지
+
+    def _refresh_parent_geometry(self):
+        self.updateGeometry()
+        p = self.parentWidget()
+        while p is not None:
+            p.updateGeometry()
+            p = p.parentWidget()

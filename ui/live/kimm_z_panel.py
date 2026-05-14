@@ -394,5 +394,13 @@ class KIMMZPanel(QWidget):
 
     # ── 로그 헬퍼 ─────────────────────────────────────────────────────
 
+    @property
+    def controller(self) -> KIMMZController | None:
+        return self._ctrl
+
+    @property
+    def is_connected(self) -> bool:
+        return self._ctrl is not None and self._ctrl.is_connected
+
     def _log(self, msg: str):
         self.log_message.emit(msg)

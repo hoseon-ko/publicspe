@@ -93,6 +93,16 @@ class AcsMotionAdapter(AcsHal):
             dev_logger.exception(f"[AcsMotionAdapter] move_to failed axis={axis}, pos_mm={pos_mm}")
             raise HalCommandError(f"ACS move_to failed: {exc}", cause=exc) from exc
 
+    def move_atomic(self, targets: list[float]) -> None:
+        dev_logger.debug(f"[AcsMotionAdapter] move_atomic requested targets={targets}")
+        ctrl = self._require_connected()
+        try:
+            ctrl.move_atomic(targets)
+            dev_logger.debug("[AcsMotionAdapter] move_atomic signal emitted")
+        except Exception as exc:
+            dev_logger.exception("[AcsMotionAdapter] move_atomic failed")
+            raise HalCommandError(f"ACS move_atomic failed: {exc}", cause=exc) from exc
+
     def get_positions(self) -> list[float]:
         dev_logger.debug("[AcsMotionAdapter] get_positions requested")
         ctrl = self._require_connected()
@@ -103,6 +113,34 @@ class AcsMotionAdapter(AcsHal):
         except Exception as exc:
             dev_logger.exception("[AcsMotionAdapter] get_positions failed")
             raise HalCommandError(f"ACS get_positions failed: {exc}", cause=exc) from exc
+
+    def is_moving(self) -> bool:
+        dev_logger.debug("[AcsMotionAdapter] is_moving requested")
+        ctrl = self._require_connected()
+        try:
+            return any(ctrl.is_moving(i) for i in range(6))
+        except Exception as exc:
+            dev_logger.exception("[AcsMotionAdapter] is_moving failed")
+            raise HalCommandError(f"ACS is_moving check failed: {exc}", cause=exc) from exc
+
+    def wait_in_position_all(self, timeout_ms: int = 30000) -> None:
+        dev_logger.debug(f"[AcsMotionAdapter] wait_in_position_all requested timeout_ms={timeout_ms}")
+        ctrl = self._require_connected()
+        try:
+            ctrl.wait_in_position_all(timeout_ms)
+            dev_logger.debug("[AcsMotionAdapter] wait_in_position_all finished")
+        except Exception as exc:
+            dev_logger.exception("[AcsMotionAdapter] wait_in_position_all failed")
+            raise HalCommandError(f"ACS wait_in_position_all failed: {exc}", cause=exc) from exc
+
+    def is_enabled_all(self) -> bool:
+        dev_logger.debug("[AcsMotionAdapter] is_enabled_all requested")
+        ctrl = self._require_connected()
+        try:
+            return all(ctrl.is_enabled(i) for i in range(6))
+        except Exception as exc:
+            dev_logger.exception("[AcsMotionAdapter] is_enabled_all failed")
+            raise HalCommandError(f"ACS is_enabled_all failed: {exc}", cause=exc) from exc
 
     def _require_connected(self) -> AcsStageController:
         if self._controller is None or not self._controller.is_connected:

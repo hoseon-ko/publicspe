@@ -1,4 +1,4 @@
-"""
+﻿"""
 ui/main_window.py
 통합 메인 윈도우 — LightField 스타일.
 
@@ -172,6 +172,7 @@ class MainWindow(QMainWindow):
 
         self.deep_align_tab = DeepAlignMainTab()
         self.deep_align_tab.bind_session_hub(self.session_hub)
+        self.deep_align_tab.bind_live_tab(self.live_tab)
         # 탭 버튼 + 스택 등록
         _modes = [
             ("🌌 DeepAlign", self.deep_align_tab),
@@ -585,3 +586,4 @@ class MainWindow(QMainWindow):
             
         self.save_all_settings()
         super().closeEvent(event)
+

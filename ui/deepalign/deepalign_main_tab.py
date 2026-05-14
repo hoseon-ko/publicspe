@@ -21,6 +21,7 @@ from typing import Optional
 from ui.live.motor_panel import MotorPanel
 from ui.live.autofocus_panel import AutoFocusPanel
 from ui.live.acs_stage_panel import AcsStagePanel
+from ui.motion.motion_tab import MotionTab
 from ui.deepalign.deepalign_camera_controller import CameraControllerMixin
 from ui.deepalign.deepalign_frame_pipeline import FramePipelineMixin
 from ui.deepalign.deepalign_layout import LayoutBuilderMixin
@@ -83,6 +84,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self.mirror_panel = MotorPanel()
         self.af_panel     = AutoFocusPanel()
         self.align_panel  = AcsStagePanel()
+        self.motion_panel = MotionTab()
         self._settings = QSettings("SpeAnalyze", "DeepAlignTab")
 
         self._init_ui()
@@ -118,12 +120,14 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self.central_stack.addWidget(self._wrap_panel(self.mirror_panel))  # 1
         self.central_stack.addWidget(self._wrap_panel(self.af_panel))      # 2
         self.central_stack.addWidget(self._wrap_panel(self.align_panel))   # 3
-        self.central_stack.addWidget(self._create_analysis_page())  # 4
+        self.central_stack.addWidget(self._wrap_panel(self.motion_panel))  # 4
+        self.central_stack.addWidget(self._create_analysis_page())  # 5
 
         # 3. 우측 작업영역: 도킹(QDockWidget) + 마스터바
         dock_workspace = self._create_docking_workspace()
 
         right_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.right_splitter = right_splitter
         right_splitter.setChildrenCollapsible(False)
         right_splitter.addWidget(dock_workspace)
         self.master_bar = self._create_master_bar()
@@ -134,6 +138,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
 
         # 4. 메인 그리드: 스플리터 필수 적용
         main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.main_splitter = main_splitter
         main_splitter.setObjectName("deepAlignMainSplitter")
         main_splitter.setChildrenCollapsible(False)
         main_splitter.setHandleWidth(6)
@@ -148,6 +153,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         # 시그널 연결
         self.mirror_panel.log_message.connect(self._on_sub_panel_log)
         self.align_panel.log_message.connect(self._on_sub_panel_log)
+        self.motion_panel.log_message.connect(self._on_sub_panel_log)
 
     def _wire_camera_actions(self):
         # Camera page controls
@@ -180,7 +186,8 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self.cb_place.currentTextChanged.connect(self._save_settings)
 
     def bind_live_tab(self, live_tab):
-        """Deprecated compatibility hook; DeepAlign camera I/O is hub-only."""
+        """Bind shared Live hardware panels for embedded Motion page."""
+        self.motion_panel.bind_live_tab(live_tab)
         self._live_tab = None
         return
         self._live_tab = live_tab
@@ -336,3 +343,20 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
 
     def _on_sub_panel_log(self, msg: str):
         print(f"[DeepAlign] {msg}")
+
+    def cleanup(self):
+        if hasattr(self, "motion_panel"):
+            self.motion_panel.cleanup()
+
+    def _on_tab_changed(self, idx: int):
+        super()._on_tab_changed(idx)
+        if not hasattr(self, "main_splitter"):
+            return
+        if idx == 4:
+            self.central_stack.setMaximumWidth(16_777_215)
+            self.right_splitter.setVisible(False)
+            self.main_splitter.setSizes([1600, 0])
+        else:
+            self.right_splitter.setVisible(True)
+            self.central_stack.setMaximumWidth(440)
+            self.main_splitter.setSizes([340, 1240])

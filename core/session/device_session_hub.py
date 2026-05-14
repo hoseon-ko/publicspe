@@ -17,6 +17,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 from core.hal.camera_hal import CameraDeviceInfo, CameraHal
 from core.hal.errors import HalCommandError, HalNotConnectedError
 from core.hal.motion_hal import AcsHal, KimmHal, PicoHal
+from core.hal.motion_hub import MotionHub
 from core.logger import dev_logger
 from core.session.ownership import OWNER_NONE, validate_owner
 from core.session.session_events import SessionEvent, SessionEventType, make_event
@@ -42,6 +43,7 @@ class DeviceSessionHub(QObject):
         self._acs_hal: AcsHal | None = None
         self._kimm_hal: KimmHal | None = None
         self._pico_hal: PicoHal | None = None
+        self._motion_hub: MotionHub = MotionHub()
         self._last_frame = None
         self._camera_lock = RLock()
 
@@ -470,6 +472,10 @@ class DeviceSessionHub(QObject):
 
     def attach_acs(self, acs_hal: AcsHal) -> None:
         self._acs_hal = acs_hal
+        self._motion_hub.attach_acs(acs_hal)
+
+    def motion(self) -> MotionHub:
+        return self._motion_hub
 
     def attach_kimm(self, kimm_hal: KimmHal) -> None:
         self._kimm_hal = kimm_hal
