@@ -227,7 +227,7 @@ class LayoutBuilderMixin:
         cl.addWidget(vg_frame)
 
         self.cam_list = QListWidget()
-        self.cam_list.setFixedHeight(36)
+        self.cam_list.setFixedHeight(85)
         self.cam_list.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         self.cam_list.setStyleSheet(
             "background: #020617; border: 1px solid #1e293b; color: #94a3b8; font-size: 11px;"
@@ -350,7 +350,7 @@ class LayoutBuilderMixin:
         lbl_count = QLabel("Frame To Save:")
         lbl_count.setStyleSheet("color: #94a3b8; font-size: 12px; font-weight: bold;")
         self.spin_frame_to_save = QSpinBox()
-        self.spin_frame_to_save.setRange(1, 100000)
+        self.spin_frame_to_save.setRange(1, 100)
         self.spin_frame_to_save.setValue(10)
         self.spin_frame_to_save.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.PlusMinus)
         self.spin_frame_to_save.setStyleSheet(editor_spin_style)

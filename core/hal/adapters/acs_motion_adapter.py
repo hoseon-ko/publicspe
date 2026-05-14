@@ -1,15 +1,18 @@
-"""ACS motion adapter implementing AcsHal."""
-
-from __future__ import annotations
-
+from PyQt6.QtCore import QObject, pyqtSignal
 from core.hal.errors import HalCommandError, HalConnectionError, HalNotConnectedError
 from core.hal.motion_hal import AcsHal
 from core.logger import dev_logger
 from core.motor.acs_stage import AcsStageController
 
 
-class AcsMotionAdapter(AcsHal):
-    def __init__(self):
+class AcsMotionAdapter(QObject):
+    # Test comment
+    positions_updated = pyqtSignal(list)
+    state_updated = pyqtSignal(list)
+
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
         self._controller: AcsStageController | None = None
 
     def connect(self, ip: str, port: int) -> None:
@@ -17,10 +20,16 @@ class AcsMotionAdapter(AcsHal):
         try:
             ctrl = AcsStageController()
             ctrl.connect(ip, int(port))
+            
+            # Connect legacy signals to adapter signals
+            ctrl.positions_updated.connect(self.positions_updated)
+            ctrl.states_updated.connect(self.state_updated)
+            
             ctrl.start_polling()
             self._controller = ctrl
             dev_logger.debug("[AcsMotionAdapter] connect succeeded")
         except Exception as exc:
+
             dev_logger.exception(f"[AcsMotionAdapter] connect failed ip={ip}, port={port}")
             self._controller = None
             raise HalConnectionError(f"ACS connect failed: {exc}", cause=exc) from exc

@@ -8,6 +8,13 @@ from enum import Enum
 from core.session.ownership import OWNER_NONE
 
 
+class DeviceConnectionState(str, Enum):
+    DISCONNECTED = "disconnected"
+    CONNECTING = "connecting"
+    CONNECTED = "connected"
+    ERROR = "error"
+
+
 class CameraConnectionState(str, Enum):
     DISCONNECTED = "disconnected"
     CONNECTING = "connecting"
@@ -42,6 +49,19 @@ class CameraSessionState:
 
 
 @dataclass(slots=True)
+class MotionSessionState:
+    acs_connection: DeviceConnectionState = DeviceConnectionState.DISCONNECTED
+    kimm_connection: DeviceConnectionState = DeviceConnectionState.DISCONNECTED
+    pico_connection: DeviceConnectionState = DeviceConnectionState.DISCONNECTED
+    
+    # 6-Axis Stage State
+    state: str = "LOCKED"  # MotionState
+    current_cartesian: list[float] = field(default_factory=lambda: [0.0]*6)
+    target_cartesian: list[float] = field(default_factory=lambda: [0.0]*6)
+
+
+
+@dataclass(slots=True)
 class RuntimeActivityState:
     acquisition: ActivityState = ActivityState.IDLE
     scan: ActivityState = ActivityState.IDLE
@@ -52,9 +72,11 @@ class RuntimeActivityState:
 @dataclass(slots=True)
 class SessionState:
     camera: CameraSessionState = field(default_factory=CameraSessionState)
+    motion: MotionSessionState = field(default_factory=MotionSessionState)
     activity: RuntimeActivityState = field(default_factory=RuntimeActivityState)
     exclusive_owner: str = OWNER_NONE
 
 
 def create_default_state() -> SessionState:
     return SessionState()
+

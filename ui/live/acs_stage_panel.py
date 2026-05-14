@@ -272,6 +272,10 @@ class _KinematicMoveWorker(QThread):
 class AcsStagePanel(QWidget):
     """ACS SPiiPlus 6축 스테이지 제어 패널."""
 
+    def run(self):
+        """DeepAlign에서 호출하는 이동 실행 진입점."""
+        self._on_kin_move()
+
     log_message     = pyqtSignal(str)
     acs_connected   = pyqtSignal(object)   # AcsStageController
     acs_disconnected = pyqtSignal()

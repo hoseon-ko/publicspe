@@ -24,15 +24,9 @@ import numpy as np
 
 log = logging.getLogger(__name__)
 
-# AlignStageAlgorithm.py는 프로젝트 루트에 위치
-_PROJ_ROOT = str(Path(__file__).resolve().parent.parent.parent)
-if _PROJ_ROOT not in sys.path:
-    sys.path.insert(0, _PROJ_ROOT)
-
 try:
-    from AlignStageAlgorithm import CalculateBallPositionPivot, CalculateAttitudePivot
+    from .AlignStageAlgorithm import CalculateBallPositionPivot, CalculateAttitudePivot
     _ALGO_OK = True
-
 except Exception as e:
     _ALGO_OK = False
     log.warning(f"[Kinematic] AlignStageAlgorithm import 실패: {e}")
