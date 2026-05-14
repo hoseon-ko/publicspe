@@ -848,18 +848,16 @@ class MotionTab(QWidget):
         set_l = kin_set_panel.content_layout()
         set_l.setSpacing(5)
 
-        defaults_head = QLabel("PHYSICAL PARAMETER EDITOR")
-        defaults_head.setStyleSheet(lbl(C_WARN, mono=True, bold=True))
-        set_l.addWidget(defaults_head)
-
+        # ── Stage Setup ───────────────────────────────────────────────
+        sec_setup = _section_box("Stage Setup", C_ACCENT)
+        sg = sec_setup.content_layout()
         setup_grid = QGridLayout()
         setup_grid.setSpacing(4)
-        setup_grid.addWidget(QLabel("Stage Setup"), 0, 0)
-        for c, text in enumerate(["X", "Y", "Z"]):
+        for c, text in enumerate(["", "X", "Y", "Z"]):
             h = QLabel(text)
             h.setAlignment(Qt.AlignmentFlag.AlignCenter)
             h.setStyleSheet(lbl(C_TEXT_DIM, mono=True))
-            setup_grid.addWidget(h, 0, c + 1)
+            setup_grid.addWidget(h, 0, c)
         setup_vals = list(self._calc.stage_setup.reshape(-1))
         idx = 0
         for r in range(3):
@@ -876,16 +874,19 @@ class MotionTab(QWidget):
                 self._stage_setup_spins.append(spin)
                 setup_grid.addWidget(spin, r + 1, c + 1)
                 idx += 1
-        set_l.addLayout(setup_grid)
+        sg.addLayout(setup_grid)
+        set_l.addWidget(sec_setup)
 
+        # ── Encoder Pos ───────────────────────────────────────────────
+        sec_enc = _section_box("Encoder Pos", C_ACCENT)
+        eg = sec_enc.content_layout()
         enc_grid = QGridLayout()
         enc_grid.setSpacing(4)
-        enc_grid.addWidget(QLabel("Encoder Pos"), 0, 0)
-        for c, text in enumerate(["X", "Y", "Z"]):
+        for c, text in enumerate(["", "X", "Y", "Z"]):
             h = QLabel(text)
             h.setAlignment(Qt.AlignmentFlag.AlignCenter)
             h.setStyleSheet(lbl(C_TEXT_DIM, mono=True))
-            enc_grid.addWidget(h, 0, c + 1)
+            enc_grid.addWidget(h, 0, c)
         enc_vals = list(self._calc.encoder_pos.reshape(-1))
         idx = 0
         for r in range(3):
@@ -902,8 +903,13 @@ class MotionTab(QWidget):
                 self._encoder_pos_spins.append(spin)
                 enc_grid.addWidget(spin, r + 1, c + 1)
                 idx += 1
-        set_l.addLayout(enc_grid)
+        eg.addLayout(enc_grid)
+        set_l.addWidget(sec_enc)
 
+        # ── Limits ────────────────────────────────────────────────────
+        sec_lim = _section_box("Limits", C_WARN)
+        sec_lim.set_collapsed(True)
+        lg = sec_lim.content_layout()
         lim_grid = QGridLayout()
         lim_grid.setSpacing(4)
         for c, h in enumerate(["Axis", "+Limit", "-Limit"]):
@@ -929,16 +935,20 @@ class MotionTab(QWidget):
             lim_grid.addWidget(ax, r, 0)
             lim_grid.addWidget(sp, r, 1)
             lim_grid.addWidget(sm, r, 2)
-        set_l.addLayout(lim_grid)
+        lg.addLayout(lim_grid)
+        set_l.addWidget(sec_lim)
 
+        # ── Direction ─────────────────────────────────────────────────
+        sec_dir = _section_box("Direction", C_ACCENT)
+        sec_dir.set_collapsed(True)
+        dg = sec_dir.content_layout()
         dir_grid = QGridLayout()
         dir_grid.setSpacing(3)
-        dir_grid.addWidget(QLabel("Direction"), 0, 0)
-        for c, t in enumerate(["X", "Y", "Z"]):
-            h = QLabel(t)
+        for c, text in enumerate(["", "X", "Y", "Z"]):
+            h = QLabel(text)
             h.setAlignment(Qt.AlignmentFlag.AlignCenter)
             h.setStyleSheet(lbl(C_TEXT_DIM, mono=True))
-            dir_grid.addWidget(h, 0, c + 1)
+            dir_grid.addWidget(h, 0, c)
         direction = list(self._calc.direction.reshape(-1))
         idx = 0
         for r in range(3):
@@ -954,16 +964,20 @@ class MotionTab(QWidget):
                 self._dir_combos.append(cb)
                 dir_grid.addWidget(cb, r + 1, c + 1)
                 idx += 1
-        set_l.addLayout(dir_grid)
+        dg.addLayout(dir_grid)
+        set_l.addWidget(sec_dir)
 
+        # ── Map ───────────────────────────────────────────────────────
+        sec_map = _section_box("Map", C_ACCENT)
+        sec_map.set_collapsed(True)
+        mg = sec_map.content_layout()
         map_grid = QGridLayout()
         map_grid.setSpacing(3)
-        map_grid.addWidget(QLabel("Map"), 0, 0)
-        for c, t in enumerate(["X", "Y", "Z"]):
-            h = QLabel(t)
+        for c, text in enumerate(["", "X", "Y", "Z"]):
+            h = QLabel(text)
             h.setAlignment(Qt.AlignmentFlag.AlignCenter)
             h.setStyleSheet(lbl(C_TEXT_DIM, mono=True))
-            map_grid.addWidget(h, 0, c + 1)
+            map_grid.addWidget(h, 0, c)
         mapping = list(self._calc._mapping.reshape(-1))
         idx = 0
         for r in range(3):
@@ -979,7 +993,8 @@ class MotionTab(QWidget):
                 self._map_combos.append(chk)
                 map_grid.addWidget(chk, r + 1, c + 1)
                 idx += 1
-        set_l.addLayout(map_grid)
+        mg.addLayout(map_grid)
+        set_l.addWidget(sec_map)
 
         row_apply = QHBoxLayout()
         self.btn_kin_apply = QPushButton("APPLY SETTINGS")

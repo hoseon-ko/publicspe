@@ -16,6 +16,13 @@ class DeepAlignViewerV2Adapter(QWidget):
     range_changed = pyqtSignal(object, object)
     colormap_changed = pyqtSignal(str)
     roi_list_changed = pyqtSignal()
+    
+    profile_updated = pyqtSignal(object, str)       # (data, label)
+    multi_profile_updated = pyqtSignal(object, object) # (data1, data2)
+    histogram_updated = pyqtSignal(object, object)  # (counts, bin_edges)
+
+    roi_added = pyqtSignal(object)
+    roi_selected = pyqtSignal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -46,6 +53,11 @@ class DeepAlignViewerV2Adapter(QWidget):
         self.viewer.view.interactions.roi_selected.connect(self._on_v2_roi_selected)
         self.viewer.roi_panel.roi_deleted.connect(lambda _roi_id: self._refresh_roi_list())
         self.viewer.roi_panel.roi_selected.connect(lambda _roi_id: self._refresh_roi_list())
+
+        # Analysis signals bridge
+        self.viewer.profile_updated.connect(self.profile_updated.emit)
+        self.viewer.multi_profile_updated.connect(self.multi_profile_updated.emit)
+        self.viewer.histogram_updated.connect(self.histogram_updated.emit)
 
         self._refresh_roi_list(emit_signal=False)
 
@@ -179,9 +191,11 @@ class DeepAlignViewerV2Adapter(QWidget):
         if hasattr(roi, "modified"):
             roi.modified.connect(self._refresh_roi_list)
         self._refresh_roi_list()
+        self.roi_added.emit(roi)
 
-    def _on_v2_roi_selected(self, _roi_id) -> None:
+    def _on_v2_roi_selected(self, roi_id) -> None:
         self._refresh_roi_list()
+        self.roi_selected.emit(roi_id)
 
     def _rois(self) -> dict[int, object]:
         return self.viewer.view.interactions._rois

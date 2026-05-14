@@ -172,7 +172,6 @@ class MainWindow(QMainWindow):
 
         self.deep_align_tab = DeepAlignMainTab()
         self.deep_align_tab.bind_session_hub(self.session_hub)
-        self.deep_align_tab.bind_live_tab(self.live_tab)
         # 탭 버튼 + 스택 등록
         _modes = [
             ("🌌 DeepAlign", self.deep_align_tab),
@@ -258,19 +257,19 @@ class MainWindow(QMainWindow):
         self.kin_tab.acs_panel.acs_connected.connect(self.live_tab.acs_stage_panel.set_controller)
         self.kin_tab.acs_panel.acs_disconnected.connect(lambda: self.live_tab.acs_stage_panel.set_controller(None))
 
-        # 하드웨어 공유: Live ↔ DeepAlign
-        self.live_tab.kimm_z_panel.kimm_connected.connect(self.deep_align_tab.set_kimm_ctrl)
-        self.live_tab.kimm_z_panel.kimm_disconnected.connect(self.deep_align_tab.clear_kimm_ctrl)
-        self.live_tab.acs_stage_panel.acs_connected.connect(self.deep_align_tab.set_acs_ctrl)
-        self.live_tab.acs_stage_panel.acs_disconnected.connect(self.deep_align_tab.clear_acs_ctrl)
-        self.live_tab.motor_panel.connected.connect(self.deep_align_tab.set_picos_ctrl)
-        self.live_tab.motor_panel.disconnected.connect(self.deep_align_tab.clear_picos_ctrl)  # [FIX] 누락됐던 disconnect
-
-        # SessionHub ↔ ACS 연동: AcsStagePanel이 직접 연결한 컨트롤러를 MotionHub에도 등록
+        # SessionHub ↔ ACS 연동 (Live 탭): ACS 연결 시 MotionHub에도 등록
         self.live_tab.acs_stage_panel.acs_connected.connect(
             self.session_hub.attach_acs_controller
         )
         self.live_tab.acs_stage_panel.acs_disconnected.connect(
+            self.session_hub.detach_acs
+        )
+
+        # SessionHub ↔ ACS 연동 (DeepAlign 탭): DeepAlign 자체 ACS 패널도 MotionHub에 등록
+        self.deep_align_tab.align_panel.acs_connected.connect(
+            self.session_hub.attach_acs_controller
+        )
+        self.deep_align_tab.align_panel.acs_disconnected.connect(
             self.session_hub.detach_acs
         )
 

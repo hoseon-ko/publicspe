@@ -11,10 +11,46 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QFrame
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QDockWidget
 
+
+from theme.styles import (
+    C_BG_MED, C_BORDER, C_TEXT_DIM, Fonts, Sizes
+)
 
 class DeepAlignStylesMixin:
+    def _make_dock_header(self, title: str) -> QWidget:
+        hdr = QWidget()
+        hdr.setFixedHeight(22)
+        hdr.setStyleSheet(
+            f"background: {C_BG_MED}; border-bottom: 1px solid {C_BORDER};"
+        )
+        row = QHBoxLayout(hdr)
+        row.setContentsMargins(8, 0, 8, 0)
+        lbl = QLabel(title)
+        lbl.setStyleSheet(
+            f"color: {C_TEXT_DIM}; font-family: '{Fonts.MONO}';"
+            f" font-size: {Sizes.SMALL}; font-weight: bold;"
+            " letter-spacing: 2px; background: transparent; border: none;"
+        )
+        row.addWidget(lbl)
+        return hdr
+
+    def _wrap_dock(self, obj_name: str, title: str, content: QWidget,
+                   area: Qt.DockWidgetArea, host) -> QDockWidget:
+        wrap = QWidget()
+        vbox = QVBoxLayout(wrap)
+        vbox.setContentsMargins(0, 0, 0, 0)
+        vbox.setSpacing(0)
+        vbox.addWidget(self._make_dock_header(title))
+        vbox.addWidget(content, 1)
+        dock = QDockWidget(host)
+        dock.setObjectName(obj_name)
+        dock.setWidget(wrap)
+        dock.setTitleBarWidget(QWidget()) # Hide default title bar
+        dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
+        host.addDockWidget(area, dock)
+        return dock
     def _set_master_progress(self, value: int):
         pct = max(0, min(100, int(value)))
         self.prog_grid.setColumnStretch(0, pct)
@@ -113,6 +149,21 @@ class DeepAlignStylesMixin:
             s.setAlignment(Qt.AlignmentFlag.AlignCenter)
             s.setStyleSheet("font-size: 8px; font-weight: 800; background: transparent; border: none; color: rgba(255,255,255,0.9);")
             lay.addWidget(s)
+        return btn
+
+    def _small_toggle_btn(self, text: str) -> QPushButton:
+        btn = QPushButton(text)
+        btn.setCheckable(True)
+        btn.setChecked(True)
+        btn.setFixedSize(70, 20)
+        btn.setStyleSheet("""
+            QPushButton {
+                background: #0f172a; color: #94a3b8; border: 1px solid #1e293b;
+                border-radius: 4px; font-size: 10px; font-weight: 800; padding: 2px;
+            }
+            QPushButton:hover { border-color: #3b82f6; color: #3b82f6; background: #1e293b; }
+            QPushButton:checked { background: #1e293b; color: #3b82f6; border-color: #3b82f6; }
+        """)
         return btn
 
     def _apply_global_styles(self):

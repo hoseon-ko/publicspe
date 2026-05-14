@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+from PyQt6.QtCore import QSize
+
 import os
 from datetime import datetime
 
@@ -26,19 +28,31 @@ from PyQt6.QtWidgets import (
     QGroupBox,
     QGridLayout,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QListWidget,
     QMainWindow,
+    QDockWidget,
     QPushButton,
     QScrollArea,
     QSizePolicy,
     QSpinBox,
+    QSplitter,
     QStackedWidget,
+    QTableWidget,
+    QTableWidgetItem,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
+    QToolBar,
 )
+from PyQt6.QtGui import QAction
 
+from ui.plot_panel import PlotPanel, HistogramPanel
+from ui.file_list_panel import FileListPanel
+from ui.frame_grid_panel import FrameGridPanel
+from ui.roi_panel import RoiPanel
 from ui.viewer_v2.deepalign_adapter import DeepAlignViewerV2Adapter
 
 
@@ -122,7 +136,264 @@ class LayoutBuilderMixin:
         self.cam_viewer.set_external_render_control(True)
         host.setCentralWidget(self.cam_viewer)
 
+        # Analysis Docks
+        self.plot_panel = PlotPanel("PROFILE")
+        self.plot_panel = PlotPanel("Profile")
+        self.dock_plot = self._wrap_dock(
+            "dock_plot", "📈  PROFILE PLOT",
+            self.plot_panel, Qt.DockWidgetArea.BottomDockWidgetArea, host
+        )
+
+        self.hist_panel = HistogramPanel()
+        self.dock_hist = self._wrap_dock(
+            "dock_histogram", "📊  HISTOGRAM",
+            self.hist_panel, Qt.DockWidgetArea.BottomDockWidgetArea, host
+        )
+
+        self.file_list_panel = FileListPanel()
+        self.dock_files = self._wrap_dock(
+            "dock_files", "📁  FILES",
+            self.file_list_panel, Qt.DockWidgetArea.LeftDockWidgetArea, host
+        )
+        self.dock_files.setVisible(False)
+
+        self.frame_grid_panel = FrameGridPanel()
+        self.dock_frames = self._wrap_dock(
+            "dock_frames", "🎞  FRAMES",
+            self.frame_grid_panel, Qt.DockWidgetArea.LeftDockWidgetArea, host
+        )
+        self.dock_frames.setVisible(False)
+
+        self.roi_panel = RoiPanel()
+        self.dock_roi = self._wrap_dock(
+            "dock_roi", "📐  ROI LIST",
+            self.roi_panel, Qt.DockWidgetArea.RightDockWidgetArea, host
+        )
+        self.dock_roi.setVisible(False)
+
+        # ── Mirror/Align Result Panel (Right, hidden until Mirror/Align tab) ─
+        scan_result_widget = self._create_scan_result_panel()
+        self.dock_scan_result = self._wrap_dock(
+            "dock_scan_result", "📋  CAPTURED FRAMES",
+            scan_result_widget, Qt.DockWidgetArea.RightDockWidgetArea, host
+        )
+        self.dock_scan_result.setMinimumWidth(300)
+        self.dock_scan_result.setVisible(False)
+
+        # ── AutoFocus Result Panel (Right, hidden until AF tab) ───────
+        af_result_widget = self._create_af_result_panel()
+        self.dock_af_result = self._wrap_dock(
+            "dock_af_result", "📋  CAPTURED FRAMES",
+            af_result_widget, Qt.DockWidgetArea.RightDockWidgetArea, host
+        )
+        self.dock_af_result.setMinimumWidth(300)
+        self.dock_af_result.setVisible(False)
+
+        # ── Analysis Toolbar (Hidden in Live) ─────────────────────────
+        self.analysis_toolbar = QToolBar("Analysis")
+        self.analysis_toolbar.setObjectName("analysis_toolbar")
+        self.analysis_toolbar.setIconSize(QSize(18, 18))
+        self.analysis_toolbar.setStyleSheet("""
+            QToolBar { background: #0a0f1e; border-bottom: 1px solid #1a4060; padding: 2px 6px; spacing: 4px; }
+            QToolButton { background: #0d1e38; color: #4ecdc4; border: 1px solid #1a4060; border-radius: 3px; padding: 3px 8px; font-weight: bold; font-size: 11px; }
+            QToolButton:hover { background: #1a3a60; }
+            QToolButton:checked { background: #1a3010; color: #4ecdc4; border-color: #2a6020; }
+        """)
+        host.addToolBar(Qt.ToolBarArea.TopToolBarArea, self.analysis_toolbar)
+        self.analysis_toolbar.setVisible(False)
+
+        # ── Toolbar Actions ───────────────────────────────────────────
+        self.act_an_open = QAction("📂  Open SPE", self)
+        self.analysis_toolbar.addAction(self.act_an_open)
+        self.analysis_toolbar.addSeparator()
+        
+        self.dock_toggles = {}
+        for text, dock in [
+            ("📋  Files",     self.dock_files),
+            ("🎞  Frames",    self.dock_frames),
+            ("📈  Plot",      self.dock_plot),
+            ("📊  Histogram", self.dock_hist),
+            ("🔲  ROI",       self.dock_roi),
+            ("📷  Scan",      self.dock_scan_result),
+            ("🔍  AF",        self.dock_af_result),
+        ]:
+            act = QAction(text, self)
+            act.setCheckable(True)
+            act.setChecked(True)
+            act.triggered.connect(dock.setVisible)
+            self.analysis_toolbar.addAction(act)
+            self.dock_toggles[dock.objectName()] = act
+
+        self.analysis_toolbar.addSeparator()
+        self.act_an_roi_range = QAction("🎯  ROI Range", self)
+        self.act_an_roi_range.setCheckable(True)
+        self.analysis_toolbar.addAction(self.act_an_roi_range)
+        
+        self.act_an_fit = QAction("⟳  Reset View", self)
+        self.analysis_toolbar.addAction(self.act_an_fit)
+
+        # 기본적으로 좌우 분할
+        host.splitDockWidget(self.dock_plot, self.dock_hist, Qt.Orientation.Horizontal)
         return host
+
+    def _create_scan_result_panel(self) -> QWidget:
+        """우측 CAPTURED FRAMES 패널: 썸네일 + Centroid 플롯 + 로그 + 결과 테이블."""
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.setStyleSheet(
+            "QSplitter::handle:vertical { background:#1a3a60; height:4px; margin:1px 0; }"
+            "QSplitter::handle:vertical:hover { background:#4ecdc4; }"
+        )
+
+        # ── 패널 1: 썸네일 리스트 ─────────────────────────────────────
+        frames_widget = QWidget()
+        frames_widget.setStyleSheet("background:#0a0f1e;")
+        frames_layout = QVBoxLayout(frames_widget)
+        frames_layout.setContentsMargins(6, 4, 6, 4)
+        frames_layout.setSpacing(4)
+
+        lbl_frames = QLabel("CAPTURED FRAMES")
+        lbl_frames.setStyleSheet(
+            "color:#4ecdc4; font-size:13px; font-weight:bold;"
+            " letter-spacing:2px; padding:0;"
+        )
+        frames_layout.addWidget(lbl_frames)
+
+        self.da_frame_list = QListWidget()
+        self.da_frame_list.setIconSize(QSize(80, 60))
+        self.da_frame_list.setFlow(QListWidget.Flow.LeftToRight)
+        self.da_frame_list.setWrapping(False)
+        self.da_frame_list.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self.da_frame_list.setMinimumHeight(60)
+        self.da_frame_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.da_frame_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.da_frame_list.setStyleSheet(
+            "QListWidget { background:#080e1e; border:1px solid #0f3460; color:#c0d0ff; }"
+            "QListWidget::item { padding:2px; border:1px solid #0f2040; }"
+            "QListWidget::item:selected { background:#1a3a60; border:1px solid #4ecdc4; }"
+        )
+        frames_layout.addWidget(self.da_frame_list)
+        splitter.addWidget(frames_widget)
+
+        # ── 패널 2: Centroid 플롯 ─────────────────────────────────────
+        self.da_plot_panel = PlotPanel("Centroid X/Y vs Motor Position")
+        self.da_plot_panel.setMinimumHeight(100)
+        splitter.addWidget(self.da_plot_panel)
+
+        # ── 패널 3: 로그 ──────────────────────────────────────────────
+        self.da_log = QTextEdit()
+        self.da_log.setReadOnly(True)
+        self.da_log.setMinimumHeight(40)
+        self.da_log.setStyleSheet(
+            "QTextEdit { background:#080e1e; border:1px solid #0f3460;"
+            " color:#00cc88; font-family:'Courier New'; font-size:12px; }"
+        )
+        splitter.addWidget(self.da_log)
+
+        # ── 패널 4: 결과 테이블 ───────────────────────────────────────
+        self.da_table = QTableWidget()
+        self.da_table.setColumnCount(10)
+        self.da_table.setHorizontalHeaderLabels(
+            ["Step", "M1", "M2", "M3", "M4", "CentX", "CentY", "σX", "σY", "SNR"]
+        )
+        self.da_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.da_table.horizontalHeader().setStretchLastSection(True)
+        self.da_table.setMinimumHeight(40)
+        self.da_table.setStyleSheet(
+            "QTableWidget { background:#080e1e; gridline-color:#0f3460;"
+            " color:#c0d0ff; font-family:'Courier New'; font-size:12px;"
+            " border:none; }"
+            "QHeaderView::section { background:#0f1729; color:#4ecdc4;"
+            " border:1px solid #0f3460; font-weight:bold;"
+            " padding:4px 2px; }"
+            "QTableWidget::item:selected { background:#1a3a60; }"
+        )
+        self.da_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        splitter.addWidget(self.da_table)
+
+        splitter.setSizes([120, 240, 100, 180])
+        return splitter
+
+    def _create_af_result_panel(self) -> QWidget:
+        """AutoFocus 전용 우측 패널: 썸네일 + Sharpness vs Z 플롯 + 결과 테이블."""
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.setStyleSheet(
+            "QSplitter::handle:vertical { background:#1a3a60; height:4px; margin:1px 0; }"
+            "QSplitter::handle:vertical:hover { background:#4ecdc4; }"
+        )
+
+        # ── 패널 1: 썸네일 ────────────────────────────────────────────
+        frames_widget = QWidget()
+        frames_widget.setStyleSheet("background:#0a0f1e;")
+        frames_layout = QVBoxLayout(frames_widget)
+        frames_layout.setContentsMargins(6, 4, 6, 4)
+        frames_layout.setSpacing(4)
+
+        lbl_frames = QLabel("CAPTURED FRAMES")
+        lbl_frames.setStyleSheet(
+            "color:#4ecdc4; font-size:13px; font-weight:bold;"
+            " letter-spacing:2px;"
+        )
+        frames_layout.addWidget(lbl_frames)
+
+        self.af_frame_list = QListWidget()
+        self.af_frame_list.setIconSize(QSize(80, 60))
+        self.af_frame_list.setFlow(QListWidget.Flow.LeftToRight)
+        self.af_frame_list.setWrapping(False)
+        self.af_frame_list.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self.af_frame_list.setMinimumHeight(60)
+        self.af_frame_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.af_frame_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.af_frame_list.setStyleSheet(
+            "QListWidget { background:#080e1e; border:1px solid #0f3460; color:#c0d0ff; }"
+            "QListWidget::item { padding:2px; border:1px solid #0f2040; }"
+            "QListWidget::item:selected { background:#1a3a60; border:1px solid #4ecdc4; }"
+        )
+        frames_layout.addWidget(self.af_frame_list)
+        splitter.addWidget(frames_widget)
+
+        # ── 패널 2: Sharpness vs Z 플롯 ──────────────────────────────
+        self.af_plot_panel = PlotPanel("SHARPNESS vs Z")
+        self.af_plot_panel.plot_widget.setLabel("bottom", "Z position (µm)", color="#8899aa")
+        self.af_plot_panel.plot_widget.setLabel("left", "Sharpness (a.u.)", color="#8899aa")
+        self.af_plot_panel.setMinimumHeight(100)
+        splitter.addWidget(self.af_plot_panel)
+
+        # ── 패널 3: 결과 테이블 ───────────────────────────────────────
+        tbl_header = QLabel("RESULTS TABLE")
+        tbl_header.setStyleSheet(
+            "color:#4ecdc4; font-size:13px; font-weight:bold;"
+            " letter-spacing:2px; background:#0a0f1e; padding:4px 6px;"
+        )
+
+        self.af_table = QTableWidget()
+        self.af_table.setColumnCount(3)
+        self.af_table.setHorizontalHeaderLabels(["Step", "Z (µm)", "Sharpness"])
+        self.af_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch
+        )
+        self.af_table.setMinimumHeight(40)
+        self.af_table.setStyleSheet(
+            "QTableWidget { background:#080e1e; gridline-color:#0f3460;"
+            " color:#c0d0ff; font-family:'Courier New'; font-size:12px; border:none; }"
+            "QHeaderView::section { background:#0f1729; color:#4ecdc4;"
+            " border:1px solid #0f3460; font-weight:bold; padding:4px 2px; }"
+            "QTableWidget::item:selected { background:#1a3a60; }"
+        )
+        self.af_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+
+        tbl_widget = QWidget()
+        tbl_widget.setStyleSheet("background:#0a0f1e;")
+        tbl_lay = QVBoxLayout(tbl_widget)
+        tbl_lay.setContentsMargins(0, 0, 0, 0)
+        tbl_lay.setSpacing(0)
+        tbl_lay.addWidget(tbl_header)
+        tbl_lay.addWidget(self.af_table)
+        splitter.addWidget(tbl_widget)
+
+        splitter.setSizes([120, 360, 200])
+        return splitter
 
     def _create_cam_page(self):
         page = QWidget()
@@ -601,20 +872,52 @@ class LayoutBuilderMixin:
         p_lay.setContentsMargins(10, 10, 10, 10)
         p_lay.setSpacing(12)
 
+        # 1. Metrics Section
         sum_grp = self._make_section("📊 ANALYSIS SUMMARY", "#10b981")
         sl = QVBoxLayout(sum_grp.content_widget)
-        sl.setContentsMargins(10, 10, 10, 10)
-        sl.setSpacing(8)
-        metrics = [("PEAK INTENSITY", "---"), ("FWHM (px)", "---"), ("SNR", "---")]
-        grid = QFrame(); grid.setStyleSheet("border: 1px solid #1e293b;")
+        sl.setContentsMargins(8, 8, 8, 8)
+        
+        grid = QFrame(); grid.setStyleSheet("border: 1px solid #1e293b; border-radius: 4px;")
         gl = QGridLayout(grid); gl.setContentsMargins(0, 0, 0, 0); gl.setSpacing(0)
-        for i, (metric, value) in enumerate(metrics):
-            gl.addWidget(self._grid_lbl(f" {metric}"), i, 0)
-            vv = QLabel(value)
-            vv.setStyleSheet("color: #10b981; font-size: 12px; font-weight: 900; padding: 6px;")
-            gl.addWidget(vv, i, 1)
+        
+        self.lbl_an_peak = QLabel("---")
+        self.lbl_an_fwhm = QLabel("---")
+        self.lbl_an_snr  = QLabel("---")
+        
+        metrics = [
+            ("PEAK", self.lbl_an_peak),
+            ("FWHM", self.lbl_an_fwhm),
+            ("SNR",  self.lbl_an_snr)
+        ]
+        for i, (name, lbl) in enumerate(metrics):
+            gl.addWidget(self._grid_lbl(f" {name}"), i, 0)
+            lbl.setStyleSheet("color: #10b981; font-size: 13px; font-weight: 900; padding: 6px;")
+            gl.addWidget(lbl, i, 1)
         sl.addWidget(grid)
         p_lay.addWidget(sum_grp)
+
+        # 2. Frame Gallery Section
+        gal_grp = self._make_section("🎞 CAPTURED GALLERY", "#38bdf8")
+        glay = QVBoxLayout(gal_grp.content_widget)
+        glay.setContentsMargins(5, 5, 5, 5)
+        
+        self.list_an_gallery = QListWidget()
+        self.list_an_gallery.setFixedHeight(400)
+        self.list_an_gallery.setViewMode(QListWidget.ViewMode.IconMode)
+        self.list_an_gallery.setIconSize(QSize(100, 100))
+        self.list_an_gallery.setSpacing(10)
+        self.list_an_gallery.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self.list_an_gallery.setStyleSheet("""
+            QListWidget { background: #080e1e; border: 1px solid #1e293b; border-radius: 4px; }
+            QListWidget::item { color: #94a3b8; font-size: 10px; font-weight: bold; }
+            QListWidget::item:selected { background: #1e293b; color: #38bdf8; border: 1px solid #38bdf8; }
+        """)
+        glay.addWidget(self.list_an_gallery)
+        
+        self.btn_clear_gal = self._style_btn("CLEAR GALLERY", "#ef4444")
+        glay.addWidget(self.btn_clear_gal)
+        
+        p_lay.addWidget(gal_grp)
         p_lay.addStretch()
 
         scroll.setWidget(container)
@@ -674,10 +977,24 @@ class LayoutBuilderMixin:
             mol.addWidget(button)
         self.master_btn_stack.addWidget(mo_w)
 
-        an_w = QWidget()
-        lbl_an = QLabel("ANALYSIS COMMANDS")
-        lbl_an.setStyleSheet("color: #10b981; font-weight: 900;")
-        QHBoxLayout(an_w).addWidget(lbl_an)
+        an_w = QWidget(); anbl = QHBoxLayout(an_w); anbl.setContentsMargins(0, 0, 0, 0); anbl.setSpacing(6)
+        self.btn_an_open = self._dash_btn("OPEN", "SPE FILE", "#3b82f6")
+        self.btn_an_roi_range = self._dash_btn("ROI RANGE", "SCALE", "#14b8a6")
+        self.btn_an_fit = self._dash_btn("FIT VIEW", "RESET", "#64748b")
+        self.btn_reset_dock = self._dash_btn("RESET", "LAYOUT", "#94a3b8")
+        
+        # 도킹 토글 버튼들을 위한 작은 수직 레이아웃
+        dock_v = QVBoxLayout(); dock_v.setSpacing(2); dock_v.setContentsMargins(5, 0, 0, 0)
+        self.btn_toggle_plot_sm = self._small_toggle_btn("📈 Plot")
+        self.btn_toggle_hist_sm = self._small_toggle_btn("📊 Hist")
+        self.btn_toggle_roi_sm  = self._small_toggle_btn("🎯 ROI")
+        dock_v.addWidget(self.btn_toggle_plot_sm)
+        dock_v.addWidget(self.btn_toggle_hist_sm)
+        dock_v.addWidget(self.btn_toggle_roi_sm)
+        
+        for button in (self.btn_an_open, self.btn_an_roi_range, self.btn_an_fit, self.btn_reset_dock):
+            anbl.addWidget(button)
+        anbl.addLayout(dock_v)
         self.master_btn_stack.addWidget(an_w)
 
         lay.addWidget(self.master_btn_stack)

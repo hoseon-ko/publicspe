@@ -11,8 +11,9 @@
 from __future__ import annotations
 
 import numpy as np
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtWidgets import QListWidgetItem
+from PyQt6.QtGui import QImage, QPixmap, QIcon
 
 from ui.image_viewer import apply_colormap
 
@@ -98,3 +99,27 @@ class FramePipelineMixin:
 
     def _on_roi_clear_clicked(self):
         self.cam_viewer.delete_all_rois()
+
+    def _add_to_gallery(self, raw: np.ndarray, label: str = "") -> None:
+        """캡처된 프레임을 Analysis 탭의 갤러리에 추가한다."""
+        if not hasattr(self, "list_an_gallery"):
+            return
+            
+        try:
+            # 썸네일 생성 (display용 RGB 활용)
+            rgb = self._to_display_rgb(raw)
+            h, w = rgb.shape[:2]
+            # QImage 생성 시 바이트 정렬 주의
+            qimg = QImage(rgb.data, w, h, 3 * w, QImage.Format.Format_RGB888)
+            pix = QPixmap.fromImage(qimg).scaled(120, 120, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            
+            if not label:
+                label = f"Frame {self.list_an_gallery.count() + 1}"
+                
+            item = QListWidgetItem(QIcon(pix), label)
+            # 원본 데이터 저장 (나중에 클릭 시 다시 보기 위함)
+            item.setData(Qt.ItemDataRole.UserRole, raw)
+            self.list_an_gallery.addItem(item)
+            self.list_an_gallery.scrollToBottom()
+        except Exception as e:
+            print(f"Gallery error: {e}")

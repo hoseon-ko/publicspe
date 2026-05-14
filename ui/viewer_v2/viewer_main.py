@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, 
     QLabel, QToolButton, QComboBox
 )
-from PyQt6.QtCore import Qt, QTimer, QRectF
+from PyQt6.QtCore import Qt, QTimer, QRectF, pyqtSignal
 from PyQt6.QtGui import QPixmap
 
 from ui.viewer_v2.viewer_state import ViewerState
@@ -22,6 +22,14 @@ class SpeImageViewerV2(QWidget):
     """
     고성능 계층형 이미지 뷰어 (V2) - 안정화 버전
     """
+    # 전역 분석 지원용 시그널
+    profile_updated = pyqtSignal(object, str)       # (data, label)
+    multi_profile_updated = pyqtSignal(object, object) # (data1, data2)
+    histogram_updated = pyqtSignal(object, object)  # (counts, bin_edges)
+    
+    # UI Toggle Requests
+    toggle_analysis_requested = pyqtSignal(str)     # 'profile' or 'histogram'
+
     def __init__(self, state: ViewerState | None = None, parent=None):
         super().__init__(parent)
         self._state = state if state else ViewerState()
@@ -94,6 +102,9 @@ class SpeImageViewerV2(QWidget):
         self.btn_roi_list.setCheckable(True)
         self.btn_roi_list.setChecked(True)
 
+        self.btn_toggle_profile = make_btn("📈 Plot", "Show/Hide Profile Panel")
+        self.btn_toggle_histogram = make_btn("📊 Hist", "Show/Hide Histogram Panel")
+
         # 컬러맵 선택 드롭다운
         self.combo_cmap = QComboBox()
         self.combo_cmap.addItems(["Off", "Gray", "Jet", "Viridis", "Hot", "Plasma"])
@@ -115,6 +126,12 @@ class SpeImageViewerV2(QWidget):
         tool_layout.addWidget(self.btn_roi_box)
         tool_layout.addWidget(self.btn_roi_hist)
         tool_layout.addWidget(self.btn_roi_list)
+        tool_layout.addSpacing(10)
+        tool_layout.addWidget(self.btn_toggle_profile)
+        tool_layout.addWidget(self.btn_toggle_histogram)
+        
+        self.btn_toggle_profile.clicked.connect(lambda: self.toggle_analysis_requested.emit("profile"))
+        self.btn_toggle_histogram.clicked.connect(lambda: self.toggle_analysis_requested.emit("histogram"))
         tool_layout.addStretch()
         tool_layout.addWidget(QLabel("🎨 Colormap:"))
         tool_layout.addWidget(self.combo_cmap)
@@ -232,16 +249,26 @@ class SpeImageViewerV2(QWidget):
             
             # 2. 히스토그램 업데이트
             self._hist_widget.update_image(image, self._state.colormap)
+            counts, bin_edges = np.histogram(image, bins=256)
+            self.histogram_updated.emit(counts, bin_edges)
             
             # 3. 전역 통계
             f_data = image.astype(np.float32)
             self._last_stats = (float(np.min(f_data)), float(np.max(f_data)), float(np.mean(f_data)))
             
-            # 4. 초기 프로파일
-            if self._state.selected_roi.isNull():
-                self._on_reset_requested()
+            # 4. 분석 데이터 갱신 (프로파일/히스토그램 실시간화)
+            # 전문 ROI 또는 기본 ROI가 활성화되어 있으면 해당 데이터를 매 프레임 다시 추출하여 emit 함
+            sel_id = self.view.interactions._selected_roi_id
+            if sel_id is not None and sel_id != -1:
+                # 전문 ROI (Line, Box, Hist)
+                self._on_roi_selected(sel_id)
+            elif not self._state.selected_roi.isNull():
+                # 기본 드래그 ROI
+                self._on_basic_roi_updated(self._state.selected_roi)
             else:
-                self._on_roi_selected(self._state.selected_roi)
+                # 선택 영역 없음 -> 전체 평균 프로파일 표시
+                self._on_reset_requested()
+
                 
             self._refresh_display()
             self._update_info_text()
@@ -415,11 +442,23 @@ class SpeImageViewerV2(QWidget):
                 # Line 타입이면 점 프로파일, 아니면 영역 프로파일
                 if roi.roi_type == 'Line':
                     xp, yp = ImageProvider.get_point_profile(self._img_data, int(x0), int(y0))
+                    self.profile_updated.emit(xp, f"ROI #{roi_id} (X)") # 호환성을 위해 하나만 발송
                 else:
                     xp, yp = ImageProvider.get_roi_profile(self._img_data, x0, y0, x1, y1)
+                    self.multi_profile_updated.emit(xp, yp)
                 
                 if xp.size > 0:
                     self.ruler_system.set_profiles(xp, yp)
+                
+                # Histogram ROI인 경우 히스토그램 발송
+                if roi.roi_type == 'Hist':
+                    ix0, ix1 = int(min(x0, x1)), int(max(x0, x1))
+                    iy0, iy1 = int(min(y0, y1)), int(max(y0, y1))
+                    sub = self._img_data[iy0:iy1, ix0:ix1]
+                    if sub.size > 0:
+                        counts, bin_edges = np.histogram(sub, bins=256)
+                        self.histogram_updated.emit(counts, bin_edges)
+
                 
                 # ROI Range 모드가 켜져 있으면 실시간 스케일링
                 if self.btn_roi_range.isChecked():
@@ -440,9 +479,11 @@ class SpeImageViewerV2(QWidget):
         
         if xp.size > 0:
             self.ruler_system.set_profiles(xp, yp)
+            self.multi_profile_updated.emit(xp, yp)
             
         if self.btn_roi_range.isChecked():
             self._apply_roi_range_with_pts(x0, y0, x1, y1)
+
 
     def _apply_roi_range_with_pts(self, x0, y0, x1, y1):
         if self._img_data is not None:
@@ -464,6 +505,7 @@ class SpeImageViewerV2(QWidget):
                 x_prof = np.mean(self._img_data, axis=0)
                 y_prof = np.mean(self._img_data, axis=1)
                 self.ruler_system.set_profiles(x_prof, y_prof)
+                self.multi_profile_updated.emit(x_prof, y_prof)
                 
             # 3. UI 갱신
             self._update_info_text()

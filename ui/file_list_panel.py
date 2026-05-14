@@ -371,8 +371,8 @@ class FileListPanel(QWidget):
                 color: #e0e0e0;
                 border: 1px solid #e94560;
                 border-radius: 4px;
-                padding: 6px;
-                font-size: 12px;
+                padding: 8px;
+                font-size: 13px;
                 font-weight: bold;
             }
             QPushButton:hover {
@@ -392,29 +392,16 @@ class FileListPanel(QWidget):
             }
         """)
         info_layout = QVBoxLayout(self.info_box)
-        info_layout.setContentsMargins(8, 6, 8, 6)
-        info_layout.setSpacing(2)
+        info_layout.setContentsMargins(10, 8, 10, 8)
+        info_layout.setSpacing(4)
 
         self.lbl_filename = QLabel("—")
+        self.lbl_filename.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_filename.setStyleSheet(
-            "color: #e0e0e0; font-size: 12px; font-weight: bold; border: none;"
+            "color: #e0e0e0; font-size: 14px; font-weight: bold; border: none; background: transparent;"
         )
         self.lbl_filename.setWordWrap(True)
-
-        self.lbl_dirpath = QLabel("")
-        self.lbl_dirpath.setStyleSheet(
-            "color: #606080; font-size: 10px; border: none;"
-        )
-        self.lbl_dirpath.setWordWrap(True)
-
-        self.lbl_frames = QLabel("")
-        self.lbl_frames.setStyleSheet(
-            "color: #e94560; font-size: 10px; font-weight: bold; border: none;"
-        )
-
         info_layout.addWidget(self.lbl_filename)
-        info_layout.addWidget(self.lbl_dirpath)
-        info_layout.addWidget(self.lbl_frames)
         layout.addWidget(self.info_box)
 
         # ── 구분선 ──
@@ -489,6 +476,21 @@ class FileListPanel(QWidget):
         self.frame_slider.setMaximum(0)
         self.frame_slider.setValue(0)
         self.frame_slider.setEnabled(False)
+        self.frame_slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                height: 4px;
+                background: #0f3460;
+                border-radius: 2px;
+            }
+            QSlider::handle:horizontal {
+                background: #e94560;
+                border: 1px solid #e94560;
+                width: 14px;
+                height: 14px;
+                margin: -5px 0;
+                border-radius: 7px;
+            }
+        """)
         self.frame_slider.valueChanged.connect(self._on_frame_changed)
         layout.addWidget(self.frame_slider)
 

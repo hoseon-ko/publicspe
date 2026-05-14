@@ -107,6 +107,11 @@ class CameraControllerMixin(CameraHubMixin):
         self._snap_progress_timer.stop()
         self._set_master_progress(100)
         self._push_frame(raw)
+        
+        # 갤러리에 추가
+        ts = datetime.now().strftime("%H:%M:%S")
+        self._add_to_gallery(raw, f"Snap_{ts}")
+        
         dev_logger.debug("[DeepAlign] snap completed")
 
     def _on_snap_error(self, msg: str) -> None:
@@ -232,6 +237,10 @@ class CameraControllerMixin(CameraHubMixin):
         )
         self._update_acquire_times(skip_progress_calc=True)
         self._push_frame(raw)
+
+        if cur == total:
+            ts = datetime.now().strftime("%H:%M:%S")
+            self._add_to_gallery(raw, f"Acq_Last_{ts}")
 
     def _on_acquire_finished(self, frames: list):
         self._acq.running = False

@@ -215,7 +215,7 @@ class FrameGridPanel(QWidget):
         header_row = QHBoxLayout()
         header = QLabel("FRAMES")
         header.setStyleSheet(
-            "font-size: 11px; font-weight: bold; color: #e94560;"
+            "font-size: 10px; font-weight: bold; color: #e94560;"
             "letter-spacing: 2px; padding: 2px;"
         )
         header_row.addWidget(header)
@@ -231,7 +231,8 @@ class FrameGridPanel(QWidget):
                 border: 1px solid #e94560;
                 border-radius: 4px;
                 font-weight: bold;
-                font-size: 11px;
+                font-size: 10px;
+                padding: 2px 8px;
             }
         """
         STYLE_INACTIVE = """
@@ -240,7 +241,8 @@ class FrameGridPanel(QWidget):
                 color: #a0a0b0;
                 border: 1px solid #0f3460;
                 border-radius: 4px;
-                font-size: 11px;
+                font-size: 10px;
+                padding: 2px 8px;
             }
             QPushButton:hover {
                 border: 1px solid #e94560;
@@ -251,8 +253,8 @@ class FrameGridPanel(QWidget):
         self._style_inactive = STYLE_INACTIVE
 
         for btn in (self.btn_thumb, self.btn_list):
-            btn.setFixedHeight(22)
-            btn.setFixedWidth(58)
+            btn.setFixedHeight(24)
+            btn.setMinimumWidth(50)
 
         self.btn_thumb.setStyleSheet(STYLE_ACTIVE)
         self.btn_list.setStyleSheet(STYLE_INACTIVE)
@@ -263,16 +265,15 @@ class FrameGridPanel(QWidget):
         header_row.addWidget(self.btn_list)
 
         self.btn_clear_checks = QPushButton("Clear")
-        self.btn_clear_checks.setFixedHeight(22)
-        self.btn_clear_checks.setFixedWidth(46)
-        self.btn_clear_checks.setToolTip("Clear all selections")
+        self.btn_clear_checks.setFixedHeight(24)
+        self.btn_clear_checks.setMinimumWidth(50)
         self.btn_clear_checks.setStyleSheet("""
             QPushButton {
                 background-color: transparent;
                 color: #a0a0b0;
                 border: 1px solid #0f3460;
                 border-radius: 4px;
-                font-size: 11px;
+                font-size: 10px;
             }
             QPushButton:hover { color: #e94560; border-color: #e94560; }
         """)

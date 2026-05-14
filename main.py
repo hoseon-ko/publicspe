@@ -10,6 +10,14 @@ main.py
 
 import os
 import sys
+
+# Windows COM Threading Mode Fix (RPC_E_CHANGED_MODE 0x80010106)
+if sys.platform == 'win32':
+    # Qt가 자체적으로 OLE를 초기화하지 않도록 설정 (충돌 방지)
+    os.environ["QT_COM_INIT"] = "0"
+    if not hasattr(sys, 'coinit_flags'):
+        sys.coinit_flags = 2  # MTA (Multi-Threaded Apartment)
+
 import signal
 import threading
 import traceback
