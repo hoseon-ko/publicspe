@@ -276,6 +276,14 @@ class AcsStagePanel(QWidget):
         """DeepAlign에서 호출하는 이동 실행 진입점."""
         self._on_kin_move()
 
+    def enable_all(self) -> None:
+        """모든 축 Enable. Master Bar에서 호출."""
+        self._on_enable_all()
+
+    def stop_all(self) -> None:
+        """모든 축 즉시 정지. Master Bar에서 호출."""
+        self._on_stop_all()
+
     log_message     = pyqtSignal(str)
     acs_connected   = pyqtSignal(object)   # AcsStageController
     acs_disconnected = pyqtSignal()

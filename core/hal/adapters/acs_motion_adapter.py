@@ -6,14 +6,30 @@ from core.motor.acs_stage import AcsStageController
 
 
 class AcsMotionAdapter(QObject):
-    # Test comment
     positions_updated = pyqtSignal(list)
     state_updated = pyqtSignal(list)
-
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._controller: AcsStageController | None = None
+
+    @classmethod
+    def from_controller(cls, ctrl: AcsStageController) -> "AcsMotionAdapter":
+        """이미 연결된 AcsStageController를 감싸는 어댑터를 생성한다.
+
+        AcsStagePanel이 직접 생성·연결한 컨트롤러를 SessionHub/MotionHub에
+        등록할 때 사용한다. 컨트롤러를 재연결하지 않고 래핑만 한다.
+        """
+        adapter = cls.__new__(cls)
+        super(AcsMotionAdapter, adapter).__init__(None)
+        adapter._controller = ctrl
+        # 기존 컨트롤러의 폴링 신호를 어댑터 신호로 중계
+        if hasattr(ctrl, "positions_updated"):
+            ctrl.positions_updated.connect(adapter.positions_updated)
+        if hasattr(ctrl, "states_updated"):
+            ctrl.states_updated.connect(adapter.state_updated)
+        dev_logger.info("[AcsMotionAdapter] from_controller: 기존 컨트롤러 랩 완료")
+        return adapter
 
     def connect(self, ip: str, port: int) -> None:
         dev_logger.debug(f"[AcsMotionAdapter] connect requested ip={ip}, port={port}")

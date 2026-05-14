@@ -264,6 +264,15 @@ class MainWindow(QMainWindow):
         self.live_tab.acs_stage_panel.acs_connected.connect(self.deep_align_tab.set_acs_ctrl)
         self.live_tab.acs_stage_panel.acs_disconnected.connect(self.deep_align_tab.clear_acs_ctrl)
         self.live_tab.motor_panel.connected.connect(self.deep_align_tab.set_picos_ctrl)
+        self.live_tab.motor_panel.disconnected.connect(self.deep_align_tab.clear_picos_ctrl)  # [FIX] 누락됐던 disconnect
+
+        # SessionHub ↔ ACS 연동: AcsStagePanel이 직접 연결한 컨트롤러를 MotionHub에도 등록
+        self.live_tab.acs_stage_panel.acs_connected.connect(
+            self.session_hub.attach_acs_controller
+        )
+        self.live_tab.acs_stage_panel.acs_disconnected.connect(
+            self.session_hub.detach_acs
+        )
 
         self.scan_tab.set_motor_panel(self.live_tab.motor_panel)
 

@@ -622,6 +622,36 @@ class DeviceSessionHub(QObject):
             self.publish_error("acs", f"connection failed: {exc}", source="hub")
             raise
 
+    def attach_acs_controller(self, ctrl) -> None:
+        """이미 연결된 AcsStageController를 SessionHub / MotionHub에 등록한다.
+
+        AcsStagePanel이 직접 생성·연결한 컨트롤러를 사용할 때 호출한다.
+        컨트롤러를 재연결하지 않고 AcsMotionAdapter로 감싸서 attach_acs()를 호출한다.
+        """
+        from core.hal.adapters.acs_motion_adapter import AcsMotionAdapter
+        try:
+            adapter = AcsMotionAdapter.from_controller(ctrl)
+            self.attach_acs(adapter)  # mark_acs_connected() 포함
+            dev_logger.info("[DeviceSessionHub] ACS controller attached via wrap")
+        except Exception as exc:
+            dev_logger.exception("[DeviceSessionHub] attach_acs_controller failed")
+            raise
+
+    def detach_acs(self) -> None:
+        """ACS HAL을 SessionHub / MotionHub에서 분리하고 상태를 초기화한다.
+
+        AcsStagePanel이 disconnect 신호를 보낼 때 호출한다.
+        컨트롤러 자체의 disconnect는 AcsStagePanel이 이미 처리했으므로 여기선 참조만 해제한다.
+        """
+        if self._acs_hal is not None:
+            try:
+                self._acs_hal = None
+                self._motion_hub._acs_hal = None
+            except Exception:
+                pass
+        self.mark_acs_disconnected()
+        dev_logger.info("[DeviceSessionHub] ACS detached")
+
     def disconnect_acs(self) -> None:
         if self._acs_hal:
             try:

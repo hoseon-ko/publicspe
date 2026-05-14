@@ -210,54 +210,37 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self.btn_stop_main.clicked.connect(self._on_stop_live_clicked)
         self.cam_viewer.roi_list_changed.connect(self._update_roi_list_from_viewer)
 
+        # ── Global Analysis Panels Connection ────────────────────────
+        self.cam_viewer.profile_updated.connect(
+            lambda data, lbl: self.plot_panel.plot_line(data, lbl)
+        )
+        self.cam_viewer.multi_profile_updated.connect(
+            lambda d1, d2: self.plot_panel.plot_two_lines(d1, d2, "X mean", "Y mean")
+        )
+        self.cam_viewer.histogram_updated.connect(self.hist_panel.plot_histogram)
+
         # ── Master bar — Mirror 탭 ────────────────────────────────────
-        # TODO: MotorPanel에 zero_all / reset / stop 공개 메서드 추가 후 연결
-        self.btn_mirror_zero_all.clicked.connect(
-            lambda: self._on_master_btn_not_implemented("Mirror / ZERO ALL")
-        )
-        self.btn_mirror_reset.clicked.connect(
-            lambda: self._on_master_btn_not_implemented("Mirror / RESET")
-        )
-        self.btn_mirror_stop.clicked.connect(
-            lambda: self._on_master_btn_not_implemented("Mirror / STOP")
-        )
+        self.btn_mirror_zero_all.clicked.connect(self.mirror_panel.zero_all)
+        self.btn_mirror_reset.clicked.connect(self.mirror_panel.reset_controller)
+        self.btn_mirror_stop.clicked.connect(self.mirror_panel.stop_all)
 
         # ── Master bar — AutoFocus 탭 ─────────────────────────────────
-        # TODO: AutoFocusPanel에 run_af / abort / set_z_base 공개 메서드 추가 후 연결
-        self.btn_af_run.clicked.connect(
-            lambda: self._on_master_btn_not_implemented("AF / RUN AF")
-        )
-        self.btn_af_abort.clicked.connect(
-            lambda: self._on_master_btn_not_implemented("AF / ABORT")
-        )
-        self.btn_af_set_z.clicked.connect(
-            lambda: self._on_master_btn_not_implemented("AF / SET Z")
-        )
+        self.btn_af_run.clicked.connect(self.af_panel.run_af)
+        self.btn_af_abort.clicked.connect(self.af_panel.abort_af)
+        self.btn_af_set_z.clicked.connect(self.af_panel.set_z_base)
 
         # ── Master bar — Align 탭 ─────────────────────────────────────
-        # TODO: AcsStagePanel에 enable_all / calc_kinematics / stop_all 공개 메서드 추가 후 연결
-        self.btn_align_enable.clicked.connect(
-            lambda: self._on_master_btn_not_implemented("Align / ENABLE ALL")
-        )
+        self.btn_align_enable.clicked.connect(self.align_panel.enable_all)
         self.btn_align_calc.clicked.connect(
             lambda: self._on_master_btn_not_implemented("Align / CALC KINEM.")
-        )
-        self.btn_align_move.clicked.connect(self.align_panel.run)  # AcsStagePanel.run() 존재
-        self.btn_align_stop.clicked.connect(
-            lambda: self._on_master_btn_not_implemented("Align / STOP ALL")
-        )
+        )  # 키네마틱 계산 — 추후 구현
+        self.btn_align_move.clicked.connect(self.align_panel.run)
+        self.btn_align_stop.clicked.connect(self.align_panel.stop_all)
 
         # ── Master bar — Motion 탭 ────────────────────────────────────
-        # TODO: MotionTab에 refresh / reconnect_all / stop_all 공개 메서드 추가 후 연결
-        self.btn_motion_refresh.clicked.connect(
-            lambda: self._on_master_btn_not_implemented("Motion / REFRESH")
-        )
-        self.btn_motion_reconnect.clicked.connect(
-            lambda: self._on_master_btn_not_implemented("Motion / RECONNECT ALL")
-        )
-        self.btn_motion_stop.clicked.connect(
-            lambda: self._on_master_btn_not_implemented("Motion / STOP ALL")
-        )
+        self.btn_motion_refresh.clicked.connect(self.motion_panel.refresh_positions)
+        self.btn_motion_reconnect.clicked.connect(self.motion_panel.reconnect_all_devices)
+        self.btn_motion_stop.clicked.connect(self.motion_panel.stop_all_motion)
 
         # ── Settings persistence ──────────────────────────────────────
         self.cb_vendor.currentTextChanged.connect(self._save_settings)
@@ -440,6 +423,12 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self._picos = ctrl
         if hasattr(self, "mirror_panel") and ctrl is not None:
             self.mirror_panel.set_controller(ctrl)
+
+    def clear_picos_ctrl(self):
+        """Picomotor 연결 해제 시 mirror_panel 컨트롤러 초기화."""
+        self._picos = None
+        if hasattr(self, "mirror_panel"):
+            self.mirror_panel.set_controller(None)
 
     def _on_sub_panel_log(self, msg: str):
         dev_logger.debug(f"[DeepAlign] {msg}")

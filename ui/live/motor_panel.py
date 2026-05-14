@@ -578,6 +578,25 @@ class MotorPanel(QWidget):
             except Exception as e:
                 self.log_message.emit(f"정지 오류: {e}")
 
+    # ── DeepAlign Master Bar 공개 API ─────────────────────────────────────────
+
+    def zero_all(self) -> None:
+        """모든 축 포지션 카운터 초기화 (물리 이동 없음). Master Bar에서 호출."""
+        self._on_zero_all()
+
+    def reset_controller(self) -> None:
+        """컨트롤러 연결 끊고 재연결 (현재: disconnect만). Master Bar에서 호출."""
+        if self._ctrl is None:
+            return
+        try:
+            self._ctrl.stop_all()
+        except Exception:
+            pass
+
+    def stop_all(self) -> None:
+        """모든 축 즉시 정지. Master Bar에서 호출."""
+        self._on_stop_all()
+
     def stop_polling(self):
         """종료 시 컨트롤러 폴링 및 연결 정지."""
         if self._ctrl:

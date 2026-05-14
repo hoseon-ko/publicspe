@@ -367,6 +367,23 @@ class AutoFocusPanel(QWidget):
                   self.spin_step, self.combo_metric):
             w.setEnabled(en)
 
+    # ── DeepAlign Master Bar 공개 API ─────────────────────────────────────────
+
+    def run_af(self) -> None:
+        """AutoFocus 시작. Master Bar에서 호출."""
+        if not self._running:
+            self._on_run()
+
+    def abort_af(self) -> None:
+        """AutoFocus 중단. Master Bar에서 호출."""
+        if self._running:
+            self._on_stop()
+
+    def set_z_base(self) -> None:
+        """현재 Z를 AF 중심값으로 설정. Master Bar에서 호출 (현재 미구현 — 추후 확장)."""
+        from core.logger import dev_logger
+        dev_logger.warning("[AutoFocusPanel] set_z_base: 아직 구현되지 않음")
+
     # ── 외부에서 호출하는 업데이트 API ────────────────────────────────
 
     def update_progress(self, step: int, total: int, z: float, sharpness: float):

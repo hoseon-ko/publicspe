@@ -165,6 +165,20 @@ class MotionTab(QWidget):
         if self._refresh_timer.isActive():
             self._refresh_timer.stop()
 
+    # ── DeepAlign Master Bar 공개 API ─────────────────────────────────────────
+
+    def refresh_positions(self) -> None:
+        """현재 위치 새로 고침. Master Bar에서 호출."""
+        self._refresh_from_sources()
+
+    def stop_all_motion(self) -> None:
+        """모든 모션 장치 즉시 정지. Master Bar에서 호출."""
+        self._all_stop()
+
+    def reconnect_all_devices(self) -> None:
+        """모든 모션 장치 재연결 시도. Master Bar에서 호출."""
+        self._reconnect_all()
+
     # ------------------------------------------------------------------
     # UI
     # ------------------------------------------------------------------
