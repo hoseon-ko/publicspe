@@ -43,9 +43,13 @@ class SimulatedCameraAdapter(CameraHal):
     def connect(self, device_id: str) -> None:
         cam_logger.debug(f"[SimulatedCameraAdapter] connect requested device_id={device_id}")
         try:
-            self._camera = SimulatedCamera()
+            # device_id에 따라 비트 깊이 결정 (0: 16, 1: 12, 2: 8)
+            bit_depth_map = {"0": 16, "1": 12, "2": 8}
+            bd = bit_depth_map.get(str(device_id), 16)
+            
+            self._camera = SimulatedCamera(bit_depth=bd)
             self._camera.connect()
-            cam_logger.debug(f"[SimulatedCameraAdapter] connect succeeded device_id={device_id}")
+            cam_logger.debug(f"[SimulatedCameraAdapter] connect succeeded device_id={device_id} (bit_depth={bd})")
         except Exception as exc:
             cam_logger.exception(f"[SimulatedCameraAdapter] connect failed device_id={device_id}")
             self._camera = None
