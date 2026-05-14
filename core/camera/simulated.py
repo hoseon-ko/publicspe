@@ -3,7 +3,8 @@
 
 하드웨어 없이 전체 UI 동작을 확인할 수 있도록 모든 기능(온도/ADC/FPS/ROI)을
 활성화하고, 이동하는 가우시안 피크 + 스펙트럼 줄무늬 + 포아송 노이즈로
-구성된 16-bit 애니메이션 프레임을 생성한다.
+구성된 애니메이션 프레임을 생성한다.
+8-bit, 12-bit, 16-bit 모드를 지원한다.
 """
 from __future__ import annotations
 
@@ -22,7 +23,11 @@ def is_available() -> bool:
 
 
 def list_devices() -> list[str]:
-    return ["[SIM-0]  Simulated Camera  512×512  16-bit"]
+    return [
+        "[SIM-0]  Simulated Camera (16-bit)  512×512",
+        "[SIM-1]  Simulated Camera (12-bit)  512×512",
+        "[SIM-2]  Simulated Camera (8-bit)   512×512",
+    ]
 
 
 class SimulatedCamera(BaseCamera):
@@ -39,10 +44,11 @@ class SimulatedCamera(BaseCamera):
     _W = 512
     _H = 512
 
-    def __init__(self):
+    def __init__(self, bit_depth: int = 16):
         self._connected   = False
         self._exposure_ms = 100.0
         self._fps         = 10.0
+        self._bit_depth   = bit_depth
         self.simulate_gil_block = False  # 테스트용 GIL 독점 모드
 
         # 온도: 실온에서 setpoint 로 서서히 냉각
@@ -54,7 +60,7 @@ class SimulatedCamera(BaseCamera):
             "adc_quality":     "Low Noise",
             "adc_speed":       "100kHz",
             "adc_analog_gain": "1x",
-            "bit_depth":       "16bit",
+            "bit_depth":       f"{bit_depth}bit",
         }
 
         self._stop_evt    = threading.Event()
@@ -80,7 +86,7 @@ class SimulatedCamera(BaseCamera):
             adc_quality_options   = ["Low Noise", "High Capacity"],
             adc_speed_options     = ["100kHz", "1MHz", "2MHz"],
             adc_gain_options      = ["1x", "2x", "4x"],
-            adc_bit_depth_options = ["16bit"],
+            adc_bit_depth_options = [f"{bit_depth}bit"],
             has_spatial_filter    = True,
             has_display_stretch   = True,
             has_dark_flat         = True,
@@ -88,9 +94,9 @@ class SimulatedCamera(BaseCamera):
 
     # ── 식별자 ───────────────────────────────────────────────────────
 
-    def camera_name(self)  -> str: return "Simulated Camera"
-    def camera_model(self) -> str: return "SIM-512"
-    def camera_serial(self)-> str: return "SIM-000001"
+    def camera_name(self)  -> str: return f"Simulated Camera ({self._bit_depth}-bit)"
+    def camera_model(self) -> str: return f"SIM-{self._bit_depth}"
+    def camera_serial(self)-> str: return f"SIM-{self._bit_depth:02d}0001"
 
     # ── 상태 ─────────────────────────────────────────────────────────
 
@@ -241,31 +247,41 @@ class SimulatedCamera(BaseCamera):
     def _make_frame(self) -> np.ndarray:
         """
         이동하는 가우시안 피크(주/부) + 스펙트럼 줄무늬 + 포아송 노이즈.
-        노출 시간에 비례해 신호 강도가 변한다 (1:1 기준 100ms).
+        노출 시간에 비례해 신호 강도가 변한다.
+        bit_depth에 따라 최대값을 클리핑하고 데이터 타입을 결정한다.
         """
         self._phase += 0.07
         p = self._phase
         H, W = self._H, self._W
         yy, xx = np.ogrid[0:H, 0:W]
 
-        # 배경 — 포아송 판독 노이즈
-        img = np.random.poisson(250, (H, W)).astype(np.float32)
+        # 16비트 기준 최대 신호 (노이즈 포함 ~65000)
+        max_val_16bit = 65535.0
+        target_max = (2 ** self._bit_depth) - 1
 
-        # 주 피크 — 리사주 궤적으로 이동
+        # 배경 — 포아송 판독 노이즈 (비트 깊이에 맞춰 스케일링)
+        base_noise = 250.0 * (target_max / max_val_16bit)
+        img = np.random.poisson(base_noise, (H, W)).astype(np.float32)
+
+        # 주 피크
         cx = W // 2 + int(W * 0.28 * np.sin(p * 0.23))
         cy = H // 2 + int(H * 0.20 * np.cos(p * 0.17))
         σ  = 26.0 + 10.0 * np.sin(p * 0.37)
-        img += 52000.0 * np.exp(-((xx - cx)**2 + (yy - cy)**2) / (2 * σ**2))
+        peak_amp = 52000.0 * (target_max / max_val_16bit)
+        img += peak_amp * np.exp(-((xx - cx)**2 + (yy - cy)**2) / (2 * σ**2))
 
-        # 부 피크 — 주 피크 근방에서 진동
+        # 부 피크
         cx2 = cx + int(45 * np.cos(p * 0.11))
         cy2 = cy + int(25 * np.sin(p * 0.19))
-        img += 16000.0 * np.exp(-((xx - cx2)**2 + (yy - cy2)**2) / (2 * 16.0**2))
+        img += (16000.0 * (target_max / max_val_16bit)) * np.exp(-((xx - cx2)**2 + (yy - cy2)**2) / (2 * 16.0**2))
 
-        # 수평 스펙트럼 줄무늬 (프로파일 플롯용)
-        img += 1800.0 * np.sin(2 * np.pi * xx / W * 9 + p * 0.6) ** 2
+        # 수평 스펙트럼 줄무늬
+        img += (1800.0 * (target_max / max_val_16bit)) * np.sin(2 * np.pi * xx / W * 9 + p * 0.6) ** 2
 
-        # 노출 배율 (100ms 기준 선형 스케일)
+        # 노출 배율
         img *= min(3.0, max(0.05, self._exposure_ms / 100.0))
 
-        return np.clip(img, 0, 65535).astype(np.uint16)
+        if self._bit_depth <= 8:
+            return np.clip(img, 0, 255).astype(np.uint8)
+        else:
+            return np.clip(img, 0, target_max).astype(np.uint16)
