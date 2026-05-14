@@ -151,49 +151,116 @@ class SimulatedCameraAdapter(CameraHal):
         self._colormap = str(name)
 
     def set_fps(self, fps: float) -> float:
+        cam_logger.debug(f"[SimulatedCameraAdapter] set_fps requested fps={fps}")
         cam = self._require_connected()
-        return float(cam.set_fps(float(fps)))
+        try:
+            result = float(cam.set_fps(float(fps)))
+            cam_logger.debug(f"[SimulatedCameraAdapter] set_fps succeeded result={result}")
+            return result
+        except Exception as exc:
+            cam_logger.exception(f"[SimulatedCameraAdapter] set_fps failed fps={fps}")
+            raise HalCommandError(f"Simulated set FPS failed: {exc}", cause=exc) from exc
 
     def get_fps(self) -> float:
+        cam_logger.debug("[SimulatedCameraAdapter] get_fps requested")
         cam = self._require_connected()
-        return float(cam.get_fps())
+        try:
+            result = float(cam.get_fps())
+            cam_logger.debug(f"[SimulatedCameraAdapter] get_fps succeeded result={result}")
+            return result
+        except Exception as exc:
+            cam_logger.exception("[SimulatedCameraAdapter] get_fps failed")
+            raise HalCommandError(f"Simulated get FPS failed: {exc}", cause=exc) from exc
 
     def disable_fps_lock(self) -> None:
+        cam_logger.debug("[SimulatedCameraAdapter] disable_fps_lock requested")
         cam = self._require_connected()
-        cam.disable_fps_lock()
+        try:
+            cam.disable_fps_lock()
+            cam_logger.debug("[SimulatedCameraAdapter] disable_fps_lock succeeded")
+        except Exception as exc:
+            cam_logger.exception("[SimulatedCameraAdapter] disable_fps_lock failed")
+            raise HalCommandError(f"Simulated disable FPS lock failed: {exc}", cause=exc) from exc
 
     def set_temperature(self, celsius: float) -> None:
+        cam_logger.debug(f"[SimulatedCameraAdapter] set_temperature requested celsius={celsius}")
         cam = self._require_connected()
-        cam.set_temperature(float(celsius))
+        try:
+            cam.set_temperature(float(celsius))
+            cam_logger.debug(f"[SimulatedCameraAdapter] set_temperature succeeded celsius={celsius}")
+        except Exception as exc:
+            cam_logger.exception(f"[SimulatedCameraAdapter] set_temperature failed celsius={celsius}")
+            raise HalCommandError(f"Simulated set temperature failed: {exc}", cause=exc) from exc
 
     def get_temperature(self) -> tuple:
+        cam_logger.debug("[SimulatedCameraAdapter] get_temperature requested")
         cam = self._require_connected()
-        return cam.get_temperature()
+        try:
+            result = cam.get_temperature()
+            cam_logger.debug(f"[SimulatedCameraAdapter] get_temperature succeeded result={result}")
+            return result
+        except Exception as exc:
+            cam_logger.exception("[SimulatedCameraAdapter] get_temperature failed")
+            raise HalCommandError(f"Simulated get temperature failed: {exc}", cause=exc) from exc
 
     def set_adc_settings(self, **kwargs) -> None:
+        cam_logger.debug(f"[SimulatedCameraAdapter] set_adc_settings requested kwargs={kwargs}")
         cam = self._require_connected()
-        cam.set_adc_settings(**kwargs)
+        try:
+            cam.set_adc_settings(**kwargs)
+            cam_logger.debug("[SimulatedCameraAdapter] set_adc_settings succeeded")
+        except Exception as exc:
+            cam_logger.exception("[SimulatedCameraAdapter] set_adc_settings failed")
+            raise HalCommandError(f"Simulated set ADC settings failed: {exc}", cause=exc) from exc
 
     def get_adc_settings(self) -> dict:
+        cam_logger.debug("[SimulatedCameraAdapter] get_adc_settings requested")
         cam = self._require_connected()
-        return dict(cam.get_adc_settings())
+        try:
+            result = dict(cam.get_adc_settings())
+            cam_logger.debug(f"[SimulatedCameraAdapter] get_adc_settings succeeded result={result}")
+            return result
+        except Exception as exc:
+            cam_logger.exception("[SimulatedCameraAdapter] get_adc_settings failed")
+            raise HalCommandError(f"Simulated get ADC settings failed: {exc}", cause=exc) from exc
 
     def get_adc_candidates(self) -> dict:
-        caps = self.capabilities()
-        return {
-            "adc_quality": list(getattr(caps, "metadata", {}).get("adc_quality_options", []) or ["Low Noise", "High Capacity"]),
-            "adc_speed": list(getattr(caps, "metadata", {}).get("adc_speed_options", []) or ["100kHz", "1MHz", "2MHz"]),
-            "adc_analog_gain": list(getattr(caps, "metadata", {}).get("adc_gain_options", []) or ["1x", "2x", "4x"]),
-            "bit_depth": list(getattr(caps, "metadata", {}).get("adc_bit_depth_options", []) or ["16bit"]),
-        }
+        cam_logger.debug("[SimulatedCameraAdapter] get_adc_candidates requested")
+        self._require_connected()  # must be connected before querying candidates
+        try:
+            caps = self.capabilities()
+            result = {
+                "adc_quality": list(getattr(caps, "metadata", {}).get("adc_quality_options", []) or ["Low Noise", "High Capacity"]),
+                "adc_speed": list(getattr(caps, "metadata", {}).get("adc_speed_options", []) or ["100kHz", "1MHz", "2MHz"]),
+                "adc_analog_gain": list(getattr(caps, "metadata", {}).get("adc_gain_options", []) or ["1x", "2x", "4x"]),
+                "bit_depth": list(getattr(caps, "metadata", {}).get("adc_bit_depth_options", []) or ["16bit"]),
+            }
+            cam_logger.debug("[SimulatedCameraAdapter] get_adc_candidates succeeded")
+            return result
+        except Exception as exc:
+            cam_logger.exception("[SimulatedCameraAdapter] get_adc_candidates failed")
+            raise HalCommandError(f"Simulated get ADC candidates failed: {exc}", cause=exc) from exc
 
     def set_roi(self, x: int, y: int, width: int, height: int, hbin: int = 1, vbin: int = 1) -> None:
+        cam_logger.debug(f"[SimulatedCameraAdapter] set_roi requested x={x} y={y} w={width} h={height} hbin={hbin} vbin={vbin}")
         cam = self._require_connected()
-        cam.set_roi(x, y, width, height, hbin=hbin, vbin=vbin)
+        try:
+            cam.set_roi(x, y, width, height, hbin=hbin, vbin=vbin)
+            cam_logger.debug("[SimulatedCameraAdapter] set_roi succeeded")
+        except Exception as exc:
+            cam_logger.exception("[SimulatedCameraAdapter] set_roi failed")
+            raise HalCommandError(f"Simulated set ROI failed: {exc}", cause=exc) from exc
 
     def get_roi(self) -> tuple:
+        cam_logger.debug("[SimulatedCameraAdapter] get_roi requested")
         cam = self._require_connected()
-        return cam.get_roi()
+        try:
+            result = cam.get_roi()
+            cam_logger.debug(f"[SimulatedCameraAdapter] get_roi succeeded result={result}")
+            return result
+        except Exception as exc:
+            cam_logger.exception("[SimulatedCameraAdapter] get_roi failed")
+            raise HalCommandError(f"Simulated get ROI failed: {exc}", cause=exc) from exc
 
     def _require_connected(self) -> SimulatedCamera:
         if self._camera is None or not self._camera.is_connected:

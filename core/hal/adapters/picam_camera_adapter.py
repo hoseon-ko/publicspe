@@ -99,7 +99,13 @@ class PicamCameraAdapter(CameraHal):
         cam_logger.debug("[PicamCameraAdapter] get_frame_total_s requested")
         cam = self._require_connected()
         try:
-            total_s = float(cam._get_frame_total_s())
+            # Use public API if available; private _get_frame_total_s is an implementation detail
+            fn = getattr(cam, "get_frame_total_s", None) or getattr(cam, "_get_frame_total_s", None)
+            if fn is not None:
+                total_s = float(fn())
+            else:
+                # Fallback: estimate from exposure only
+                total_s = self.get_exposure_ms() / 1000.0
             cam_logger.debug(f"[PicamCameraAdapter] get_frame_total_s succeeded s={total_s}")
             return total_s
         except Exception as exc:
@@ -153,32 +159,78 @@ class PicamCameraAdapter(CameraHal):
         self._colormap = str(name)
 
     def set_temperature(self, celsius: float) -> None:
+        cam_logger.debug(f"[PicamCameraAdapter] set_temperature requested celsius={celsius}")
         cam = self._require_connected()
-        cam.set_temperature(float(celsius))
+        try:
+            cam.set_temperature(float(celsius))
+            cam_logger.debug(f"[PicamCameraAdapter] set_temperature succeeded celsius={celsius}")
+        except Exception as exc:
+            cam_logger.exception(f"[PicamCameraAdapter] set_temperature failed celsius={celsius}")
+            raise HalCommandError(f"Picam set temperature failed: {exc}", cause=exc) from exc
 
     def get_temperature(self) -> tuple:
+        cam_logger.debug("[PicamCameraAdapter] get_temperature requested")
         cam = self._require_connected()
-        return cam.get_temperature()
+        try:
+            result = cam.get_temperature()
+            cam_logger.debug(f"[PicamCameraAdapter] get_temperature succeeded result={result}")
+            return result
+        except Exception as exc:
+            cam_logger.exception("[PicamCameraAdapter] get_temperature failed")
+            raise HalCommandError(f"Picam get temperature failed: {exc}", cause=exc) from exc
 
     def set_adc_settings(self, **kwargs) -> None:
+        cam_logger.debug(f"[PicamCameraAdapter] set_adc_settings requested kwargs={kwargs}")
         cam = self._require_connected()
-        cam.set_adc_settings(**kwargs)
+        try:
+            cam.set_adc_settings(**kwargs)
+            cam_logger.debug("[PicamCameraAdapter] set_adc_settings succeeded")
+        except Exception as exc:
+            cam_logger.exception("[PicamCameraAdapter] set_adc_settings failed")
+            raise HalCommandError(f"Picam set ADC settings failed: {exc}", cause=exc) from exc
 
     def get_adc_settings(self) -> dict:
+        cam_logger.debug("[PicamCameraAdapter] get_adc_settings requested")
         cam = self._require_connected()
-        return dict(cam.get_adc_settings())
+        try:
+            result = dict(cam.get_adc_settings())
+            cam_logger.debug(f"[PicamCameraAdapter] get_adc_settings succeeded result={result}")
+            return result
+        except Exception as exc:
+            cam_logger.exception("[PicamCameraAdapter] get_adc_settings failed")
+            raise HalCommandError(f"Picam get ADC settings failed: {exc}", cause=exc) from exc
 
     def get_adc_candidates(self) -> dict:
+        cam_logger.debug("[PicamCameraAdapter] get_adc_candidates requested")
         cam = self._require_connected()
-        return dict(cam.get_adc_candidates())
+        try:
+            result = dict(cam.get_adc_candidates())
+            cam_logger.debug("[PicamCameraAdapter] get_adc_candidates succeeded")
+            return result
+        except Exception as exc:
+            cam_logger.exception("[PicamCameraAdapter] get_adc_candidates failed")
+            raise HalCommandError(f"Picam get ADC candidates failed: {exc}", cause=exc) from exc
 
     def set_roi(self, x: int, y: int, width: int, height: int, hbin: int = 1, vbin: int = 1) -> None:
+        cam_logger.debug(f"[PicamCameraAdapter] set_roi requested x={x} y={y} w={width} h={height} hbin={hbin} vbin={vbin}")
         cam = self._require_connected()
-        cam.set_roi(x, y, width, height, hbin=hbin, vbin=vbin)
+        try:
+            cam.set_roi(x, y, width, height, hbin=hbin, vbin=vbin)
+            cam_logger.debug("[PicamCameraAdapter] set_roi succeeded")
+        except Exception as exc:
+            cam_logger.exception("[PicamCameraAdapter] set_roi failed")
+            raise HalCommandError(f"Picam set ROI failed: {exc}", cause=exc) from exc
 
     def get_roi(self) -> tuple | None:
+        cam_logger.debug("[PicamCameraAdapter] get_roi requested")
         cam = self._require_connected()
-        return cam.get_roi()
+        try:
+            result = cam.get_roi()
+            cam_logger.debug(f"[PicamCameraAdapter] get_roi succeeded result={result}")
+            return result
+        except Exception as exc:
+            cam_logger.exception("[PicamCameraAdapter] get_roi failed")
+            raise HalCommandError(f"Picam get ROI failed: {exc}", cause=exc) from exc
 
     def _require_connected(self) -> PicamCamera:
         if self._camera is None or not self._camera.is_connected:

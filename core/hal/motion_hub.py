@@ -1,8 +1,7 @@
 from enum import Enum
-import time
 import numpy as np
 from typing import Optional
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 
 from core.hal.motion_hal import AcsHal
 from core.hal.errors import HalCommandError, HalNotConnectedError, HalTimeoutError
@@ -30,22 +29,34 @@ class MotionHub(QObject):
     move_started = pyqtSignal()
     move_finished = pyqtSignal(bool, str) # success, message
 
-    def __init__(self, acs_hal: Optional[AcsHal] = None, parent=None):
+    def __init__(self, acs_hal: Optional[AcsHal] = None, settle_ms: int = 500, parent=None):
         super().__init__(parent)
         self._acs_hal = acs_hal
         self._kinematics = KinematicCalc()
-        
+
         # Current States
         self._current_joints = [0.0] * 6
         self._current_cartesian = [0.0] * 6
+        self._target_cartesian = [0.0] * 6
         self._state = MotionState.LOCKED
+
+        # Settling Logic
+        self._settle_timer = QTimer()
+        self._settle_timer.setSingleShot(True)
+        self._settle_timer.timeout.connect(self._on_settle_timeout)
+        self._settle_ms = settle_ms
 
     def attach_acs(self, hal: AcsHal):
         self._acs_hal = hal
-        # If the HAL provides signals (like AcsMotionAdapter might via its controller), 
-        # we can connect them here. 
-        # For now, we assume the Hub will be polled or triggered by the session hub.
-        dev_logger.info("[MotionHub] ACS HAL attached")
+        
+        # Connect signals if available (AcsMotionAdapter is a QObject)
+        if isinstance(hal, QObject):
+            if hasattr(hal, "positions_updated"):
+                hal.positions_updated.connect(self.update_joint_positions)
+            if hasattr(hal, "state_updated"):
+                hal.state_updated.connect(self._on_hw_state_updated)
+        
+        dev_logger.info("[MotionHub] ACS HAL attached and signals connected")
 
     def _set_state(self, state: MotionState):
         if self._state != state:
@@ -59,7 +70,8 @@ class MotionHub(QObject):
             raise HalCommandError(f"Cannot move: Current state is {self._state.value}")
 
         dev_logger.info(f"[MotionHub] Move to Cartesian: T=({tx}, {ty}, {tz}), R=({rx_mrad}, {ry_mrad}, {rz_mrad})")
-        
+        self._target_cartesian = [tx, ty, tz, rx_mrad, ry_mrad, rz_mrad]
+
         # 1. Inverse Kinematics
         targets, _, ok, violations = self._kinematics.calculate(
             [tx, ty, tz], [rx_mrad, ry_mrad, rz_mrad]
@@ -72,6 +84,7 @@ class MotionHub(QObject):
             raise HalCommandError(msg)
 
         # 2. Execute Atomic Move
+        self._set_state(MotionState.MOVING)
         self._execute_atomic_move(targets)
 
     def _execute_atomic_move(self, joint_targets: np.ndarray):
@@ -93,7 +106,7 @@ class MotionHub(QObject):
 
     def update_joint_positions(self, joints: list[float]):
         """외부(Adapter/Controller)에서 Joint 위치 업데이트를 주입."""
-        self._current_joints = joints
+        self._current_joints = list(joints)  # copy — do not store external reference
         self.joint_updated.emit(list(joints))
         
         # Forward Kinematics Sync
@@ -114,23 +127,33 @@ class MotionHub(QObject):
         try:
             # 1. Get Real Joint Positions
             joints = self._acs_hal.get_positions()
-            self._current_joints = joints
-            self.joint_updated.emit(list(joints))
-            
-            # 2. Forward Kinematics
-            res = self._kinematics.calculate_forward(np.array(joints))
-            if res is not None:
-                # res: [Rx, Ry, Rz, Tx, Ty, Tz] (rad, mm)
-                # UI Format: [Tx, Ty, Tz, Rx_mrad, Ry_mrad, Rz_mrad]
-                cartesian = [
-                    res[3], res[4], res[5],    # Tx, Ty, Tz
-                    res[0]*1000.0, res[1]*1000.0, res[2]*1000.0 # Rx, Ry, Rz (mrad)
-                ]
-                self._current_cartesian = cartesian
-                self.cartesian_updated.emit(cartesian)
-                
+            self.update_joint_positions(joints)
         except Exception as e:
             dev_logger.error(f"[MotionHub] Failed to sync positions: {e}")
+
+    def _on_hw_state_updated(self, hw_states: list[dict]):
+        """하드웨어 상태(Enabled, Moving 등) 업데이트에 따른 상태 머신 전이."""
+        any_moving = any(s.get("moving", False) for s in hw_states)
+        
+        if self._state == MotionState.MOVING:
+            if not any_moving:
+                # 이동이 끝났으면 Settling 단계로 진입
+                self._set_state(MotionState.SETTLING)
+                self._settle_timer.start(self._settle_ms)
+        elif self._state == MotionState.SETTLING:
+            if any_moving:
+                # 다시 움직이기 시작하면 MOVING으로 복귀
+                self._settle_timer.stop()
+                self._set_state(MotionState.MOVING)
+        elif self._state == MotionState.LOCKED:
+            if any_moving:
+                self._set_state(MotionState.MOVING)
+
+    def _on_settle_timeout(self):
+        """Settling 완료 후 최종 LOCKED 상태로 변경."""
+        if self._state == MotionState.SETTLING:
+            self._set_state(MotionState.LOCKED)
+            self.move_finished.emit(True, "Move completed and settled")
 
     @property
     def state(self) -> MotionState:
@@ -139,6 +162,10 @@ class MotionHub(QObject):
     @property
     def current_cartesian(self) -> list[float]:
         return self._current_cartesian
+
+    @property
+    def target_cartesian(self) -> list[float]:
+        return self._target_cartesian
 
     @property
     def current_joints(self) -> list[float]:

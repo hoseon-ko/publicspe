@@ -1,9 +1,8 @@
-"""Device session hub skeleton.
+"""Device session hub.
 
-This hub is intentionally minimal in phase-1:
-- No UI wiring yet
-- No behavior change to existing tabs
-- Provides typed state + event emission entrypoints
+모든 하드웨어 접근의 단일 진입점.
+- 카메라 작업은 _camera_lock (RLock) 으로 직렬화
+- 상태 변경 및 이벤트 발행은 Qt 신호를 통해 UI 스레드에서 안전하게 처리
 """
 
 from __future__ import annotations
@@ -24,6 +23,7 @@ from core.session.session_events import SessionEvent, SessionEventType, make_eve
 from core.session.session_state import (
     ActivityState,
     CameraConnectionState,
+    DeviceConnectionState,
     SessionState,
     StreamState,
     create_default_state,
@@ -31,21 +31,26 @@ from core.session.session_state import (
 
 
 class DeviceSessionHub(QObject):
-    event_published = pyqtSignal(object)  # SessionEvent
-    status_message = pyqtSignal(str)
-    frame_ready = pyqtSignal(object, object)  # rgb, raw
+    event_published = pyqtSignal(object)   # SessionEvent
+    status_message  = pyqtSignal(str)
+    frame_ready     = pyqtSignal(object, object)  # rgb, raw
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._state: SessionState = create_default_state()
         self._camera_hal: CameraHal | None = None
         self._camera_factories: dict[str, Callable[[], CameraHal]] = {}
-        self._acs_hal: AcsHal | None = None
+        self._acs_hal:  AcsHal  | None = None
         self._kimm_hal: KimmHal | None = None
         self._pico_hal: PicoHal | None = None
         self._motion_hub: MotionHub = MotionHub()
+        self._setup_motion_hub_bindings()
         self._last_frame = None
-        self._camera_lock = RLock()
+        self._camera_lock = RLock()  # 카메라 관련 작업 직렬화
+
+    # ──────────────────────────────────────────────────────────
+    # 카메라 등록 / 스캔
+    # ──────────────────────────────────────────────────────────
 
     def register_camera_hal(self, vendor: str, factory: Callable[[], CameraHal]) -> None:
         key = vendor.strip().lower()
@@ -61,12 +66,10 @@ class DeviceSessionHub(QObject):
         key = self._state.camera.vendor.strip().lower()
         if not key:
             return []
-
         factory = self._camera_factories.get(key)
         if factory is None:
             self.publish_status(f"Camera vendor is not registered: {key}", source="hub")
             return []
-
         hal = factory()
         try:
             return hal.list_devices(key)
@@ -75,12 +78,15 @@ class DeviceSessionHub(QObject):
             self.publish_error("camera", f"scan failed: {exc}", source="hub")
             return []
 
+    # ──────────────────────────────────────────────────────────
+    # 카메라 연결 / 해제
+    # ──────────────────────────────────────────────────────────
+
     def connect_camera(self, device_id: str) -> None:
         with self._camera_lock:
             key = self._state.camera.vendor.strip().lower()
             if not key:
                 raise ValueError("Camera vendor is not selected")
-
             factory = self._camera_factories.get(key)
             if factory is None:
                 raise ValueError(f"Camera vendor is not registered: {key}")
@@ -90,7 +96,9 @@ class DeviceSessionHub(QObject):
 
             self._state.camera.connection = CameraConnectionState.CONNECTING
             self.set_camera_device(device_id)
-            self.publish_status(f"Connecting camera: vendor={key}, device={device_id}", source="hub")
+            self.publish_status(
+                f"Connecting camera: vendor={key}, device={device_id}", source="hub"
+            )
 
             hal = factory()
             try:
@@ -98,7 +106,9 @@ class DeviceSessionHub(QObject):
                 self._camera_hal = hal
                 self.mark_camera_connected(source="hub")
             except Exception as exc:
-                dev_logger.exception(f"[DeviceSessionHub] connect_camera failed vendor={key}, device_id={device_id}")
+                dev_logger.exception(
+                    f"[DeviceSessionHub] connect_camera failed vendor={key}, device_id={device_id}"
+                )
                 self._state.camera.connection = CameraConnectionState.ERROR
                 self.publish_error("camera", f"connect failed: {exc}", source="hub")
                 raise
@@ -115,40 +125,61 @@ class DeviceSessionHub(QObject):
                     self.publish_error("camera", f"disconnect failed: {exc}", source="hub")
             self.mark_camera_disconnected(reason=reason, source="hub")
 
-    def start_stream(self, owner: str, frame_cb: Callable[[object], None] | None = None) -> None:
+    # ──────────────────────────────────────────────────────────
+    # 스트리밍  [FIXED: _camera_lock 보호 추가]
+    # ──────────────────────────────────────────────────────────
+
+    def start_stream(
+        self, owner: str, frame_cb: Callable[[object], None] | None = None
+    ) -> None:
         normalized = validate_owner(owner)
-        hal = self._require_camera_hal()
+        with self._camera_lock:
+            hal = self._require_camera_hal()
 
-        if self._state.camera.stream == StreamState.STREAMING:
-            raise HalCommandError("Stream already running")
-        if self._state.activity.acquisition == ActivityState.RUNNING and self._state.exclusive_owner != normalized:
-            raise HalCommandError("Cannot start stream during acquisition by another owner")
+            if self._state.camera.stream == StreamState.STREAMING:
+                raise HalCommandError("Stream already running")
+            if (
+                self._state.activity.acquisition == ActivityState.RUNNING
+                and self._state.exclusive_owner != normalized
+            ):
+                raise HalCommandError(
+                    "Cannot start stream during acquisition by another owner"
+                )
 
-        try:
-            if frame_cb is None:
-                def _default_frame_cb(frame):
-                    self.publish_frame(frame, frame, source="hub")
-                hal.start_stream(_default_frame_cb)
-            else:
-                hal.start_stream(frame_cb)
-            self.mark_stream_started(normalized, source="hub")
-        except Exception as exc:
-            dev_logger.exception(f"[DeviceSessionHub] start_stream failed owner={normalized}")
-            self._state.camera.stream = StreamState.ERROR
-            self.publish_error("camera", f"start_stream failed: {exc}", source="hub")
-            raise
+            try:
+                if frame_cb is None:
+                    def _default_frame_cb(frame):
+                        self.publish_frame(frame, frame, source="hub")
+                    hal.start_stream(_default_frame_cb)
+                else:
+                    hal.start_stream(frame_cb)
+                self.mark_stream_started(normalized, source="hub")
+            except Exception as exc:
+                dev_logger.exception(
+                    f"[DeviceSessionHub] start_stream failed owner={normalized}"
+                )
+                self._state.camera.stream = StreamState.ERROR
+                self.publish_error("camera", f"start_stream failed: {exc}", source="hub")
+                raise
 
     def stop_stream(self, owner: str) -> None:
         normalized = validate_owner(owner)
-        hal = self._require_camera_hal()
-        try:
-            hal.stop_stream()
-            self.mark_stream_stopped(normalized, source="hub")
-        except Exception as exc:
-            dev_logger.exception(f"[DeviceSessionHub] stop_stream failed owner={normalized}")
-            self._state.camera.stream = StreamState.ERROR
-            self.publish_error("camera", f"stop_stream failed: {exc}", source="hub")
-            raise
+        with self._camera_lock:
+            hal = self._require_camera_hal()
+            try:
+                hal.stop_stream()
+                self.mark_stream_stopped(normalized, source="hub")
+            except Exception as exc:
+                dev_logger.exception(
+                    f"[DeviceSessionHub] stop_stream failed owner={normalized}"
+                )
+                self._state.camera.stream = StreamState.ERROR
+                self.publish_error("camera", f"stop_stream failed: {exc}", source="hub")
+                raise
+
+    # ──────────────────────────────────────────────────────────
+    # 단일 프레임 / 배치 획득
+    # ──────────────────────────────────────────────────────────
 
     def snap(self, owner: str):
         with self._camera_lock:
@@ -160,7 +191,9 @@ class DeviceSessionHub(QObject):
                 self.publish_frame(raw, raw, source="hub")
                 return raw
             except Exception as exc:
-                dev_logger.exception(f"[DeviceSessionHub] snap failed owner={owner}")
+                dev_logger.exception(
+                    f"[DeviceSessionHub] snap failed owner={owner}"
+                )
                 self.publish_error("camera", f"snap failed: {exc}", source="hub")
                 raise
 
@@ -174,15 +207,14 @@ class DeviceSessionHub(QObject):
         with self._camera_lock:
             normalized = validate_owner(owner)
             hal = self._require_camera_hal()
-
             count = max(1, int(frame_count))
+
             if not self.request_exclusive_mode(normalized, mode="acquire"):
                 raise HalCommandError("Cannot acquire: exclusive owner conflict")
 
             self.mark_acquisition_started(normalized, source="hub")
             self.publish_status(
-                f"acquisition started: owner={normalized}, frames={count}",
-                source="hub",
+                f"acquisition started: owner={normalized}, frames={count}", source="hub"
             )
 
             try:
@@ -194,16 +226,20 @@ class DeviceSessionHub(QObject):
                     frames.append(frame)
                     if on_frame is not None:
                         on_frame(idx + 1, count, frame)
+
                 if frames:
                     self._last_frame = frames[-1]
                     self.publish_frame(frames[-1], frames[-1], source="hub")
+
                 self.publish_status(
                     f"acquisition finished: owner={normalized}, frames={len(frames)}",
                     source="hub",
                 )
                 return frames
             except Exception as exc:
-                dev_logger.exception(f"[DeviceSessionHub] acquire failed owner={normalized}, frames={count}")
+                dev_logger.exception(
+                    f"[DeviceSessionHub] acquire failed owner={normalized}, frames={count}"
+                )
                 self.publish_error("acquisition", f"acquire failed: {exc}", source="hub")
                 raise
             finally:
@@ -213,186 +249,254 @@ class DeviceSessionHub(QObject):
     def acquire(self, owner: str, frame_count: int) -> list:
         return self.acquire_with_progress(owner, frame_count)
 
+    # ──────────────────────────────────────────────────────────
+    # 노출 제어  [FIXED: _camera_lock 보호 추가]
+    # ──────────────────────────────────────────────────────────
+
     def camera_set_exposure_ms(self, owner: str, ms: float) -> float:
         normalized = validate_owner(owner)
-        hal = self._require_camera_hal()
-        value = float(ms)
-        try:
-            hal.set_exposure_ms(value)
-            actual = float(hal.get_exposure_ms())
-            self.set_exposure_ms(actual, source="hub")
-            self.publish_status(
-                f"camera exposure set: owner={normalized}, ms={actual:.3f}",
-                source="hub",
-            )
-            return actual
-        except Exception as exc:
-            dev_logger.exception(f"[DeviceSessionHub] camera_set_exposure_ms failed owner={normalized}, ms={value}")
-            self.publish_error("camera", f"set_exposure failed: {exc}", source="hub")
-            raise
+        with self._camera_lock:
+            hal = self._require_camera_hal()
+            value = float(ms)
+            try:
+                hal.set_exposure_ms(value)
+                actual = float(hal.get_exposure_ms())
+                self.set_exposure_ms(actual, source="hub")
+                self.publish_status(
+                    f"camera exposure set: owner={normalized}, ms={actual:.3f}",
+                    source="hub",
+                )
+                return actual
+            except Exception as exc:
+                dev_logger.exception(
+                    f"[DeviceSessionHub] camera_set_exposure_ms failed owner={normalized}, ms={value}"
+                )
+                self.publish_error("camera", f"set_exposure failed: {exc}", source="hub")
+                raise
 
     def camera_get_exposure_ms(self, owner: str) -> float:
         normalized = validate_owner(owner)
-        hal = self._require_camera_hal()
-        try:
-            actual = float(hal.get_exposure_ms())
-            self.set_exposure_ms(actual, source="hub")
-            return actual
-        except Exception as exc:
-            dev_logger.exception(f"[DeviceSessionHub] camera_get_exposure_ms failed owner={normalized}")
-            self.publish_error("camera", f"get_exposure failed: {exc}", source="hub")
-            raise
+        with self._camera_lock:
+            hal = self._require_camera_hal()
+            try:
+                actual = float(hal.get_exposure_ms())
+                self.set_exposure_ms(actual, source="hub")
+                return actual
+            except Exception as exc:
+                dev_logger.exception(
+                    f"[DeviceSessionHub] camera_get_exposure_ms failed owner={normalized}"
+                )
+                self.publish_error("camera", f"get_exposure failed: {exc}", source="hub")
+                raise
 
     def camera_get_frame_total_s(self, owner: str) -> float:
         """프레임 총 시간(초): exposure + readout"""
         normalized = validate_owner(owner)
-        hal = self._require_camera_hal()
-        try:
-            total_s = float(hal.get_frame_total_s())
-            dev_logger.debug(f"[DeviceSessionHub] camera_get_frame_total_s owner={normalized} total_s={total_s}")
-            return total_s
-        except Exception as exc:
-            dev_logger.exception(f"[DeviceSessionHub] camera_get_frame_total_s failed owner={normalized}")
-            self.publish_error("camera", f"get_frame_total_s failed: {exc}", source="hub")
-            raise
+        with self._camera_lock:
+            hal = self._require_camera_hal()
+            try:
+                total_s = float(hal.get_frame_total_s())
+                dev_logger.debug(
+                    f"[DeviceSessionHub] camera_get_frame_total_s owner={normalized} total_s={total_s}"
+                )
+                return total_s
+            except Exception as exc:
+                dev_logger.exception(
+                    f"[DeviceSessionHub] camera_get_frame_total_s failed owner={normalized}"
+                )
+                self.publish_error(
+                    "camera", f"get_frame_total_s failed: {exc}", source="hub"
+                )
+                raise
+
+    # ──────────────────────────────────────────────────────────
+    # FPS 제어  [FIXED: _camera_lock 보호 추가]
+    # ──────────────────────────────────────────────────────────
 
     def camera_set_fps(self, owner: str, fps: float) -> float:
         normalized = validate_owner(owner)
-        hal = self._require_camera_hal()
-        value = float(fps)
-        try:
-            if not hasattr(hal, "set_fps"):
-                raise HalCommandError("FPS control is not supported")
-            actual = float(hal.set_fps(value))
-            self.publish_status(
-                f"camera fps set: owner={normalized}, fps={actual:.3f}",
-                source="hub",
-            )
-            return actual
-        except Exception as exc:
-            dev_logger.exception(f"[DeviceSessionHub] camera_set_fps failed owner={normalized}, fps={value}")
-            self.publish_error("camera", f"set_fps failed: {exc}", source="hub")
-            raise
+        with self._camera_lock:
+            hal = self._require_camera_hal()
+            value = float(fps)
+            try:
+                if not hasattr(hal, "set_fps"):
+                    raise HalCommandError("FPS control is not supported")
+                actual = float(hal.set_fps(value))
+                self.publish_status(
+                    f"camera fps set: owner={normalized}, fps={actual:.3f}", source="hub"
+                )
+                return actual
+            except Exception as exc:
+                dev_logger.exception(
+                    f"[DeviceSessionHub] camera_set_fps failed owner={normalized}, fps={value}"
+                )
+                self.publish_error("camera", f"set_fps failed: {exc}", source="hub")
+                raise
 
     def camera_get_fps(self, owner: str) -> float:
         normalized = validate_owner(owner)
-        hal = self._require_camera_hal()
-        try:
-            if not hasattr(hal, "get_fps"):
-                raise HalCommandError("FPS read is not supported")
-            fps = float(hal.get_fps())
-            self.publish_status(
-                f"camera fps read: owner={normalized}, fps={fps:.3f}",
-                source="hub",
-            )
-            return fps
-        except Exception as exc:
-            dev_logger.exception(f"[DeviceSessionHub] camera_get_fps failed owner={normalized}")
-            self.publish_error("camera", f"get_fps failed: {exc}", source="hub")
-            raise
+        with self._camera_lock:
+            hal = self._require_camera_hal()
+            try:
+                if not hasattr(hal, "get_fps"):
+                    raise HalCommandError("FPS read is not supported")
+                fps = float(hal.get_fps())
+                self.publish_status(
+                    f"camera fps read: owner={normalized}, fps={fps:.3f}", source="hub"
+                )
+                return fps
+            except Exception as exc:
+                dev_logger.exception(
+                    f"[DeviceSessionHub] camera_get_fps failed owner={normalized}"
+                )
+                self.publish_error("camera", f"get_fps failed: {exc}", source="hub")
+                raise
 
     def camera_disable_fps_lock(self, owner: str) -> None:
         normalized = validate_owner(owner)
-        hal = self._require_camera_hal()
-        try:
-            if not hasattr(hal, "disable_fps_lock"):
-                raise HalCommandError("FPS lock control is not supported")
-            hal.disable_fps_lock()
-            self.publish_status(
-                f"camera fps lock disabled: owner={normalized}",
-                source="hub",
-            )
-        except Exception as exc:
-            dev_logger.exception(f"[DeviceSessionHub] camera_disable_fps_lock failed owner={normalized}")
-            self.publish_error("camera", f"disable_fps_lock failed: {exc}", source="hub")
-            raise
+        with self._camera_lock:
+            hal = self._require_camera_hal()
+            try:
+                if not hasattr(hal, "disable_fps_lock"):
+                    raise HalCommandError("FPS lock control is not supported")
+                hal.disable_fps_lock()
+                self.publish_status(
+                    f"camera fps lock disabled: owner={normalized}", source="hub"
+                )
+            except Exception as exc:
+                dev_logger.exception(
+                    f"[DeviceSessionHub] camera_disable_fps_lock failed owner={normalized}"
+                )
+                self.publish_error(
+                    "camera", f"disable_fps_lock failed: {exc}", source="hub"
+                )
+                raise
+
+    # ──────────────────────────────────────────────────────────
+    # 온도 제어  [FIXED: _camera_lock 보호 추가]
+    # ──────────────────────────────────────────────────────────
 
     def camera_set_temperature(self, owner: str, celsius: float) -> tuple:
         normalized = validate_owner(owner)
-        hal = self._require_camera_hal()
-        target = float(celsius)
-        try:
-            if not hasattr(hal, "set_temperature") or not hasattr(hal, "get_temperature"):
-                raise HalCommandError("Temperature control is not supported")
-            hal.set_temperature(target)
-            reading, setpoint, status = hal.get_temperature()
-            self.publish_status(
-                f"camera temperature set: owner={normalized}, setpoint={float(setpoint):.2f}",
-                source="hub",
-            )
-            return reading, setpoint, status
-        except Exception as exc:
-            dev_logger.exception(f"[DeviceSessionHub] camera_set_temperature failed owner={normalized}, celsius={target}")
-            self.publish_error("camera", f"set_temperature failed: {exc}", source="hub")
-            raise
+        with self._camera_lock:
+            hal = self._require_camera_hal()
+            target = float(celsius)
+            try:
+                if not hasattr(hal, "set_temperature") or not hasattr(
+                    hal, "get_temperature"
+                ):
+                    raise HalCommandError("Temperature control is not supported")
+                hal.set_temperature(target)
+                reading, setpoint, status = hal.get_temperature()
+                self.publish_status(
+                    f"camera temperature set: owner={normalized}, setpoint={float(setpoint):.2f}",
+                    source="hub",
+                )
+                return reading, setpoint, status
+            except Exception as exc:
+                dev_logger.exception(
+                    f"[DeviceSessionHub] camera_set_temperature failed owner={normalized}, celsius={target}"
+                )
+                self.publish_error(
+                    "camera", f"set_temperature failed: {exc}", source="hub"
+                )
+                raise
 
     def camera_get_temperature(self, owner: str) -> tuple:
         normalized = validate_owner(owner)
-        hal = self._require_camera_hal()
-        try:
-            if not hasattr(hal, "get_temperature"):
-                raise HalCommandError("Temperature read is not supported")
-            reading, setpoint, status = hal.get_temperature()
-            self.publish_status(
-                f"camera temperature read: owner={normalized}, reading={float(reading):.2f}",
-                source="hub",
-            )
-            return reading, setpoint, status
-        except Exception as exc:
-            dev_logger.exception(f"[DeviceSessionHub] camera_get_temperature failed owner={normalized}")
-            self.publish_error("camera", f"get_temperature failed: {exc}", source="hub")
-            raise
+        with self._camera_lock:
+            hal = self._require_camera_hal()
+            try:
+                if not hasattr(hal, "get_temperature"):
+                    raise HalCommandError("Temperature read is not supported")
+                reading, setpoint, status = hal.get_temperature()
+                self.publish_status(
+                    f"camera temperature read: owner={normalized}, reading={float(reading):.2f}",
+                    source="hub",
+                )
+                return reading, setpoint, status
+            except Exception as exc:
+                dev_logger.exception(
+                    f"[DeviceSessionHub] camera_get_temperature failed owner={normalized}"
+                )
+                self.publish_error(
+                    "camera", f"get_temperature failed: {exc}", source="hub"
+                )
+                raise
+
+    # ──────────────────────────────────────────────────────────
+    # ADC 설정  [FIXED: _camera_lock 보호 추가]
+    # ──────────────────────────────────────────────────────────
 
     def camera_set_adc_settings(self, owner: str, **kwargs) -> None:
         normalized = validate_owner(owner)
-        hal = self._require_camera_hal()
-        settings = {k: v for k, v in kwargs.items() if v is not None}
-        try:
-            if not hasattr(hal, "set_adc_settings"):
-                raise HalCommandError("ADC settings are not supported")
-            hal.set_adc_settings(**settings)
-            self.publish_status(
-                f"camera adc settings applied: owner={normalized}, keys={sorted(settings.keys())}",
-                source="hub",
-            )
-        except Exception as exc:
-            dev_logger.exception(f"[DeviceSessionHub] camera_set_adc_settings failed owner={normalized}")
-            self.publish_error("camera", f"set_adc_settings failed: {exc}", source="hub")
-            raise
+        with self._camera_lock:
+            hal = self._require_camera_hal()
+            settings = {k: v for k, v in kwargs.items() if v is not None}
+            try:
+                if not hasattr(hal, "set_adc_settings"):
+                    raise HalCommandError("ADC settings are not supported")
+                hal.set_adc_settings(**settings)
+                self.publish_status(
+                    f"camera adc settings applied: owner={normalized}, keys={sorted(settings.keys())}",
+                    source="hub",
+                )
+            except Exception as exc:
+                dev_logger.exception(
+                    f"[DeviceSessionHub] camera_set_adc_settings failed owner={normalized}"
+                )
+                self.publish_error(
+                    "camera", f"set_adc_settings failed: {exc}", source="hub"
+                )
+                raise
 
     def camera_get_adc_settings(self, owner: str) -> dict:
         normalized = validate_owner(owner)
-        hal = self._require_camera_hal()
-        try:
-            if not hasattr(hal, "get_adc_settings"):
-                raise HalCommandError("ADC settings read is not supported")
-            settings = dict(hal.get_adc_settings())
-            self.publish_status(
-                f"camera adc settings read: owner={normalized}, keys={sorted(settings.keys())}",
-                source="hub",
-            )
-            return settings
-        except Exception as exc:
-            dev_logger.exception(f"[DeviceSessionHub] camera_get_adc_settings failed owner={normalized}")
-            self.publish_error("camera", f"get_adc_settings failed: {exc}", source="hub")
-            raise
+        with self._camera_lock:
+            hal = self._require_camera_hal()
+            try:
+                if not hasattr(hal, "get_adc_settings"):
+                    raise HalCommandError("ADC settings read is not supported")
+                settings = dict(hal.get_adc_settings())
+                self.publish_status(
+                    f"camera adc settings read: owner={normalized}, keys={sorted(settings.keys())}",
+                    source="hub",
+                )
+                return settings
+            except Exception as exc:
+                dev_logger.exception(
+                    f"[DeviceSessionHub] camera_get_adc_settings failed owner={normalized}"
+                )
+                self.publish_error(
+                    "camera", f"get_adc_settings failed: {exc}", source="hub"
+                )
+                raise
 
     def camera_get_adc_candidates(self, owner: str) -> dict:
         normalized = validate_owner(owner)
-        hal = self._require_camera_hal()
-        try:
-            if not hasattr(hal, "get_adc_candidates"):
-                raise HalCommandError("ADC candidates read is not supported")
-            candidates = dict(hal.get_adc_candidates())
-            self.publish_status(
-                f"camera adc candidates read: owner={normalized}, keys={sorted(candidates.keys())}",
-                source="hub",
-            )
-            return candidates
-        except Exception as exc:
-            dev_logger.exception(f"[DeviceSessionHub] camera_get_adc_candidates failed owner={normalized}")
-            self.publish_error("camera", f"get_adc_candidates failed: {exc}", source="hub")
-            raise
+        with self._camera_lock:
+            hal = self._require_camera_hal()
+            try:
+                if not hasattr(hal, "get_adc_candidates"):
+                    raise HalCommandError("ADC candidates read is not supported")
+                candidates = dict(hal.get_adc_candidates())
+                self.publish_status(
+                    f"camera adc candidates read: owner={normalized}, keys={sorted(candidates.keys())}",
+                    source="hub",
+                )
+                return candidates
+            except Exception as exc:
+                dev_logger.exception(
+                    f"[DeviceSessionHub] camera_get_adc_candidates failed owner={normalized}"
+                )
+                self.publish_error(
+                    "camera", f"get_adc_candidates failed: {exc}", source="hub"
+                )
+                raise
+
+    # ──────────────────────────────────────────────────────────
+    # ROI  [FIXED: _camera_lock 보호 추가]
+    # ──────────────────────────────────────────────────────────
 
     def camera_set_roi(
         self,
@@ -405,51 +509,74 @@ class DeviceSessionHub(QObject):
         vbin: int = 1,
     ) -> None:
         normalized = validate_owner(owner)
-        hal = self._require_camera_hal()
-        try:
-            if not hasattr(hal, "set_roi"):
-                raise HalCommandError("ROI control is not supported")
-            hal.set_roi(int(x), int(y), int(width), int(height), int(hbin), int(vbin))
-            self.publish_status(
-                f"camera roi set: owner={normalized}, x={int(x)}, y={int(y)}, w={int(width)}, h={int(height)}, hbin={int(hbin)}, vbin={int(vbin)}",
-                source="hub",
-            )
-        except Exception as exc:
-            dev_logger.exception(f"[DeviceSessionHub] camera_set_roi failed owner={normalized}")
-            self.publish_error("camera", f"set_roi failed: {exc}", source="hub")
-            raise
+        with self._camera_lock:
+            hal = self._require_camera_hal()
+            try:
+                if not hasattr(hal, "set_roi"):
+                    raise HalCommandError("ROI control is not supported")
+                hal.set_roi(
+                    int(x), int(y), int(width), int(height), int(hbin), int(vbin)
+                )
+                self.publish_status(
+                    f"camera roi set: owner={normalized}, x={x}, y={y}, w={width}, h={height}, hbin={hbin}, vbin={vbin}",
+                    source="hub",
+                )
+            except Exception as exc:
+                dev_logger.exception(
+                    f"[DeviceSessionHub] camera_set_roi failed owner={normalized}"
+                )
+                self.publish_error("camera", f"set_roi failed: {exc}", source="hub")
+                raise
 
     def camera_get_roi(self, owner: str):
         normalized = validate_owner(owner)
-        hal = self._require_camera_hal()
-        try:
-            if not hasattr(hal, "get_roi"):
-                raise HalCommandError("ROI read is not supported")
-            roi = hal.get_roi()
-            self.publish_status(f"camera roi read: owner={normalized}", source="hub")
-            return roi
-        except Exception as exc:
-            dev_logger.exception(f"[DeviceSessionHub] camera_get_roi failed owner={normalized}")
-            self.publish_error("camera", f"get_roi failed: {exc}", source="hub")
-            raise
+        with self._camera_lock:
+            hal = self._require_camera_hal()
+            try:
+                if not hasattr(hal, "get_roi"):
+                    raise HalCommandError("ROI read is not supported")
+                roi = hal.get_roi()
+                self.publish_status(
+                    f"camera roi read: owner={normalized}", source="hub"
+                )
+                return roi
+            except Exception as exc:
+                dev_logger.exception(
+                    f"[DeviceSessionHub] camera_get_roi failed owner={normalized}"
+                )
+                self.publish_error("camera", f"get_roi failed: {exc}", source="hub")
+                raise
+
+    # ──────────────────────────────────────────────────────────
+    # 메타 정보  [FIXED: _camera_lock 보호 추가]
+    # ──────────────────────────────────────────────────────────
 
     def get_camera_state(self):
         return self._state.camera
 
     def camera_get_capabilities(self):
-        hal = self._require_camera_hal()
-        try:
-            return hal.capabilities()
-        except Exception as exc:
-            dev_logger.exception("[DeviceSessionHub] camera_get_capabilities failed")
-            self.publish_error("camera", f"get_capabilities failed: {exc}", source="hub")
-            raise
+        with self._camera_lock:
+            hal = self._require_camera_hal()
+            try:
+                return hal.capabilities()
+            except Exception as exc:
+                dev_logger.exception(
+                    "[DeviceSessionHub] camera_get_capabilities failed"
+                )
+                self.publish_error(
+                    "camera", f"get_capabilities failed: {exc}", source="hub"
+                )
+                raise
 
     def get_stream_state(self) -> StreamState:
         return self._state.camera.stream
 
     def get_last_frame(self):
         return self._last_frame
+
+    # ──────────────────────────────────────────────────────────
+    # 배타 모드
+    # ──────────────────────────────────────────────────────────
 
     def request_exclusive_mode(self, owner: str, mode: str) -> bool:
         normalized = validate_owner(owner)
@@ -459,31 +586,51 @@ class DeviceSessionHub(QObject):
                 source="hub",
             )
             return False
-
         self._state.exclusive_owner = normalized
-        self.publish_status(f"exclusive mode granted: owner={normalized}, mode={mode}", source="hub")
+        self.publish_status(
+            f"exclusive mode granted: owner={normalized}, mode={mode}", source="hub"
+        )
         return True
 
     def release_exclusive_mode(self, owner: str, mode: str) -> None:
         normalized = validate_owner(owner)
         if self._state.exclusive_owner == normalized:
             self._state.exclusive_owner = OWNER_NONE
-            self.publish_status(f"exclusive mode released: owner={normalized}, mode={mode}", source="hub")
+            self.publish_status(
+                f"exclusive mode released: owner={normalized}, mode={mode}", source="hub"
+            )
+
+    # ──────────────────────────────────────────────────────────
+    # ACS 모션
+    # ──────────────────────────────────────────────────────────
 
     def attach_acs(self, acs_hal: AcsHal) -> None:
         self._acs_hal = acs_hal
         self._motion_hub.attach_acs(acs_hal)
+        self.mark_acs_connected()
 
-    def motion(self) -> MotionHub:
-        return self._motion_hub
+    def connect_acs(self, ip: str, port: int) -> None:
+        from core.hal.adapters import AcsMotionAdapter
+        self._state.motion.acs_connection = DeviceConnectionState.CONNECTING
+        self.publish_status(f"Connecting ACS: {ip}:{port}", source="hub")
+        try:
+            hal = AcsMotionAdapter()
+            hal.connect(ip, port)
+            self.attach_acs(hal)
+        except Exception as exc:
+            self._state.motion.acs_connection = DeviceConnectionState.ERROR
+            self.publish_error("acs", f"connection failed: {exc}", source="hub")
+            raise
 
-    def attach_kimm(self, kimm_hal: KimmHal) -> None:
-        self._kimm_hal = kimm_hal
+    def disconnect_acs(self) -> None:
+        if self._acs_hal:
+            try:
+                self._acs_hal.disconnect()
+            except Exception:
+                pass
+            self._acs_hal = None
+            self.mark_acs_disconnected()
 
-    def attach_pico(self, pico_hal: PicoHal) -> None:
-        self._pico_hal = pico_hal
-
-    # Motion HAL APIs (phase-1 minimal)
     def acs_enable_all(self) -> None:
         hal = self._require_acs_hal()
         try:
@@ -519,11 +666,13 @@ class DeviceSessionHub(QObject):
         try:
             hal.move_to(int(axis), float(pos_mm))
             self.publish_status(
-                f"ACS move_to requested: axis={int(axis)}, pos_mm={float(pos_mm):.6f}",
+                f"ACS move_to requested: axis={axis}, pos_mm={float(pos_mm):.6f}",
                 source="hub",
             )
         except Exception as exc:
-            dev_logger.exception(f"[DeviceSessionHub] acs_move_to failed axis={int(axis)}, pos_mm={float(pos_mm)}")
+            dev_logger.exception(
+                f"[DeviceSessionHub] acs_move_to failed axis={axis}, pos_mm={pos_mm}"
+            )
             self.publish_error("acs", f"move_to failed: {exc}", source="hub")
             raise
 
@@ -536,13 +685,47 @@ class DeviceSessionHub(QObject):
             self.publish_error("acs", f"get_positions failed: {exc}", source="hub")
             raise
 
+    # ──────────────────────────────────────────────────────────
+    # KIMM 모션
+    # ──────────────────────────────────────────────────────────
+
+    def attach_kimm(self, kimm_hal: KimmHal) -> None:
+        self._kimm_hal = kimm_hal
+        self.mark_kimm_connected()
+
+    def connect_kimm(self, ip: str, port: int) -> None:
+        from core.hal.adapters import KimmMotionAdapter
+        self._state.motion.kimm_connection = DeviceConnectionState.CONNECTING
+        self.publish_status(f"Connecting KIMM-Z: {ip}:{port}", source="hub")
+        try:
+            hal = KimmMotionAdapter()
+            hal.connect(ip, port)
+            self.attach_kimm(hal)
+        except Exception as exc:
+            self._state.motion.kimm_connection = DeviceConnectionState.ERROR
+            self.publish_error("kimm", f"connection failed: {exc}", source="hub")
+            raise
+
+    def disconnect_kimm(self) -> None:
+        if self._kimm_hal:
+            try:
+                self._kimm_hal.disconnect()
+            except Exception:
+                pass
+            self._kimm_hal = None
+            self.mark_kimm_disconnected()
+
     def kimm_move_to_z(self, um: float) -> None:
         hal = self._require_kimm_hal()
         try:
             hal.move_to_z(float(um))
-            self.publish_status(f"KIMM move_to_z requested: um={float(um):.6f}", source="hub")
+            self.publish_status(
+                f"KIMM move_to_z requested: um={float(um):.6f}", source="hub"
+            )
         except Exception as exc:
-            dev_logger.exception(f"[DeviceSessionHub] kimm_move_to_z failed um={float(um)}")
+            dev_logger.exception(
+                f"[DeviceSessionHub] kimm_move_to_z failed um={um}"
+            )
             self.publish_error("kimm", f"move_to_z failed: {exc}", source="hub")
             raise
 
@@ -555,16 +738,48 @@ class DeviceSessionHub(QObject):
             self.publish_error("kimm", f"get_z failed: {exc}", source="hub")
             raise
 
+    # ──────────────────────────────────────────────────────────
+    # Picomotor
+    # ──────────────────────────────────────────────────────────
+
+    def attach_pico(self, pico_hal: PicoHal) -> None:
+        self._pico_hal = pico_hal
+        self.mark_pico_connected()
+
+    def connect_pico(self, *args, **kwargs) -> None:
+        from core.hal.adapters import PicoMotionAdapter
+        self._state.motion.pico_connection = DeviceConnectionState.CONNECTING
+        self.publish_status("Connecting Picomotor", source="hub")
+        try:
+            hal = PicoMotionAdapter()
+            hal.connect(*args, **kwargs)
+            self.attach_pico(hal)
+        except Exception as exc:
+            self._state.motion.pico_connection = DeviceConnectionState.ERROR
+            self.publish_error("pico", f"connection failed: {exc}", source="hub")
+            raise
+
+    def disconnect_pico(self) -> None:
+        if self._pico_hal:
+            try:
+                self._pico_hal.disconnect()
+            except Exception:
+                pass
+            self._pico_hal = None
+            self.mark_pico_disconnected()
+
     def pico_move_relative(self, axis: int, steps: int) -> None:
         hal = self._require_pico_hal()
         try:
             hal.move_relative(int(axis), int(steps))
             self.publish_status(
-                f"Picomotor move_relative requested: axis={int(axis)}, steps={int(steps)}",
+                f"Picomotor move_relative requested: axis={axis}, steps={steps}",
                 source="hub",
             )
         except Exception as exc:
-            dev_logger.exception(f"[DeviceSessionHub] pico_move_relative failed axis={int(axis)}, steps={int(steps)}")
+            dev_logger.exception(
+                f"[DeviceSessionHub] pico_move_relative failed axis={axis}, steps={steps}"
+            )
             self.publish_error("pico", f"move_relative failed: {exc}", source="hub")
             raise
 
@@ -573,9 +788,22 @@ class DeviceSessionHub(QObject):
         try:
             return int(hal.get_position(int(axis)))
         except Exception as exc:
-            dev_logger.exception(f"[DeviceSessionHub] pico_get_position failed axis={int(axis)}")
+            dev_logger.exception(
+                f"[DeviceSessionHub] pico_get_position failed axis={axis}"
+            )
             self.publish_error("pico", f"get_position failed: {exc}", source="hub")
             raise
+
+    # ──────────────────────────────────────────────────────────
+    # MotionHub 접근
+    # ──────────────────────────────────────────────────────────
+
+    def motion(self) -> MotionHub:
+        return self._motion_hub
+
+    # ──────────────────────────────────────────────────────────
+    # 상태 조회 / 직렬화
+    # ──────────────────────────────────────────────────────────
 
     @property
     def state(self) -> SessionState:
@@ -590,9 +818,16 @@ class DeviceSessionHub(QObject):
     def set_camera_device(self, device_id: str) -> None:
         self._state.camera.device_id = device_id.strip()
 
+    # ──────────────────────────────────────────────────────────
+    # 상태 마킹 (mark_*)
+    # ──────────────────────────────────────────────────────────
+
     def mark_camera_connected(self, source: str = "hub") -> None:
         self._state.camera.connection = CameraConnectionState.CONNECTED
-        self._emit(SessionEventType.CAMERA_CONNECTED, source, device_id=self._state.camera.device_id)
+        self._emit(
+            SessionEventType.CAMERA_CONNECTED, source,
+            device_id=self._state.camera.device_id,
+        )
 
     def mark_camera_disconnected(self, reason: str = "", source: str = "hub") -> None:
         self._state.camera.connection = CameraConnectionState.DISCONNECTED
@@ -630,6 +865,34 @@ class DeviceSessionHub(QObject):
             self._state.exclusive_owner = OWNER_NONE
         self._emit(SessionEventType.ACQUISITION_FINISHED, source, owner=normalized)
 
+    def mark_acs_connected(self, source: str = "hub") -> None:
+        self._state.motion.acs_connection = DeviceConnectionState.CONNECTED
+        self._emit(SessionEventType.ACS_CONNECTED, source)
+
+    def mark_acs_disconnected(self, source: str = "hub") -> None:
+        self._state.motion.acs_connection = DeviceConnectionState.DISCONNECTED
+        self._emit(SessionEventType.ACS_DISCONNECTED, source)
+
+    def mark_kimm_connected(self, source: str = "hub") -> None:
+        self._state.motion.kimm_connection = DeviceConnectionState.CONNECTED
+        self._emit(SessionEventType.KIMM_CONNECTED, source)
+
+    def mark_kimm_disconnected(self, source: str = "hub") -> None:
+        self._state.motion.kimm_connection = DeviceConnectionState.DISCONNECTED
+        self._emit(SessionEventType.KIMM_DISCONNECTED, source)
+
+    def mark_pico_connected(self, source: str = "hub") -> None:
+        self._state.motion.pico_connection = DeviceConnectionState.CONNECTED
+        self._emit(SessionEventType.PICO_CONNECTED, source)
+
+    def mark_pico_disconnected(self, source: str = "hub") -> None:
+        self._state.motion.pico_connection = DeviceConnectionState.DISCONNECTED
+        self._emit(SessionEventType.PICO_DISCONNECTED, source)
+
+    # ──────────────────────────────────────────────────────────
+    # 이벤트 발행
+    # ──────────────────────────────────────────────────────────
+
     def publish_error(self, scope: str, message: str, source: str = "hub") -> None:
         self._state.camera.last_error = message
         self._emit(SessionEventType.ERROR_RAISED, source, scope=scope, message=message)
@@ -643,12 +906,37 @@ class DeviceSessionHub(QObject):
         self._emit(SessionEventType.FRAME_READY, source)
         self.frame_ready.emit(rgb, raw)
 
-    def _emit(self, event_type: SessionEventType, source: str, **payload) -> SessionEvent:
+    # ──────────────────────────────────────────────────────────
+    # 내부 헬퍼
+    # ──────────────────────────────────────────────────────────
+
+    def _setup_motion_hub_bindings(self) -> None:
+        self._motion_hub.state_changed.connect(self._on_motion_state_changed)
+        self._motion_hub.cartesian_updated.connect(self._on_motion_coords_updated)
+
+    def _on_motion_state_changed(self, state) -> None:
+        self._state.motion.state = str(state.value)
+        self._emit(
+            SessionEventType.MOTION_STATE_CHANGED, "motion_hub",
+            state=self._state.motion.state,
+        )
+
+    def _on_motion_coords_updated(self, coords: list[float]) -> None:
+        self._state.motion.current_cartesian = list(coords)
+        self._emit(
+            SessionEventType.MOTION_COORDS_UPDATED, "motion_hub",
+            coords=list(coords),
+        )
+
+    def _emit(
+        self, event_type: SessionEventType, source: str, **payload
+    ) -> SessionEvent:
         event: SessionEvent = make_event(event_type, source, **payload)
         self.event_published.emit(event)
         return event
 
     def _require_camera_hal(self) -> CameraHal:
+        """반드시 _camera_lock 보유 상태에서 호출해야 합니다."""
         hal = self._camera_hal
         if hal is None:
             raise HalNotConnectedError("Camera HAL is not attached")
