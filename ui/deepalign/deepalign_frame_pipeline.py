@@ -45,10 +45,10 @@ class FramePipelineMixin:
             if arr.ndim != 2:
                 arr = np.zeros((32, 32), dtype=np.uint8)
 
-        cmap = getattr(self.cam_viewer, "_current_cmap", "off")
+        cmap = self.cam_viewer.current_cmap
         if cmap and str(cmap).lower() != "off":
-            vmin = getattr(self.cam_viewer, "_display_vmin", None)
-            vmax = getattr(self.cam_viewer, "_display_vmax", None)
+            vmin = self.cam_viewer.display_vmin
+            vmax = self.cam_viewer.display_vmax
             rgba = apply_colormap(arr.astype(np.float64), str(cmap), vmin=vmin, vmax=vmax)
             return np.ascontiguousarray(rgba[:, :, :3]).astype(np.uint8)
 
@@ -78,7 +78,7 @@ class FramePipelineMixin:
         if not hasattr(self, "roi_list") or not self.cam_viewer:
             return
         self.roi_list.clear()
-        internal_list = self.cam_viewer._roi_list_widget
+        internal_list = self.cam_viewer.get_roi_list_widget()
         for i in range(internal_list.count()):
             src_item = internal_list.item(i)
             new_item = QListWidgetItem(src_item.text())
@@ -88,14 +88,13 @@ class FramePipelineMixin:
     def _on_roi_item_clicked(self, item):
         roi_id = item.data(Qt.ItemDataRole.UserRole)
         if roi_id is not None:
-            self.cam_viewer._set_active_roi(roi_id, "profile")
+            self.cam_viewer.set_active_roi(roi_id, "profile")
 
     def _on_roi_del_clicked(self):
         item = self.roi_list.currentItem()
         if item:
             roi_id = item.data(Qt.ItemDataRole.UserRole)
-            self.cam_viewer._view.delete_roi(roi_id)
-            self.cam_viewer._refresh_roi_list()
+            self.cam_viewer.delete_roi(roi_id)
 
     def _on_roi_clear_clicked(self):
-        self.cam_viewer._delete_all_rois_ui()
+        self.cam_viewer.delete_all_rois()

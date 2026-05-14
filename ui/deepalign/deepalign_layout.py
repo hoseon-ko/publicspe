@@ -530,36 +530,39 @@ class LayoutBuilderMixin:
         self.cb_time_fmt.setEnabled(has_time)
         self.cb_place.setEnabled(has_date or has_time)
 
-    def _update_save_preview(self):
+    def _build_filename_stem(self, counter: str = "0001") -> str:
+        """날짜/시간/카운터 토큰을 조합하여 파일명 stem을 반환합니다.
+
+        Args:
+            counter: 증분 카운터 문자열 (기본 "0001"). 루프에서 충돌 방지 시 증가시켜 넘깁니다.
+
+        Returns:
+            확장자 없는 파일명 stem (예: "Capture_2026-05-14_12_00_00_0001").
+        """
         now = datetime.now()
-        base = self.edit_file_base.text().strip() or "Capture"
-        folder = self.edit_folder.text().strip() or "Live_Captures"
-        tokens = []
+        tokens: list[str] = []
 
         if self.check_add_date.isChecked():
-            if self.cb_date_fmt.currentText() == "YYYY-MM-DD":
-                tokens.append(now.strftime("%Y-%m-%d"))
-            else:
-                tokens.append(now.strftime("%Y-%B-%d"))
+            fmt = "%Y-%m-%d" if self.cb_date_fmt.currentText() == "YYYY-MM-DD" else "%Y-%B-%d"
+            tokens.append(now.strftime(fmt))
 
         if self.check_add_time.isChecked():
-            if self.cb_time_fmt.currentText() == "hh:mm:ss (12h)":
-                tokens.append(now.strftime("%I_%M_%S%p"))
-            else:
-                tokens.append(now.strftime("%H_%M_%S"))
+            fmt = "%I_%M_%S%p" if self.cb_time_fmt.currentText() == "hh:mm:ss (12h)" else "%H_%M_%S"
+            tokens.append(now.strftime(fmt))
 
         if self.check_inc_name.isChecked():
-            tokens.append("0001")
+            tokens.append(counter)
 
-        if tokens:
-            if self.cb_place.currentText() == "Prefix":
-                filename = f"{'_'.join(tokens)}_{base}"
-            else:
-                filename = f"{base}_{'_'.join(tokens)}"
-        else:
-            filename = base
+        base = self.edit_file_base.text().strip() or "Capture"
+        if not tokens:
+            return base
+        joined = "_".join(tokens)
+        return f"{joined}_{base}" if self.cb_place.currentText() == "Prefix" else f"{base}_{joined}"
 
-        full_name = f"{filename}.spe"
+    def _update_save_preview(self):
+        folder = self.edit_folder.text().strip() or "Live_Captures"
+        stem = self._build_filename_stem()
+        full_name = f"{stem}.spe"
         full_path = os.path.normpath(os.path.join(folder, full_name))
         self.lbl_save_preview.setText(f"Example File Name: {full_name}")
         self.lbl_save_full.setText(f"Full Path: {full_path}")
@@ -639,23 +642,36 @@ class LayoutBuilderMixin:
         self.master_btn_stack.addWidget(cam_w)
 
         mir_w = QWidget(); mbl = QHBoxLayout(mir_w); mbl.setContentsMargins(0, 0, 0, 0); mbl.setSpacing(8)
-        for title, sub, color in [("ZERO ALL", "ALL AXIS", "#38bdf8"), ("RESET", "", "#64748b"), ("STOP", "EMERGENCY", "#ef4444")]:
-            mbl.addWidget(self._dash_btn(title, sub, color))
+        self.btn_mirror_zero_all = self._dash_btn("ZERO ALL", "ALL AXIS", "#38bdf8")
+        self.btn_mirror_reset    = self._dash_btn("RESET",    "",         "#64748b")
+        self.btn_mirror_stop     = self._dash_btn("STOP",     "EMERGENCY","#ef4444")
+        for button in (self.btn_mirror_zero_all, self.btn_mirror_reset, self.btn_mirror_stop):
+            mbl.addWidget(button)
         self.master_btn_stack.addWidget(mir_w)
 
         af_w = QWidget(); abl = QHBoxLayout(af_w); abl.setContentsMargins(0, 0, 0, 0); abl.setSpacing(8)
-        for title, sub, color in [("RUN AF", "SEARCH", "#fbbf24"), ("ABORT", "", "#ef4444"), ("SET Z", "BASE", "#3b82f6")]:
-            abl.addWidget(self._dash_btn(title, sub, color))
+        self.btn_af_run   = self._dash_btn("RUN AF", "SEARCH", "#fbbf24")
+        self.btn_af_abort = self._dash_btn("ABORT",  "",       "#ef4444")
+        self.btn_af_set_z = self._dash_btn("SET Z",  "BASE",   "#3b82f6")
+        for button in (self.btn_af_run, self.btn_af_abort, self.btn_af_set_z):
+            abl.addWidget(button)
         self.master_btn_stack.addWidget(af_w)
 
         al_w = QWidget(); albl = QHBoxLayout(al_w); albl.setContentsMargins(0, 0, 0, 0); albl.setSpacing(8)
-        for title, sub, color in [("ENABLE", "ALL", "#4ecdc4"), ("CALC", "KINEM.", "#aa7acc"), ("MOVE", "EXECUTE", "#ef4444"), ("STOP", "ALL", "#64748b")]:
-            albl.addWidget(self._dash_btn(title, sub, color))
+        self.btn_align_enable = self._dash_btn("ENABLE", "ALL",     "#4ecdc4")
+        self.btn_align_calc   = self._dash_btn("CALC",   "KINEM.",  "#aa7acc")
+        self.btn_align_move   = self._dash_btn("MOVE",   "EXECUTE", "#ef4444")
+        self.btn_align_stop   = self._dash_btn("STOP",   "ALL",     "#64748b")
+        for button in (self.btn_align_enable, self.btn_align_calc, self.btn_align_move, self.btn_align_stop):
+            albl.addWidget(button)
         self.master_btn_stack.addWidget(al_w)
 
         mo_w = QWidget(); mol = QHBoxLayout(mo_w); mol.setContentsMargins(0, 0, 0, 0); mol.setSpacing(8)
-        for title, sub, color in [("REFRESH", "", "#4ecdc4"), ("RECONNECT", "ALL", "#fbbf24"), ("STOP", "ALL", "#ef4444")]:
-            mol.addWidget(self._dash_btn(title, sub, color))
+        self.btn_motion_refresh   = self._dash_btn("REFRESH",   "",    "#4ecdc4")
+        self.btn_motion_reconnect = self._dash_btn("RECONNECT", "ALL", "#fbbf24")
+        self.btn_motion_stop      = self._dash_btn("STOP",      "ALL", "#ef4444")
+        for button in (self.btn_motion_refresh, self.btn_motion_reconnect, self.btn_motion_stop):
+            mol.addWidget(button)
         self.master_btn_stack.addWidget(mo_w)
 
         an_w = QWidget()
@@ -701,10 +717,16 @@ class LayoutBuilderMixin:
         lay.addLayout(prog_lay, 1)
 
         tel = QHBoxLayout(); tel.setSpacing(20)
-        for label, val in [("DROPPED", "0"), ("WRITE RATE", "--- MB/s"), ("STORAGE", "--- Free"), ("BUFFER", "---")]:
+        for label, val, attr in [
+            ("DROPPED",    "0",        "lbl_tel_dropped"),
+            ("WRITE RATE", "--- MB/s", "lbl_tel_write_rate"),
+            ("STORAGE",    "--- Free", "lbl_tel_storage"),
+            ("BUFFER",     "---",      "lbl_tel_buffer"),
+        ]:
             vbox = QVBoxLayout(); vbox.setSpacing(2)
             ll = QLabel(label); ll.setStyleSheet("color: #64748b; font-size: 9px; font-weight: 900; border: none;")
-            vv = QLabel(val); vv.setStyleSheet("color: #14b8a6; font-size: 11px; font-weight: 900; border: none;")
+            vv = QLabel(val);   vv.setStyleSheet("color: #14b8a6; font-size: 11px; font-weight: 900; border: none;")
+            setattr(self, attr, vv)
             vbox.addWidget(ll); vbox.addWidget(vv)
             tel.addLayout(vbox)
         lay.addLayout(tel)

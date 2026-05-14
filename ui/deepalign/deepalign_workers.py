@@ -15,14 +15,18 @@ from PyQt6.QtCore import QObject, pyqtSignal
 
 
 class _AcquireWorker(QObject):
+    """hub.acquire_with_progress()를 워커 스레드에서 실행하는 워커.
+
+    hub 경로만 지원합니다. acquire_fn은 반드시 제공해야 합니다.
+    """
+
     frame_started = pyqtSignal(int, int)      # frame_idx(1-based), total
-    progress = pyqtSignal(int, int, object)  # cur, total, raw_frame
-    finished = pyqtSignal(list)              # frames
+    progress = pyqtSignal(int, int, object)   # cur, total, raw_frame
+    finished = pyqtSignal(list)               # frames
     error = pyqtSignal(str)
 
-    def __init__(self, camera_or_snap, nframes: int, acquire_fn=None):
+    def __init__(self, nframes: int, acquire_fn):
         super().__init__()
-        self._camera_or_snap = camera_or_snap
         self._acquire_fn = acquire_fn
         self._nframes = max(1, int(nframes))
         self._stop_requested = False
@@ -33,26 +37,11 @@ class _AcquireWorker(QObject):
     def run(self):
         frames = []
         try:
-            if self._acquire_fn is not None:
-                def _on_frame(idx: int, total: int, frame):
-                    self.frame_started.emit(idx, total)
-                    self.progress.emit(idx, total, frame)
+            def _on_frame(idx: int, total: int, frame):
+                self.frame_started.emit(idx, total)
+                self.progress.emit(idx, total, frame)
 
-                frames = self._acquire_fn(self._nframes, _on_frame, lambda: self._stop_requested)
-                self.finished.emit(frames)
-                return
-
-            if callable(self._camera_or_snap):
-                snap_fn = self._camera_or_snap
-            else:
-                snap_fn = self._camera_or_snap.snap
-            for i in range(self._nframes):
-                if self._stop_requested:
-                    break
-                self.frame_started.emit(i + 1, self._nframes)
-                frame = snap_fn()
-                frames.append(frame)
-                self.progress.emit(i + 1, self._nframes, frame)
+            frames = self._acquire_fn(self._nframes, _on_frame, lambda: self._stop_requested)
             self.finished.emit(frames)
         except Exception as e:
             self.error.emit(str(e))

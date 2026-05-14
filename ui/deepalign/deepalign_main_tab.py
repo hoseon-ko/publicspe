@@ -10,7 +10,8 @@
 
 from __future__ import annotations
 
-import os
+import time
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -27,8 +28,45 @@ from ui.deepalign.deepalign_frame_pipeline import FramePipelineMixin
 from ui.deepalign.deepalign_layout import LayoutBuilderMixin
 from ui.deepalign.deepalign_styles import DeepAlignStylesMixin
 from ui.deepalign.deepalign_workers import _AcquireWorker, _SnapWorker, _LiveWorker
+from core.logger import dev_logger
 from core.session.session_state import CameraConnectionState
 from core.spe_writer import save_spe
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Acquire 진행 상태를 하나의 객체로 관리 (산란 방지)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class AcquireState:
+    """Acquire 작업 전체 진행 상태. _begin_acquire_if_ready()에서 start()로 초기화."""
+    running: bool = False
+    cur: int = 0
+    total: int = 0
+    started_at: float = 0.0
+    frame_expected_s: float = 0.0
+    avg_frame_s: float = 0.0
+    frame_started_at: float = 0.0
+    frame_idx: int = 0
+    stop_requested: bool = False
+
+    def start(self, frame_count: int, expected_s: float) -> None:
+        """Acquire 시작 시 상태 초기화."""
+        t = time.monotonic()
+        self.running = True
+        self.cur = 0
+        self.total = frame_count
+        self.stop_requested = False
+        self.frame_expected_s = expected_s
+        self.avg_frame_s = 0.0
+        self.started_at = t
+        self.frame_started_at = t
+        self.frame_idx = 1
+
+    def reset(self) -> None:
+        """Acquire 종료 후 상태 초기화."""
+        self.running = False
+        self.stop_requested = False
 
 
 class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMixin, CameraControllerMixin, QWidget):
@@ -48,34 +86,34 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self._session_hub: Optional[object] = None
         self._scanned_devices: list[object] = []
         self._viewer_first_frame = True
+
+        # 워커 스레드
         self._acq_thread: Optional[QThread] = None
         self._acq_worker: Optional[_AcquireWorker] = None
         self._snap_thread: Optional[QThread] = None
         self._snap_worker: Optional[_SnapWorker] = None
         self._live_worker_thread: Optional[QThread] = None
         self._live_worker: Optional[_LiveWorker] = None
-        self._acq_running = False
-        self._acq_cur = 0
-        self._acq_total = 0
-        self._acq_started_at = 0.0
-        self._acq_frame_expected_s = 0.0
-        self._acq_avg_frame_s = 0.0
-        self._acq_frame_started_at = 0.0
-        self._acq_frame_idx = 0
-        self._acq_stop_requested = False
+
+        # Acquire 상태 (dataclass로 통합 관리)
+        self._acq = AcquireState()
+
+        # Live 진행 타이머
         self._hub_live_progress_timer = QTimer(self)
         self._hub_live_progress_timer.setInterval(20)
         self._hub_live_progress_timer.timeout.connect(self._on_hub_live_progress_tick)
         self._hub_live_progress_started_at = 0.0
         self._hub_live_progress_cycle_s = 0.05
+
+        # Snap 진행 타이머
         self._snap_progress_timer = QTimer(self)
         self._snap_progress_timer.setInterval(20)
         self._snap_progress_timer.timeout.connect(self._on_snap_progress_tick)
         self._snap_started_at = 0.0
         self._snap_expected_s = 0.05
         self._snap_in_progress = False
-        
-        # ACQUIRE 진행률 타이머 (부드러운 애니메이션)
+
+        # Acquire 진행률 타이머 (부드러운 애니메이션)
         self._acq_progress_timer = QTimer(self)
         self._acq_progress_timer.setInterval(20)
         self._acq_progress_timer.timeout.connect(self._on_acquire_progress_tick)
@@ -116,12 +154,12 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
             "background-color: #0d121d; border-right: 1px solid #1e293b;"
         )
 
-        self.central_stack.addWidget(self._create_cam_page())       # 0
+        self.central_stack.addWidget(self._create_cam_page())              # 0
         self.central_stack.addWidget(self._wrap_panel(self.mirror_panel))  # 1
         self.central_stack.addWidget(self._wrap_panel(self.af_panel))      # 2
         self.central_stack.addWidget(self._wrap_panel(self.align_panel))   # 3
         self.central_stack.addWidget(self._wrap_panel(self.motion_panel))  # 4
-        self.central_stack.addWidget(self._create_analysis_page())  # 5
+        self.central_stack.addWidget(self._create_analysis_page())         # 5
 
         # 3. 우측 작업영역: 도킹(QDockWidget) + 마스터바
         dock_workspace = self._create_docking_workspace()
@@ -156,7 +194,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self.motion_panel.log_message.connect(self._on_sub_panel_log)
 
     def _wire_camera_actions(self):
-        # Camera page controls
+        # ── Camera page controls ──────────────────────────────────────
         self.btn_scan.clicked.connect(self._on_scan_clicked)
         self.btn_connect.clicked.connect(self._on_connect_clicked)
         self.btn_disconnect.clicked.connect(self._on_disconnect_clicked)
@@ -165,16 +203,72 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self.btn_apply_temp.clicked.connect(self._on_apply_temp_clicked)
         self.btn_apply_adc.clicked.connect(self._on_apply_adc_clicked)
 
-        # Master bar controls (camera index)
+        # ── Master bar — Camera 탭 ────────────────────────────────────
         self.btn_snap.clicked.connect(self._on_snap_clicked)
         self.btn_live_air.clicked.connect(self._on_start_live_clicked)
         self.btn_acquire.clicked.connect(self._on_acquire_clicked)
         self.btn_stop_main.clicked.connect(self._on_stop_live_clicked)
         self.cam_viewer.roi_list_changed.connect(self._update_roi_list_from_viewer)
 
-        # Settings persistence
+        # ── Master bar — Mirror 탭 ────────────────────────────────────
+        # TODO: MotorPanel에 zero_all / reset / stop 공개 메서드 추가 후 연결
+        self.btn_mirror_zero_all.clicked.connect(
+            lambda: self._on_master_btn_not_implemented("Mirror / ZERO ALL")
+        )
+        self.btn_mirror_reset.clicked.connect(
+            lambda: self._on_master_btn_not_implemented("Mirror / RESET")
+        )
+        self.btn_mirror_stop.clicked.connect(
+            lambda: self._on_master_btn_not_implemented("Mirror / STOP")
+        )
+
+        # ── Master bar — AutoFocus 탭 ─────────────────────────────────
+        # TODO: AutoFocusPanel에 run_af / abort / set_z_base 공개 메서드 추가 후 연결
+        self.btn_af_run.clicked.connect(
+            lambda: self._on_master_btn_not_implemented("AF / RUN AF")
+        )
+        self.btn_af_abort.clicked.connect(
+            lambda: self._on_master_btn_not_implemented("AF / ABORT")
+        )
+        self.btn_af_set_z.clicked.connect(
+            lambda: self._on_master_btn_not_implemented("AF / SET Z")
+        )
+
+        # ── Master bar — Align 탭 ─────────────────────────────────────
+        # TODO: AcsStagePanel에 enable_all / calc_kinematics / stop_all 공개 메서드 추가 후 연결
+        self.btn_align_enable.clicked.connect(
+            lambda: self._on_master_btn_not_implemented("Align / ENABLE ALL")
+        )
+        self.btn_align_calc.clicked.connect(
+            lambda: self._on_master_btn_not_implemented("Align / CALC KINEM.")
+        )
+        self.btn_align_move.clicked.connect(self.align_panel.run)  # AcsStagePanel.run() 존재
+        self.btn_align_stop.clicked.connect(
+            lambda: self._on_master_btn_not_implemented("Align / STOP ALL")
+        )
+
+        # ── Master bar — Motion 탭 ────────────────────────────────────
+        # TODO: MotionTab에 refresh / reconnect_all / stop_all 공개 메서드 추가 후 연결
+        self.btn_motion_refresh.clicked.connect(
+            lambda: self._on_master_btn_not_implemented("Motion / REFRESH")
+        )
+        self.btn_motion_reconnect.clicked.connect(
+            lambda: self._on_master_btn_not_implemented("Motion / RECONNECT ALL")
+        )
+        self.btn_motion_stop.clicked.connect(
+            lambda: self._on_master_btn_not_implemented("Motion / STOP ALL")
+        )
+
+        # ── Settings persistence ──────────────────────────────────────
         self.cb_vendor.currentTextChanged.connect(self._save_settings)
         self.spin_exposure.valueChanged.connect(self._save_settings)
+        self.spin_fps.valueChanged.connect(self._save_settings)
+        self.check_fps_lock.toggled.connect(self._save_settings)
+        self.spin_temp.valueChanged.connect(self._save_settings)
+        self.cb_adc_quality.currentTextChanged.connect(self._save_settings)
+        self.cb_adc_speed.currentTextChanged.connect(self._save_settings)
+        self.cb_adc_gain.currentTextChanged.connect(self._save_settings)
+        self.cb_adc_bit.currentTextChanged.connect(self._save_settings)
         self.spin_frame_to_save.valueChanged.connect(self._save_settings)
         self.edit_folder.textChanged.connect(self._save_settings)
         self.edit_file_base.textChanged.connect(self._save_settings)
@@ -221,36 +315,69 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self._set_master_progress(value)
 
     def _save_settings(self):
-        self._settings.setValue("camera/vendor", self.cb_vendor.currentText())
+        # Camera
+        self._settings.setValue("camera/vendor",      self.cb_vendor.currentText())
         self._settings.setValue("camera/exposure_ms", float(self.spin_exposure.value()))
+        self._settings.setValue("camera/fps",         float(self.spin_fps.value()))
+        self._settings.setValue("camera/fps_lock",    bool(self.check_fps_lock.isChecked()))
+        self._settings.setValue("camera/temp",        float(self.spin_temp.value()))
+        self._settings.setValue("camera/adc_quality", self.cb_adc_quality.currentText())
+        self._settings.setValue("camera/adc_speed",   self.cb_adc_speed.currentText())
+        self._settings.setValue("camera/adc_gain",    self.cb_adc_gain.currentText())
+        self._settings.setValue("camera/adc_bit",     self.cb_adc_bit.currentText())
+        # Save
         self._settings.setValue("save/frame_to_save", int(self.spin_frame_to_save.value()))
-        self._settings.setValue("save/folder", self.edit_folder.text())
-        self._settings.setValue("save/file_base", self.edit_file_base.text())
-        self._settings.setValue("save/inc_name", bool(self.check_inc_name.isChecked()))
-        self._settings.setValue("save/add_date", bool(self.check_add_date.isChecked()))
-        self._settings.setValue("save/add_time", bool(self.check_add_time.isChecked()))
-        self._settings.setValue("save/date_fmt", self.cb_date_fmt.currentText())
-        self._settings.setValue("save/time_fmt", self.cb_time_fmt.currentText())
-        self._settings.setValue("save/place", self.cb_place.currentText())
+        self._settings.setValue("save/folder",         self.edit_folder.text())
+        self._settings.setValue("save/file_base",      self.edit_file_base.text())
+        self._settings.setValue("save/inc_name",       bool(self.check_inc_name.isChecked()))
+        self._settings.setValue("save/add_date",       bool(self.check_add_date.isChecked()))
+        self._settings.setValue("save/add_time",       bool(self.check_add_time.isChecked()))
+        self._settings.setValue("save/date_fmt",       self.cb_date_fmt.currentText())
+        self._settings.setValue("save/time_fmt",       self.cb_time_fmt.currentText())
+        self._settings.setValue("save/place",          self.cb_place.currentText())
 
     def _restore_settings(self):
-        vendor = str(self._settings.value("camera/vendor", "Simulation"))
-        exposure = self._settings.value("camera/exposure_ms", 20.0, type=float)
-        frame_to_save = self._settings.value("save/frame_to_save", 10, type=int)
-        save_folder = str(self._settings.value("save/folder", "Live_Captures"))
-        file_base = str(self._settings.value("save/file_base", "Capture"))
-        inc_name = self._settings.value("save/inc_name", False, type=bool)
-        add_date = self._settings.value("save/add_date", True, type=bool)
-        add_time = self._settings.value("save/add_time", True, type=bool)
-        date_fmt = str(self._settings.value("save/date_fmt", "YYYY-Month-DD"))
-        time_fmt = str(self._settings.value("save/time_fmt", "hh:mm:ss (24h)"))
-        place = str(self._settings.value("save/place", "Suffix"))
+        # Camera
+        vendor    = str(self._settings.value("camera/vendor",      "Simulation"))
+        exposure  = self._settings.value("camera/exposure_ms", 20.0,  type=float)
+        fps       = self._settings.value("camera/fps",         30.0,  type=float)
+        fps_lock  = self._settings.value("camera/fps_lock",    False, type=bool)
+        temp      = self._settings.value("camera/temp",        -70.0, type=float)
+        adc_qual  = str(self._settings.value("camera/adc_quality", ""))
+        adc_spd   = str(self._settings.value("camera/adc_speed",   ""))
+        adc_gain  = str(self._settings.value("camera/adc_gain",    ""))
+        adc_bit   = str(self._settings.value("camera/adc_bit",     ""))
+        # Save
+        frame_to_save = self._settings.value("save/frame_to_save", 10,    type=int)
+        save_folder   = str(self._settings.value("save/folder",    "Live_Captures"))
+        file_base     = str(self._settings.value("save/file_base", "Capture"))
+        inc_name      = self._settings.value("save/inc_name",  False, type=bool)
+        add_date      = self._settings.value("save/add_date",  True,  type=bool)
+        add_time      = self._settings.value("save/add_time",  True,  type=bool)
+        date_fmt      = str(self._settings.value("save/date_fmt", "YYYY-Month-DD"))
+        time_fmt      = str(self._settings.value("save/time_fmt", "hh:mm:ss (24h)"))
+        place         = str(self._settings.value("save/place",    "Suffix"))
 
-        vendor_index = self.cb_vendor.findText(vendor)
-        if vendor_index >= 0:
-            self.cb_vendor.setCurrentIndex(vendor_index)
-
+        # Camera 복원
+        idx = self.cb_vendor.findText(vendor)
+        if idx >= 0:
+            self.cb_vendor.setCurrentIndex(idx)
         self.spin_exposure.setValue(float(exposure))
+        self.spin_fps.setValue(float(fps))
+        self.check_fps_lock.setChecked(bool(fps_lock))
+        self.spin_temp.setValue(float(temp))
+        for cb, val in [
+            (self.cb_adc_quality, adc_qual),
+            (self.cb_adc_speed,   adc_spd),
+            (self.cb_adc_gain,    adc_gain),
+            (self.cb_adc_bit,     adc_bit),
+        ]:
+            if val:
+                idx = cb.findText(val)
+                if idx >= 0:
+                    cb.setCurrentIndex(idx)
+
+        # Save 복원
         self.spin_frame_to_save.setValue(int(frame_to_save))
         self.edit_folder.setText(save_folder)
         self.edit_file_base.setText(file_base)
@@ -258,15 +385,14 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self.check_add_date.setChecked(bool(add_date))
         self.check_add_time.setChecked(bool(add_time))
 
-        idx_date = self.cb_date_fmt.findText(date_fmt)
-        if idx_date >= 0:
-            self.cb_date_fmt.setCurrentIndex(idx_date)
-        idx_time = self.cb_time_fmt.findText(time_fmt)
-        if idx_time >= 0:
-            self.cb_time_fmt.setCurrentIndex(idx_time)
-        idx_place = self.cb_place.findText(place)
-        if idx_place >= 0:
-            self.cb_place.setCurrentIndex(idx_place)
+        for cb, val in [
+            (self.cb_date_fmt, date_fmt),
+            (self.cb_time_fmt, time_fmt),
+            (self.cb_place,    place),
+        ]:
+            idx = cb.findText(val)
+            if idx >= 0:
+                cb.setCurrentIndex(idx)
 
         self._update_save_control_state()
         self._update_save_preview()
@@ -300,30 +426,27 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self._kimm = None
 
     def set_acs_ctrl(self, ctrl):
+        """ACS 스테이지 컨트롤러를 align_panel에 주입한다."""
         self._acs = ctrl
-        if hasattr(self, 'align_panel') and ctrl is not None:
-            # 컨트롤러를 align_panel에 직접 주입
-            self.align_panel._ctrl_ref[0] = ctrl
-            if ctrl.is_connected:
-                from theme.styles import C_ACCENT
-                from theme.styles import lbl as lbl_style
-                self.align_panel.lbl_status.setText(f"● CONNECTED")
-                self.align_panel.lbl_status.setStyleSheet(lbl_style(C_ACCENT, mono=True, bold=True))
-                self.align_panel.btn_connect.setEnabled(False)
-                self.align_panel.btn_disconnect.setEnabled(True)
-                for b in self.align_panel._move_btns:
-                    b.setEnabled(True)
+        if hasattr(self, "align_panel"):
+            self.align_panel.set_controller(ctrl)
 
     def clear_acs_ctrl(self):
         self._acs = None
+        if hasattr(self, "align_panel"):
+            self.align_panel.set_controller(None)
 
     def set_picos_ctrl(self, ctrl):
         self._picos = ctrl
-        if hasattr(self, 'mirror_panel') and ctrl is not None:
+        if hasattr(self, "mirror_panel") and ctrl is not None:
             self.mirror_panel.set_controller(ctrl)
 
     def _on_sub_panel_log(self, msg: str):
-        print(f"[DeepAlign] {msg}")
+        dev_logger.debug(f"[DeepAlign] {msg}")
+
+    def _on_master_btn_not_implemented(self, name: str):
+        """Master Bar 버튼 중 아직 패널 공개 API가 없는 항목의 임시 핸들러."""
+        dev_logger.warning(f"[DeepAlign] Master Bar '{name}' 버튼은 아직 연결되지 않았습니다.")
 
     def cleanup(self):
         if hasattr(self, "motion_panel"):
@@ -333,7 +456,8 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         super()._on_tab_changed(idx)
         if not hasattr(self, "main_splitter"):
             return
-        if idx == 4:
+        _MOTION_PAGE_IDX = 4
+        if idx == _MOTION_PAGE_IDX:
             self.central_stack.setMaximumWidth(16_777_215)
             self.right_splitter.setVisible(False)
             self.main_splitter.setSizes([1600, 0])

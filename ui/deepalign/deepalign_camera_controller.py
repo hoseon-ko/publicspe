@@ -46,7 +46,7 @@ class CameraControllerMixin(CameraHubMixin):
         self._start_hub_live()
 
     def _on_stop_live_clicked(self):
-        if self._acq_running:
+        if self._acq.running:
             self._stop_acquire()
             return
         self._update_dash_label(self.btn_live_air, "LIVE", "")
@@ -88,17 +88,17 @@ class CameraControllerMixin(CameraHubMixin):
         self._set_master_progress(int(ratio * 100.0))
 
     def _on_acquire_progress_tick(self) -> None:
-        if not self._acq_running:
+        if not self._acq.running:
             self._acq_progress_timer.stop()
             return
 
-        expected = max(0.001, float(self._acq_frame_expected_s))
+        expected = max(0.001, float(self._acq.frame_expected_s))
         now_mono = time.monotonic()
-        frame_elapsed = clamp_frame_elapsed(now_mono, self._acq_frame_started_at, expected)
+        frame_elapsed = clamp_frame_elapsed(now_mono, self._acq.frame_started_at, expected)
 
-        completed = max(0, min(self._acq_cur, self._acq_total))
+        completed = max(0, min(self._acq.cur, self._acq.total))
         in_frame_ratio = min(1.0, frame_elapsed / expected)
-        overall_ratio = overall_progress_ratio(completed, self._acq_total, in_frame_ratio)
+        overall_ratio = overall_progress_ratio(completed, self._acq.total, in_frame_ratio)
         self._set_master_progress(int(overall_ratio * 100.0))
         self._update_acquire_times(skip_progress_calc=True)
 
@@ -144,7 +144,7 @@ class CameraControllerMixin(CameraHubMixin):
             return 0.05
 
     def _on_acquire_clicked(self):
-        if self._acq_running:
+        if self._acq.running:
             return
         if not self._is_hub_camera_connected():
             dev_logger.debug("[DeepAlign] acquire ignored (hub camera disconnected)")
@@ -154,13 +154,13 @@ class CameraControllerMixin(CameraHubMixin):
             try:
                 self._stop_hub_live(after_stop=self._begin_acquire_if_ready)
             except Exception as exc:
-                print(f"[DeepAlign] Failed to trigger physical stop before acquire: {exc}")
+                dev_logger.exception(f"[DeepAlign] Failed to trigger physical stop before acquire: {exc}")
             return
 
         self._begin_acquire_if_ready()
 
     def _begin_acquire_if_ready(self):
-        if self._acq_running:
+        if self._acq.running:
             return
         if not self._is_hub_camera_connected():
             dev_logger.debug("[DeepAlign] acquire deferred but hub camera disconnected")
@@ -168,15 +168,7 @@ class CameraControllerMixin(CameraHubMixin):
 
         frame_count = max(1, int(self.spin_frame_to_save.value()))
 
-        self._acq_running = True
-        self._acq_cur = 0
-        self._acq_total = frame_count
-        self._acq_stop_requested = False
-        self._acq_started_at = time.monotonic()
-        self._acq_frame_expected_s = self._estimate_frame_seconds()
-        self._acq_avg_frame_s = 0.0
-        self._acq_frame_started_at = self._acq_started_at
-        self._acq_frame_idx = 1
+        self._acq.start(frame_count, self._estimate_frame_seconds())
 
         self._update_dash_label(self.btn_acquire, "ACQUIRE", "SAVING")
         self._set_master_progress(0)
@@ -191,7 +183,6 @@ class CameraControllerMixin(CameraHubMixin):
 
         self._acq_thread = QThread(self)
         self._acq_worker = _AcquireWorker(
-            None,
             frame_count,
             acquire_fn=lambda n, on_frame, should_stop: self._session_hub.acquire_with_progress(
                 OWNER_DEEPALIGN,
@@ -213,45 +204,45 @@ class CameraControllerMixin(CameraHubMixin):
         self._acq_thread.start()
 
     def _stop_acquire(self):
-        if not self._acq_running:
+        if not self._acq.running:
             return
-        self._acq_stop_requested = True
+        self._acq.stop_requested = True
         self._update_dash_label(self.btn_acquire, "ACQUIRE", "STOPPING")
         self._update_dash_label(self.btn_live_air, "LIVE", "")
         if self._acq_worker is not None:
             self._acq_worker.stop()
 
     def _on_acquire_frame_started(self, idx: int, total: int):
-        self._acq_frame_idx = int(idx)
-        self._acq_total = max(1, int(total))
-        self._acq_frame_started_at = time.monotonic()
+        self._acq.frame_idx = int(idx)
+        self._acq.total = max(1, int(total))
+        self._acq.frame_started_at = time.monotonic()
         self._update_acquire_times(skip_progress_calc=True)
 
     def _on_acquire_progress(self, cur: int, total: int, raw):
-        self._acq_cur = int(cur)
-        self._acq_total = max(1, int(total))
-        self._acq_frame_started_at = time.monotonic()
+        self._acq.cur = int(cur)
+        self._acq.total = max(1, int(total))
+        self._acq.frame_started_at = time.monotonic()
 
-        elapsed = max(0.0, time.monotonic() - self._acq_started_at)
-        if self._acq_cur > 0:
-            self._acq_avg_frame_s = elapsed / float(self._acq_cur)
+        elapsed = max(0.0, time.monotonic() - self._acq.started_at)
+        if self._acq.cur > 0:
+            self._acq.avg_frame_s = elapsed / float(self._acq.cur)
 
         self.lbl_frame_info.setText(
-            f"FRAME: <font color='#f8fafc'>{self._acq_cur} / {self._acq_total}</font>"
+            f"FRAME: <font color='#f8fafc'>{self._acq.cur} / {self._acq.total}</font>"
         )
         self._update_acquire_times(skip_progress_calc=True)
         self._push_frame(raw)
 
     def _on_acquire_finished(self, frames: list):
-        self._acq_running = False
+        self._acq.running = False
         self._acq_progress_timer.stop()
-        stopped = self._acq_stop_requested or (len(frames) < self._acq_total)
+        stopped = self._acq.stop_requested or (len(frames) < self._acq.total)
         if stopped:
-            final_pct = int(100 * len(frames) / max(1, self._acq_total))
+            final_pct = int(100 * len(frames) / max(1, self._acq.total))
             self._set_master_progress(final_pct)
         else:
-            self._set_master_progress(100 if self._acq_total > 0 else 0)
-        final_total = self._acq_total if self._acq_total > 0 else len(frames)
+            self._set_master_progress(100 if self._acq.total > 0 else 0)
+        final_total = self._acq.total if self._acq.total > 0 else len(frames)
         self.lbl_frame_info.setText(
             f"FRAME: <font color='#f8fafc'>{len(frames)} / {final_total}</font>"
         )
@@ -274,14 +265,14 @@ class CameraControllerMixin(CameraHubMixin):
         self._restore_after_acquire()
 
     def _on_acquire_error(self, msg: str):
-        self._acq_running = False
+        self._acq.running = False
         self._acq_progress_timer.stop()
         self._set_master_progress(0)
         self.lbl_times.setText(
             "FRAME TIME: <font color='#f8fafc'>ERROR</font> | REMAIN: "
             "<font color='#f8fafc'>00:00:00</font> | ETA: <font color='#f8fafc'>ERROR</font>"
         )
-        print(f"[DeepAlign] Acquire failed: {msg}")
+        dev_logger.error(f"[DeepAlign] Acquire failed: {msg}")
         self._update_dash_label(self.btn_acquire, "ACQUIRE", "FAILED")
         self._restore_after_acquire()
 
@@ -302,50 +293,18 @@ class CameraControllerMixin(CameraHubMixin):
         folder = Path(self.edit_folder.text().strip() or "Live_Captures")
         folder.mkdir(parents=True, exist_ok=True)
 
-        base = self.edit_file_base.text().strip() or "Capture"
-        tokens: list[str] = []
-        now = datetime.now()
-
-        if self.check_add_date.isChecked():
-            if self.cb_date_fmt.currentText() == "YYYY-MM-DD":
-                tokens.append(now.strftime("%Y-%m-%d"))
-            else:
-                tokens.append(now.strftime("%Y-%B-%d"))
-
-        if self.check_add_time.isChecked():
-            if self.cb_time_fmt.currentText() == "hh:mm:ss (12h)":
-                tokens.append(now.strftime("%I_%M_%S%p"))
-            else:
-                tokens.append(now.strftime("%H_%M_%S"))
-
-        if self.check_inc_name.isChecked():
-            tokens.append("0001")
-
-        if tokens:
-            if self.cb_place.currentText() == "Prefix":
-                stem = f"{'_'.join(tokens)}_{base}"
-            else:
-                stem = f"{base}_{'_'.join(tokens)}"
-        else:
-            stem = base
-
+        stem = self._build_filename_stem()
         path = folder / f"{stem}.spe"
+
         if self.check_inc_name.isChecked():
             counter = 2
             while path.exists():
-                seq = f"{counter:04d}"
-                if tokens:
-                    token_list = list(tokens)
-                    token_list[-1] = seq
-                    if self.cb_place.currentText() == "Prefix":
-                        stem = f"{'_'.join(token_list)}_{base}"
-                    else:
-                        stem = f"{base}_{'_'.join(token_list)}"
-                else:
-                    stem = f"{base}_{seq}"
+                stem = self._build_filename_stem(counter=f"{counter:04d}")
                 path = folder / f"{stem}.spe"
                 counter += 1
         elif path.exists():
+            base = self.edit_file_base.text().strip() or "Capture"
+            now = datetime.now()
             path = folder / f"{base}_{now.strftime('%Y%m%d_%H%M%S')}.spe"
 
         return path
@@ -444,7 +403,7 @@ class CameraControllerMixin(CameraHubMixin):
             after_stop()
 
     def _on_hub_live_frame(self, raw) -> None:
-        if self._acq_running:
+        if self._acq.running:
             return
         self._hub_live_progress_started_at = time.monotonic()
         self._push_frame(raw)
@@ -453,7 +412,7 @@ class CameraControllerMixin(CameraHubMixin):
         self._on_hub_live_frame(raw)
 
     def _on_hub_live_progress_tick(self) -> None:
-        if not self._hub_live_progress_timer.isActive() or self._acq_running:
+        if not self._hub_live_progress_timer.isActive() or self._acq.running:
             return
         if not getattr(self, "_hub_live_active", False):
             return
@@ -468,8 +427,8 @@ class CameraControllerMixin(CameraHubMixin):
             self._stop_hub_live()
 
             # 2) Acquire 진행 중이면 stop 플래그 세팅
-            if getattr(self, "_acq_running", False):
-                self._acq_stop_requested = True
+            if self._acq.running:
+                self._acq.stop_requested = True
                 if self._acq_worker is not None:
                     self._acq_worker.stop()
 
@@ -495,7 +454,7 @@ class CameraControllerMixin(CameraHubMixin):
         return format_hms(seconds)
 
     def _update_acquire_times(self, force_done: bool = False, skip_progress_calc: bool = False):
-        if self._acq_started_at <= 0:
+        if self._acq.started_at <= 0:
             self.lbl_times.setText(
                 "FRAME TIME: <font color='#f8fafc'>0.00 / 0.00s</font> | REMAIN: "
                 "<font color='#f8fafc'>00:00:00</font> | ETA: <font color='#f8fafc'>00:00:00</font>"
@@ -503,20 +462,20 @@ class CameraControllerMixin(CameraHubMixin):
             return
 
         now_mono = time.monotonic()
-        expected = max(0.001, float(self._acq_frame_expected_s))
+        expected = max(0.001, float(self._acq.frame_expected_s))
         effective_frame_s = expected
-        if self._acq_avg_frame_s > 0:
-            effective_frame_s = max(0.001, float(self._acq_avg_frame_s))
-        frame_elapsed = 0.0 if force_done else clamp_frame_elapsed(now_mono, self._acq_frame_started_at, expected)
+        if self._acq.avg_frame_s > 0:
+            effective_frame_s = max(0.001, float(self._acq.avg_frame_s))
+        frame_elapsed = 0.0 if force_done else clamp_frame_elapsed(now_mono, self._acq.frame_started_at, expected)
 
-        completed = max(0, min(self._acq_cur, self._acq_total))
+        completed = max(0, min(self._acq.cur, self._acq.total))
         in_frame_ratio = 0.0 if force_done else min(1.0, frame_elapsed / expected)
 
         if not skip_progress_calc:
-            overall_ratio = overall_progress_ratio(completed, self._acq_total, in_frame_ratio)
+            overall_ratio = overall_progress_ratio(completed, self._acq.total, in_frame_ratio)
             self._set_master_progress(int(overall_ratio * 100.0))
 
-        remaining_frames = max(0.0, float(self._acq_total - completed) - in_frame_ratio)
+        remaining_frames = max(0.0, float(self._acq.total - completed) - in_frame_ratio)
         remain = max(0.0, remaining_frames * effective_frame_s)
         eta = time.time() + remain
         eta_txt = time.strftime("%H:%M:%S", time.localtime(eta))

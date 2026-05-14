@@ -73,6 +73,43 @@ class DeepAlignViewerV2Adapter(QWidget):
         if fit:
             self.viewer.view.fit_in_view()
 
+    # ------------------------------------------------------------------
+    # Public API (FramePipelineMixin 등 외부에서 접근할 공개 인터페이스)
+    # ------------------------------------------------------------------
+
+    @property
+    def current_cmap(self) -> str:
+        """현재 적용된 컬러맵 이름을 반환합니다."""
+        return self._current_cmap
+
+    @property
+    def display_vmin(self):
+        """현재 표시 범위의 최솟값을 반환합니다."""
+        return self._display_vmin
+
+    @property
+    def display_vmax(self):
+        """현재 표시 범위의 최댓값을 반환합니다."""
+        return self._display_vmax
+
+    def get_roi_list_widget(self) -> QListWidget:
+        """내부 ROI 목록 위젯을 반환합니다."""
+        return self._roi_list_widget
+
+    def set_active_roi(self, roi_id: int, mode: str = "profile") -> None:
+        """지정한 ROI를 활성 상태로 설정합니다."""
+        self._set_active_roi(roi_id, mode)
+
+    def delete_roi(self, roi_id: int) -> None:
+        """지정한 ROI를 삭제하고 목록을 갱신합니다."""
+        self._delete_roi_from_view(roi_id)
+
+    def delete_all_rois(self) -> None:
+        """모든 ROI를 삭제합니다."""
+        self._delete_all_rois_ui()
+
+    # ------------------------------------------------------------------
+
     def hide_range_popup(self) -> None:
         popup = getattr(self.viewer, "_range_popup", None)
         if popup is not None:
