@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+"""Camera HAL protocol definitions."""
+
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Callable, Protocol, runtime_checkable
 
@@ -17,6 +21,15 @@ class CameraCapabilities:
     has_fps_control: bool = False
     has_binarize: bool = False
     supports_range_control: bool = True
+    
+    # Picam / Hardware specific
+    temperature_range_c: tuple[float | None, float | None] = (None, None)
+    adc_quality_options: list[str] = field(default_factory=list)
+    adc_speed_options: list[str] = field(default_factory=list)
+    adc_gain_options: list[str] = field(default_factory=list)
+    adc_bit_depth_options: list[str] = field(default_factory=list)
+    adc_port_options: list[str] = field(default_factory=list)
+    
     metadata: dict[str, str] = field(default_factory=dict)
 
 
@@ -61,3 +74,12 @@ class CameraHal(Protocol):
     def set_range(self, vmin: float | None, vmax: float | None) -> None: ...
 
     def set_colormap(self, name: str) -> None: ...
+
+    # Optional Hardware Controls
+    def get_temperature(self) -> tuple: ...
+    def set_temperature(self, celsius: float) -> None: ...
+    def get_adc_candidates(self) -> dict: ...
+    def get_adc_settings(self) -> dict: ...
+    def set_adc_settings(self, **kwargs) -> None: ...
+    def get_roi(self) -> tuple | None: ...
+    def set_roi(self, x: int, y: int, width: int, height: int, hbin: int = 1, vbin: int = 1) -> None: ...

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Optional, List
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
     QPushButton, QFrame, QSizePolicy,
@@ -63,6 +63,8 @@ class MirrorMotorPanel(QWidget):
         super().__init__(parent)
         self._ctrl: Optional[PicomotorController] = None
         self._is_own_ctrl: bool = False          # True = 직접 연결, False = 주입
+        self._session_hub = None
+        self._poll_timer: Optional[QTimer] = None
         self._pico_cards: List[MotorCard] = []
         self._pico_pos_labels: List[QLabel] = []
         self._build_ui()
@@ -194,6 +196,17 @@ class MirrorMotorPanel(QWidget):
     # ── 직접 연결 ─────────────────────────────────────────────────────────────
 
     def _on_connect(self) -> None:
+        if self._session_hub is not None:
+            try:
+                self._session_hub.connect_pico()
+                self._start_hub_polling()
+                self._apply_connected(True, "Picomotor 8742")
+                self.connected.emit("Picomotor 8742")
+                self.log_message.emit("✅ Picomotor 연결 (hub)")
+            except Exception as e:
+                self.log_message.emit(f"❌ 연결 오류: {e}")
+                dev_logger.exception("[MirrorMotorPanel] connect via hub failed")
+            return
         try:
             self._ctrl = PicomotorController()
             model = self._ctrl.connect()
@@ -209,6 +222,16 @@ class MirrorMotorPanel(QWidget):
             dev_logger.exception("[MirrorMotorPanel] connect failed")
 
     def _on_disconnect(self) -> None:
+        if self._session_hub is not None:
+            self._stop_hub_polling()
+            try:
+                self._session_hub.disconnect_pico()
+            except Exception:
+                pass
+            self._apply_connected(False)
+            self.disconnected.emit()
+            self.log_message.emit("Picomotor 연결 해제 (hub)")
+            return
         if self._is_own_ctrl and self._ctrl:
             try:
                 self._ctrl.stop_polling()
@@ -229,6 +252,34 @@ class MirrorMotorPanel(QWidget):
         self.disconnected.emit()
         self.log_message.emit("⚠️ Picomotor 연결 끊김")
 
+    # ── SessionHub 연동 ───────────────────────────────────────────────────────
+
+    def bind_session_hub(self, hub) -> None:
+        """DeepAlignMainTab.bind_session_hub()에서 호출 — hub 경유 모드 활성화."""
+        self._session_hub = hub
+
+    def _start_hub_polling(self) -> None:
+        if self._poll_timer is not None:
+            return
+        self._poll_timer = QTimer(self)
+        self._poll_timer.setInterval(500)
+        self._poll_timer.timeout.connect(self._poll_hub_positions)
+        self._poll_timer.start()
+
+    def _stop_hub_polling(self) -> None:
+        if self._poll_timer is not None:
+            self._poll_timer.stop()
+            self._poll_timer = None
+
+    def _poll_hub_positions(self) -> None:
+        if self._session_hub is None:
+            return
+        try:
+            positions = [self._session_hub.pico_get_position(ax) for ax in range(1, 5)]
+            self.update_positions(positions)
+        except Exception:
+            pass
+
     # ── 위치 갱신 ─────────────────────────────────────────────────────────────
 
     def update_positions(self, positions: list) -> None:
@@ -241,7 +292,10 @@ class MirrorMotorPanel(QWidget):
         self.positions_updated.emit(list(positions))
 
     def _refresh_positions(self) -> None:
-        """REFRESH 버튼 — 주입 컨트롤러에서 즉시 조회 (자체 폴링 시는 자동 갱신)."""
+        """REFRESH 버튼 — 즉시 위치 조회."""
+        if self._session_hub is not None:
+            self._poll_hub_positions()
+            return
         if self._ctrl and self._ctrl.is_connected:
             try:
                 self.update_positions(self._ctrl.get_all_positions())
@@ -251,6 +305,20 @@ class MirrorMotorPanel(QWidget):
     # ── 모터 이동 ─────────────────────────────────────────────────────────────
 
     def _on_move_requested(self, motor_num: int, steps: int) -> None:
+        if self._session_hub is not None:
+            self._pico_cards[motor_num - 1].flash_moving(steps)
+            try:
+                if steps == 0:
+                    dev_logger.debug(f"[MirrorMotorPanel] zero via hub not supported, skipping M{motor_num}")
+                    self.log_message.emit(f"Motor {motor_num}: ZERO (hub mode — counter reset not supported)")
+                else:
+                    self._session_hub.pico_move_relative(motor_num, steps)
+                    sign = "+" if steps > 0 else ""
+                    self.log_message.emit(f"Motor {motor_num}: {sign}{steps} steps → OK")
+            except Exception as e:
+                self.log_message.emit(f"Motor {motor_num} 오류: {e}")
+                dev_logger.exception("[MirrorMotorPanel] move via hub error")
+            return
         if self._ctrl is None or not self._ctrl.is_connected:
             return
         self._pico_cards[motor_num - 1].flash_moving(steps)
@@ -269,6 +337,10 @@ class MirrorMotorPanel(QWidget):
             dev_logger.exception("[MirrorMotorPanel] move error")
 
     def _on_zero_all(self) -> None:
+        if self._session_hub is not None:
+            dev_logger.debug("[MirrorMotorPanel] zero_all via hub not supported")
+            self.log_message.emit("⚠️ ZERO ALL: hub 모드에서는 카운터 초기화 미지원")
+            return
         if self._ctrl is None or not self._ctrl.is_connected:
             return
         errors = []
@@ -283,6 +355,10 @@ class MirrorMotorPanel(QWidget):
             self.log_message.emit("⊙ 전체 포지션 카운터 초기화 완료")
 
     def _on_stop_all(self) -> None:
+        if self._session_hub is not None:
+            dev_logger.debug("[MirrorMotorPanel] stop_all via hub not supported")
+            self.log_message.emit("⛔ STOP ALL: hub 모드에서는 즉시 정지 미지원")
+            return
         if self._ctrl is None:
             return
         try:
@@ -329,6 +405,9 @@ class MirrorMotorPanel(QWidget):
 
     def reset_controller(self) -> None:
         """Master Bar RESET 버튼 — 모션 중단(best-effort)."""
+        if self._session_hub is not None:
+            dev_logger.debug("[MirrorMotorPanel] reset via hub not supported")
+            return
         if self._ctrl:
             try:
                 self._ctrl.stop_all()
@@ -337,6 +416,14 @@ class MirrorMotorPanel(QWidget):
 
     def move(self, motor_num: int, steps: int) -> bool:
         """외부(ScanWorker 등)에서 모터 이동."""
+        if self._session_hub is not None:
+            try:
+                if steps != 0:
+                    self._session_hub.pico_move_relative(motor_num, steps)
+                return True
+            except Exception as e:
+                self.log_message.emit(f"Motor {motor_num} 이동 오류: {e}")
+                return False
         if self._ctrl is None or not self._ctrl.is_connected:
             return False
         try:
@@ -349,6 +436,11 @@ class MirrorMotorPanel(QWidget):
             return False
 
     def get_positions(self) -> list:
+        if self._session_hub is not None:
+            try:
+                return [self._session_hub.pico_get_position(ax) for ax in range(1, 5)]
+            except Exception:
+                return [None, None, None, None]
         if self._ctrl and self._ctrl.is_connected:
             try:
                 return self._ctrl.get_all_positions()
@@ -357,7 +449,8 @@ class MirrorMotorPanel(QWidget):
         return [None, None, None, None]
 
     def stop_polling(self) -> None:
-        """앱 종료 시 자체 연결만 종료한다. 주입 컨트롤러는 LiveTab이 관리."""
+        """앱 종료 시 타이머 및 자체 연결 종료. 주입 컨트롤러는 LiveTab이 관리."""
+        self._stop_hub_polling()
         if self._is_own_ctrl and self._ctrl:
             try:
                 self._ctrl.stop_polling()
@@ -367,6 +460,8 @@ class MirrorMotorPanel(QWidget):
 
     @property
     def is_connected(self) -> bool:
+        if self._session_hub is not None:
+            return self._poll_timer is not None and self._poll_timer.isActive()
         return self._ctrl is not None and self._ctrl.is_connected
 
     @property

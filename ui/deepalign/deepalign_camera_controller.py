@@ -591,8 +591,14 @@ class CameraControllerMixin(CameraHubMixin):
             return
         try:
             reading, setpoint, status = self._session_hub.camera_get_temperature(OWNER_DEEPALIGN)
-            self.lbl_temp_read.setText(f"Reading: {reading}")
-            self.lbl_temp_set.setText(f"Setpoint: {setpoint}")
-            self.lbl_temp_state.setText(f"Status: {status}")
+            
+            # None 처리를 위해 문자열 변환 시 fallback 적용
+            r_str = f"{float(reading):.2f}" if reading is not None else "—"
+            s_str = f"{float(setpoint):.2f}" if setpoint is not None else "—"
+            st_str = str(status) if status is not None else "—"
+
+            self.lbl_temp_read.setText(f"Reading: {r_str}")
+            self.lbl_temp_set.setText(f"Setpoint: {s_str}")
+            self.lbl_temp_state.setText(f"Status: {st_str}")
         except Exception:
             pass

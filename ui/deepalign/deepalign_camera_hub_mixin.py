@@ -77,6 +77,42 @@ class CameraHubMixin:
                     self.spin_exposure.blockSignals(False)
                 except Exception:
                     pass
+
+                # [ADDED] 온도 및 ADC 설정 즉시 동기화
+                if caps and caps.has_temperature:
+                    try:
+                        reading, setpoint, status = self._session_hub.camera_get_temperature(OWNER_DEEPALIGN)
+                        self.lbl_temp_read.setText(f"Reading: {reading}")
+                        self.lbl_temp_set.setText(f"Setpoint: {setpoint}")
+                        self.lbl_temp_state.setText(f"Status: {status}")
+                        if setpoint is not None:
+                            self.spin_temp.blockSignals(True)
+                            self.spin_temp.setValue(float(setpoint))
+                            self.spin_temp.blockSignals(False)
+                    except Exception:
+                        pass
+                
+                if caps and caps.has_adc:
+                    try:
+                        settings = self._session_hub.camera_get_adc_settings(OWNER_DEEPALIGN)
+                        # settings 맵의 값을 콤보박스에 반영
+                        mapping = {
+                            "adc_quality": self.cb_adc_quality,
+                            "adc_speed": self.cb_adc_speed,
+                            "adc_analog_gain": self.cb_adc_gain,
+                            "bit_depth": self.cb_adc_bit,
+                        }
+                        for key, cb in mapping.items():
+                            val = settings.get(key)
+                            if val is not None:
+                                idx = cb.findText(str(val))
+                                if idx >= 0:
+                                    cb.blockSignals(True)
+                                    cb.setCurrentIndex(idx)
+                                    cb.blockSignals(False)
+                    except Exception:
+                        pass
+
                 self._set_camera_action_state(True)
                 has_temp = bool(caps and getattr(caps, "has_temperature", False))
                 if has_temp:

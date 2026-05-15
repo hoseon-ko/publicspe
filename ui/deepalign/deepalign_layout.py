@@ -122,6 +122,142 @@ class LayoutBuilderMixin:
         lay.addWidget(scroll)
         return page
 
+    def _create_align_page(self) -> QWidget:
+        """Align 탭 페이지 — AcsStagePanel + Kinematic Calc 섹션."""
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("border: none; background: transparent;")
+
+        container = QWidget()
+        c_lay = QVBoxLayout(container)
+        c_lay.setContentsMargins(0, 0, 0, 0)
+        c_lay.addWidget(self.align_panel)
+        c_lay.addWidget(self._create_kinem_calc_section())
+
+        scroll.setWidget(container)
+        lay.addWidget(scroll)
+        return page
+
+    def _create_kinem_calc_section(self) -> QWidget:
+        """KINEMATIC CALC 섹션 — 3개 볼 위치 입력 + 형상 설정 + 결과 표시."""
+        _C_ACCENT    = "#aa7acc"
+        _C_BG        = "#080e1e"
+        _C_BD        = "#2a1a4a"
+        _C_TEXT      = "#c0a8ff"
+        _C_TEXT_DIM  = "#6a5a8a"
+        _SPIN_QSS = f"""
+            QDoubleSpinBox {{
+                background:{_C_BG}; border:1px solid {_C_BD};
+                color:{_C_TEXT}; border-radius:3px;
+                font-size:11px; padding:1px 4px;
+            }}
+            QDoubleSpinBox:focus {{ border-color:{_C_ACCENT}; }}
+            QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
+                width:12px; border:none; background:#0d1838;
+            }}
+        """
+        _LBL = f"color:{_C_TEXT_DIM}; font-size:11px;"
+        _BTN = f"""
+            QPushButton {{
+                background:transparent; color:{_C_ACCENT};
+                border:1px solid {_C_ACCENT}; border-radius:3px;
+                font-size:11px; font-weight:bold; padding:3px 10px;
+            }}
+            QPushButton:hover {{ background:{_C_ACCENT}22; }}
+            QPushButton:disabled {{ color:#3a2a5a; border-color:#2a1a3a; }}
+        """
+
+        sec = QGroupBox("KINEMATIC CALC")
+        sec.setStyleSheet(f"""
+            QGroupBox {{
+                color:{_C_ACCENT}; border:1px solid {_C_BD};
+                border-radius:4px; margin-top:8px; font-size:11px;
+                font-weight:bold; letter-spacing:2px;
+            }}
+            QGroupBox::title {{ subcontrol-origin:margin; left:8px; }}
+        """)
+        v = QVBoxLayout(sec)
+        v.setContentsMargins(8, 12, 8, 8)
+        v.setSpacing(6)
+
+        # ── 1. 형상 설정 파일 ─────────────────────────────────────────
+        cfg_row = QHBoxLayout()
+        cfg_lbl = QLabel("Config:")
+        cfg_lbl.setStyleSheet(_LBL)
+        cfg_lbl.setFixedWidth(46)
+        self.edit_kinem_config = QLineEdit()
+        self.edit_kinem_config.setPlaceholderText("geometry_config.json 경로")
+        self.edit_kinem_config.setStyleSheet(f"""
+            QLineEdit {{
+                background:{_C_BG}; border:1px solid {_C_BD};
+                color:{_C_TEXT}; border-radius:3px; font-size:11px; padding:2px 5px;
+            }}
+            QLineEdit:focus {{ border-color:{_C_ACCENT}; }}
+        """)
+        self.btn_kinem_config_browse = QPushButton("…")
+        self.btn_kinem_config_browse.setFixedWidth(28)
+        self.btn_kinem_config_browse.setStyleSheet(_BTN)
+        cfg_row.addWidget(cfg_lbl)
+        cfg_row.addWidget(self.edit_kinem_config, 1)
+        cfg_row.addWidget(self.btn_kinem_config_browse)
+        v.addLayout(cfg_row)
+
+        # ── 2. 측정 볼 위치 (3 balls × xyz) ───────────────────────────
+        balls_lbl = QLabel("Measured ball positions (mm)")
+        balls_lbl.setStyleSheet(_LBL)
+        v.addWidget(balls_lbl)
+
+        grid = QGridLayout()
+        grid.setSpacing(3)
+        grid.setContentsMargins(0, 0, 0, 0)
+        for col, hdr in enumerate(("", "X", "Y", "Z")):
+            h = QLabel(hdr)
+            h.setStyleSheet(f"color:{_C_ACCENT}; font-size:10px; font-weight:bold;")
+            h.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            grid.addWidget(h, 0, col)
+
+        self._kinem_ball_spins: list[list[QDoubleSpinBox]] = []
+        for r in range(3):
+            row_spins = []
+            lbl = QLabel(f"B{r+1}")
+            lbl.setStyleSheet(f"color:{_C_TEXT}; font-size:11px; font-weight:bold;")
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            grid.addWidget(lbl, r + 1, 0)
+            for c in range(3):
+                sp = QDoubleSpinBox()
+                sp.setRange(-9999.0, 9999.0)
+                sp.setDecimals(4)
+                sp.setValue(0.0)
+                sp.setStyleSheet(_SPIN_QSS)
+                sp.setFixedHeight(24)
+                grid.addWidget(sp, r + 1, c + 1)
+                row_spins.append(sp)
+            self._kinem_ball_spins.append(row_spins)
+        v.addLayout(grid)
+
+        # ── 3. 결과 표시 ─────────────────────────────────────────────
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet(f"color:{_C_BD}; margin:2px 0;")
+        v.addWidget(sep)
+
+        res_lbl = QLabel("RESULT")
+        res_lbl.setStyleSheet(f"color:{_C_TEXT_DIM}; font-size:10px; font-weight:bold; letter-spacing:2px;")
+        v.addWidget(res_lbl)
+
+        self.lbl_kinem_result = QLabel("rx=—  ry=—  rz=—  tx=—  ty=—  tz=—")
+        self.lbl_kinem_result.setStyleSheet(
+            f"color:{_C_ACCENT}; font-size:11px; font-family:monospace;"
+        )
+        self.lbl_kinem_result.setWordWrap(True)
+        v.addWidget(self.lbl_kinem_result)
+
+        return sec
+
     def _create_docking_workspace(self) -> QMainWindow:
         host = QMainWindow()
         host.setObjectName("deepAlignDockHost")
@@ -847,16 +983,35 @@ class LayoutBuilderMixin:
         self.sec_adc.setVisible(has_adc)
         self.sec_temp.setVisible(has_temp)
 
+        if has_temp and hasattr(caps, "temperature_range_c"):
+            mn, mx = caps.temperature_range_c
+            if mn is not None:
+                self.spin_temp.setMinimum(float(mn))
+            if mx is not None:
+                self.spin_temp.setMaximum(float(mx))
+
         if has_adc:
             self.cb_adc_quality.clear()
             self.cb_adc_speed.clear()
             self.cb_adc_gain.clear()
             self.cb_adc_bit.clear()
 
-            self.cb_adc_quality.addItems(getattr(caps, "adc_quality_options", []) or ["High Capacity", "Low Noise"])
-            self.cb_adc_speed.addItems(getattr(caps, "adc_speed_options", []) or ["100kHz", "1MHz"])
-            self.cb_adc_gain.addItems(getattr(caps, "adc_gain_options", []) or ["1x", "2x"])
-            self.cb_adc_bit.addItems(getattr(caps, "adc_bit_depth_options", []) or ["16bit", "12bit"])
+            # Use capabilities options if available, otherwise use defaults
+            qual_opts = getattr(caps, "adc_quality_options", [])
+            if not qual_opts: qual_opts = ["High Capacity", "Low Noise"]
+            self.cb_adc_quality.addItems([str(x) for x in qual_opts])
+
+            speed_opts = getattr(caps, "adc_speed_options", [])
+            if not speed_opts: speed_opts = ["100kHz", "1MHz"]
+            self.cb_adc_speed.addItems([str(x) for x in speed_opts])
+
+            gain_opts = getattr(caps, "adc_gain_options", [])
+            if not gain_opts: gain_opts = ["1x", "2x"]
+            self.cb_adc_gain.addItems([str(x) for x in gain_opts])
+
+            bit_opts = getattr(caps, "adc_bit_depth_options", [])
+            if not bit_opts: bit_opts = ["16bit", "12bit"]
+            self.cb_adc_bit.addItems([str(x) for x in bit_opts])
 
     def _create_analysis_page(self):
         page = QWidget()

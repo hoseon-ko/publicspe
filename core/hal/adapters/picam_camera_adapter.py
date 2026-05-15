@@ -18,6 +18,27 @@ class PicamCameraAdapter(CameraHal):
         self._colormap: str = "gray"
 
     def capabilities(self) -> CameraCapabilities:
+        if self._camera and self._camera.is_connected:
+            try:
+                caps = self._camera.capabilities
+                return CameraCapabilities(
+                    has_exposure=True,
+                    has_live=True,
+                    has_temperature=caps.has_temperature,
+                    has_adc=caps.has_adc,
+                    supports_range_control=True,
+                    temperature_range_c=caps.temperature_range_c,
+                    adc_quality_options=caps.adc_quality_options,
+                    adc_speed_options=caps.adc_speed_options,
+                    adc_gain_options=caps.adc_gain_options,
+                    adc_bit_depth_options=caps.adc_bit_depth_options,
+                    adc_port_options=caps.adc_port_options,
+                    metadata={"vendor": "picam", "model": self._camera.camera_model()},
+                )
+            except Exception as exc:
+                cam_logger.error(f"[PicamCameraAdapter] Failed to fetch live capabilities: {exc}")
+
+        # Fallback / Disconnected state
         return CameraCapabilities(
             has_exposure=True,
             has_live=True,

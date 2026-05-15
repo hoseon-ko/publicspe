@@ -36,9 +36,58 @@ from ui.deepalign.deepalign_frame_pipeline import FramePipelineMixin
 from ui.deepalign.deepalign_layout import LayoutBuilderMixin
 from ui.deepalign.deepalign_styles import DeepAlignStylesMixin
 from ui.deepalign.deepalign_workers import _AcquireWorker, _SnapWorker, _LiveWorker
+from ui.autofocus.af_worker import AutoFocusWorker
 from core.logger import dev_logger
 from core.session.session_state import CameraConnectionState
+from core.session.ownership import OWNER_DEEPALIGN
 from core.spe_writer import save_spe
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AutoFocusWorker용 thin proxy: hub API → worker 인터페이스 변환
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _HubCameraProxy:
+    """hub.snap(owner) 또는 fallback camera.snap()을 worker 인터페이스로 노출."""
+    def __init__(self, hub, fallback_camera):
+        self._hub = hub
+        self._cam = fallback_camera
+
+    def snap(self):
+        if self._hub is not None:
+            return self._hub.snap(OWNER_DEEPALIGN)
+        if self._cam is not None:
+            return self._cam.snap()
+        raise RuntimeError("카메라 없음")
+
+    def is_valid(self) -> bool:
+        return self._hub is not None or self._cam is not None
+
+
+class _HubKimmProxy:
+    """hub.kimm_move_to_z(z) 또는 fallback kimm_ctrl.move_to_z(z)를 worker 인터페이스로 노출."""
+    def __init__(self, hub, fallback_kimm):
+        self._hub = hub
+        self._kimm = fallback_kimm
+
+    def move_to_z(self, z: float) -> bool:
+        if self._hub is not None:
+            self._hub.kimm_move_to_z(z)
+            return True
+        if self._kimm is not None:
+            return bool(self._kimm.move_to_z(z))
+        return False
+
+    def is_valid(self) -> bool:
+        if self._hub is not None:
+            try:
+                from core.session.session_state import DeviceConnectionState
+                state = self._hub.state
+                return getattr(getattr(state, "motion", None), "kimm_connection", None) \
+                       == DeviceConnectionState.CONNECTED
+            except Exception:
+                return False
+        return self._kimm is not None and getattr(self._kimm, "is_connected", False)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -102,6 +151,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self._snap_worker: Optional[_SnapWorker] = None
         self._live_worker_thread: Optional[QThread] = None
         self._live_worker: Optional[_LiveWorker] = None
+        self._af_worker: Optional[AutoFocusWorker] = None
 
         # Acquire 상태 (dataclass로 통합 관리)
         self._acq = AcquireState()
@@ -165,7 +215,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self.central_stack.addWidget(self._create_cam_page())              # 0
         self.central_stack.addWidget(self._wrap_panel(self.mirror_panel))  # 1
         self.central_stack.addWidget(self._wrap_panel(self.af_panel))      # 2
-        self.central_stack.addWidget(self._wrap_panel(self.align_panel))   # 3
+        self.central_stack.addWidget(self._create_align_page())            # 3
         self.central_stack.addWidget(self._wrap_panel(self.motion_panel))  # 4
         self.central_stack.addWidget(self._create_analysis_page())         # 5
 
@@ -240,12 +290,13 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self.btn_af_run.clicked.connect(self.af_panel.run_af)
         self.btn_af_abort.clicked.connect(self.af_panel.abort_af)
         self.btn_af_set_z.clicked.connect(self.af_panel.set_z_base)
+        self.af_panel.run_requested.connect(self._on_af_run_requested)
+        self.af_panel.stop_requested.connect(self._on_af_stop_requested)
 
         # ── Master bar — Align 탭 ─────────────────────────────────────
         self.btn_align_enable.clicked.connect(self.align_panel.enable_all)
-        self.btn_align_calc.clicked.connect(
-            lambda: self._on_master_btn_not_implemented("Align / CALC KINEM.")
-        )  # 키네마틱 계산 — 추후 구현
+        self.btn_align_calc.clicked.connect(self._on_calc_kinem_clicked)
+        self.btn_kinem_config_browse.clicked.connect(self._on_kinem_config_browse)
         self.btn_align_move.clicked.connect(self.align_panel.run)
         self.btn_align_stop.clicked.connect(self.align_panel.stop_all)
 
@@ -311,6 +362,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         if self._session_hub is None:
             self._set_camera_action_state(False)
             return
+        self.mirror_panel.bind_session_hub(session_hub)
         try:
             self._session_hub.select_camera_vendor(self._vendor_key())
         except Exception:
@@ -461,6 +513,95 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
     def _on_sub_panel_log(self, msg: str):
         dev_logger.debug(f"[DeepAlign] {msg}")
 
+    # ── AutoFocus Worker 연동 ─────────────────────────────────────────────────
+
+    def _on_af_run_requested(self, center: float, half_range: float, step: float, metric: str):
+        if self._af_worker is not None and self._af_worker.isRunning():
+            return
+
+        z_positions = list(np.arange(center - half_range, center + half_range + step * 0.5, step))
+
+        # 카메라 proxy: hub.snap(owner) 또는 self._camera.snap()
+        camera_proxy = _HubCameraProxy(self._session_hub, self._camera)
+
+        # KIMM proxy: hub.kimm_move_to_z(z) 또는 self._kimm.move_to_z(z)
+        kimm_proxy = _HubKimmProxy(self._session_hub, self._kimm if hasattr(self, "_kimm") else None)
+
+        if not camera_proxy.is_valid():
+            self.af_panel.set_error("카메라가 연결되지 않았습니다")
+            return
+
+        self._af_worker = AutoFocusWorker(
+            camera=camera_proxy,
+            kimm_ctrl=kimm_proxy if kimm_proxy.is_valid() else None,
+            z_positions=z_positions,
+            metric=metric,
+            settle_ms=200,
+            sim_mode=(not kimm_proxy.is_valid()),
+        )
+        self._af_worker.step_done.connect(
+            lambda step, total, z, sh, _frame: self.af_panel.update_progress(step, total, z, sh)
+        )
+        self._af_worker.finished.connect(lambda best_z, _sh: self.af_panel.set_result(best_z))
+        self._af_worker.error.connect(self.af_panel.set_error)
+        self._af_worker.start()
+
+    def _on_af_stop_requested(self):
+        if self._af_worker is not None and self._af_worker.isRunning():
+            self._af_worker.request_stop()
+
+    # ── Kinematic Calc ────────────────────────────────────────────────────────
+
+    def _on_kinem_config_browse(self):
+        from PyQt6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(
+            self, "형상 설정 파일 선택", "", "JSON Files (*.json);;All Files (*)"
+        )
+        if path:
+            self.edit_kinem_config.setText(path)
+
+    def _on_calc_kinem_clicked(self):
+        import json
+        from core.motor.AlignStageAlgorithm import CalculateAttitude
+
+        config_path = self.edit_kinem_config.text().strip()
+        if not config_path:
+            self.lbl_kinem_result.setText("⚠ geometry config 파일을 선택하세요")
+            return
+
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            v0 = np.array(cfg["v0"], dtype=float)
+            b0 = np.array(cfg["b0"], dtype=float)
+            m  = np.array(cfg["m"],  dtype=float)
+            m0 = np.array(cfg["m0"], dtype=float)
+            a0 = np.array(cfg["a0"], dtype=float)
+            c0 = np.array(cfg["c0"], dtype=float)
+            x0 = np.array(cfg.get("x0", [0.0] * 6), dtype=float)
+        except Exception as e:
+            self.lbl_kinem_result.setText(f"⚠ 설정 파일 오류: {e}")
+            dev_logger.exception("[DeepAlign] kinem config load failed")
+            return
+
+        b = np.array([
+            sp.value()
+            for row in self._kinem_ball_spins
+            for sp in row
+        ], dtype=float)
+
+        try:
+            result = CalculateAttitude(v0, b0, m, m0, a0, c0, b, x0)
+            rx, ry, rz, tx, ty, tz = result
+            self.lbl_kinem_result.setText(
+                f"rx={rx:.4f}  ry={ry:.4f}  rz={rz:.4f}\n"
+                f"tx={tx:.4f}  ty={ty:.4f}  tz={tz:.4f}"
+            )
+            dev_logger.info(f"[DeepAlign] CalculateAttitude → {result}")
+        except Exception as e:
+            self.lbl_kinem_result.setText(f"⚠ 계산 오류: {e}")
+            dev_logger.exception("[DeepAlign] CalculateAttitude failed")
+
     def _on_master_btn_not_implemented(self, name: str):
         """Master Bar 버튼 중 아직 패널 공개 API가 없는 항목의 임시 핸들러."""
         dev_logger.warning(f"[DeepAlign] Master Bar '{name}' 버튼은 아직 연결되지 않았습니다.")
@@ -591,13 +732,27 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
             self._update_analysis_metrics(raw)
 
     def _update_analysis_metrics(self, raw: np.ndarray):
-        """프레임의 기본 분석 메트릭(Peak, FWHM 등)을 계산하여 사이드바에 표시한다."""
+        """프레임의 기본 분석 메트릭(Peak, FWHM, SNR)을 계산하여 사이드바에 표시한다."""
         try:
-            peak = np.max(raw)
-            self.lbl_an_peak.setText(f"{peak:.1f}")
-            # FWHM 등은 추후 상세 계산 로직 추가 가능
-            self.lbl_an_fwhm.setText("CALC...")
-            self.lbl_an_snr.setText("CALC...")
+            peak = int(raw.max())
+            self.lbl_an_peak.setText(f"{peak}")
+
+            # FWHM: 이미지 중앙 행 1D 프로파일 기준 반치폭
+            row = raw[raw.shape[0] // 2, :].astype(float)
+            row_max = row.max()
+            if row_max > 0:
+                half_max = row_max / 2.0
+                above = np.where(row >= half_max)[0]
+                fwhm = int(above[-1] - above[0]) if len(above) >= 2 else 0
+            else:
+                fwhm = 0
+            self.lbl_an_fwhm.setText(f"{fwhm} px")
+
+            # SNR: 피크 / 좌상단 코너 배경 표준편차
+            corner = raw[:min(10, raw.shape[0]), :min(10, raw.shape[1])].astype(float)
+            bg_std = float(corner.std()) or 1.0
+            snr = round(peak / bg_std, 1)
+            self.lbl_an_snr.setText(f"{snr}")
         except Exception:
             pass
 
@@ -688,8 +843,17 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self.cam_viewer.delete_roi(roi_id)
 
     def _on_roi_goto(self, roi_id: int):
-        # ROI 위치로 뷰 이동
-        pass
+        try:
+            rois = self.cam_viewer.viewer.view.interactions._rois
+            roi = rois.get(roi_id)
+            if roi is None:
+                return
+            pts = roi.get_points()
+            cx = (pts[0] + pts[2]) / 2
+            cy = (pts[1] + pts[3]) / 2
+            self.cam_viewer.viewer.view.centerOn(cx, cy)
+        except Exception:
+            dev_logger.exception("[DeepAlign] roi_goto failed")
 
     def _on_roi_added_from_viewer(self, roi):
         """이미지 뷰어에서 ROI가 생성되면 ROI 패널에 등록한다."""
