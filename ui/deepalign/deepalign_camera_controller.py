@@ -98,12 +98,21 @@ class CameraControllerMixin(CameraHubMixin):
             self._acq_progress_timer.stop()
             return
 
-        expected = max(0.001, float(self._acq.frame_expected_s))
+        # avg_frame_s가 쌓이면 실측값 우선, 없으면 초기 추정값
+        expected = max(0.001, float(
+            self._acq.avg_frame_s if self._acq.avg_frame_s > 0 else self._acq.frame_expected_s
+        ))
         now_mono = time.monotonic()
-        frame_elapsed = clamp_frame_elapsed(now_mono, self._acq.frame_started_at, expected)
+        elapsed = max(0.0, now_mono - self._acq.frame_started_at)
 
         completed = max(0, min(self._acq.cur, self._acq.total))
-        in_frame_ratio = min(1.0, frame_elapsed / expected)
+        # 예상 초과 시 서서히 1.0에 접근, 0.99 cap (snap과 동일 패턴)
+        if elapsed <= expected:
+            in_frame_ratio = elapsed / expected
+        else:
+            in_frame_ratio = 1.0 - (0.04 / (1.0 + (elapsed - expected)))
+        in_frame_ratio = min(0.99, in_frame_ratio)
+
         overall_ratio = overall_progress_ratio(completed, self._acq.total, in_frame_ratio)
         self._set_master_progress(int(overall_ratio * 100.0))
         self._update_acquire_times(skip_progress_calc=True)
@@ -366,8 +375,7 @@ class CameraControllerMixin(CameraHubMixin):
             return
 
         try:
-            exp_ms = max(10.0, float(self.spin_exposure.value()))
-            self._hub_live_progress_cycle_s = max(0.02, exp_ms / 1000.0)
+            self._hub_live_progress_cycle_s = max(0.02, self._estimate_frame_seconds())
         except Exception:
             self._hub_live_progress_cycle_s = 0.05
 
@@ -421,7 +429,15 @@ class CameraControllerMixin(CameraHubMixin):
     def _on_hub_live_frame(self, raw) -> None:
         if self._acq.running:
             return
-        self._hub_live_progress_started_at = time.monotonic()
+        now = time.monotonic()
+        # 실제 프레임 간격으로 cycle_s adaptive 업데이트 (EMA α=0.2)
+        if self._hub_live_progress_started_at > 0:
+            actual_interval = now - self._hub_live_progress_started_at
+            if 0.01 < actual_interval < 10.0:
+                self._hub_live_progress_cycle_s = (
+                    0.8 * self._hub_live_progress_cycle_s + 0.2 * actual_interval
+                )
+        self._hub_live_progress_started_at = now
         self._push_frame(raw)
 
     def _on_hub_live_frame_ready(self, rgb, raw) -> None:
@@ -434,8 +450,12 @@ class CameraControllerMixin(CameraHubMixin):
             return
         cycle = max(0.02, float(self._hub_live_progress_cycle_s))
         elapsed = max(0.0, time.monotonic() - self._hub_live_progress_started_at)
-        ratio = min(1.0, elapsed / cycle)
-        self._set_master_progress(int(ratio * 100.0))
+        # 예상 초과 시 서서히 99%에 접근 (snap/acquire와 동일 패턴)
+        if elapsed <= cycle:
+            ratio = elapsed / cycle
+        else:
+            ratio = 0.99 - (0.04 / (1.0 + (elapsed - cycle)))
+        self._set_master_progress(int(min(0.99, ratio) * 100.0))
 
     def closeEvent(self, event):
         try:

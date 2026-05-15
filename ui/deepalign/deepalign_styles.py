@@ -60,10 +60,14 @@ class DeepAlignStylesMixin:
     def _set_camera_action_state(self, connected: bool, busy: bool = False):
         """버튼 활성화 상태를 3-state로 관리.
 
-        - not connected : CONNECT만 활성, 나머지 전부 비활성
+        - not connected : CONNECT만 활성, 나머지 전부 비활성, 카메라 설정 섹션 숨김
         - connected + busy : STOP만 활성, 나머지 전부 비활성
         - connected + idle : SNAP/LIVE/ACQUIRE/DISCONNECT 활성, STOP 비활성
         """
+        # 카메라 설정 섹션은 연결 시에만 표시
+        if hasattr(self, "cam_connected_settings"):
+            self.cam_connected_settings.setVisible(connected)
+
         if not connected:
             self.btn_connect.setEnabled(True)
             self.btn_disconnect.setEnabled(False)
@@ -142,6 +146,8 @@ class DeepAlignStylesMixin:
             QPushButton {{ background: transparent; color: {color}; border: 1px solid {color};
                            border-radius: 4px; font-weight: bold; font-size: 11px; padding: 5px; }}
             QPushButton:hover {{ background: {color}22; }}
+            QPushButton:disabled {{ color: #2a3547; border-color: #1e293b;
+                                    background: transparent; }}
         """
         )
         return btn
@@ -156,6 +162,7 @@ class DeepAlignStylesMixin:
                            border: none; font-weight: 900; padding: 0; }}
             QPushButton:hover {{ background: {color}cc; }}
             QPushButton:pressed {{ background: {color}aa; margin-top: 1px; }}
+            QPushButton:disabled {{ background: #0f172a; border: 1px solid #1e293b; }}
         """
         )
         lay = QVBoxLayout(btn)
@@ -194,5 +201,6 @@ class DeepAlignStylesMixin:
             QScrollArea { border: none; background: transparent; }
             QScrollBar:vertical { border: none; background: #05080c; width: 6px; }
             QScrollBar::handle:vertical { background: #1e293b; border-radius: 3px; }
+            QWidget#deepAlignTab QLabel:disabled { color: #2a3547; }
         """
         )

@@ -66,19 +66,20 @@ class LayoutBuilderMixin:
         lay.setSpacing(25)
 
         icons = [
-            ("📷", "#94a3b8"),
-            ("🪞", "#38bdf8"),
-            ("🔍", "#fbbf24"),
-            ("🎯", "#ef4444"),
-            ("⚙", "#4ecdc4"),
-            ("📊", "#10b981"),
+            ("📷", "#94a3b8", "Camera Control"),
+            ("🪞", "#38bdf8", "Mirror / Scan"),
+            ("🔍", "#fbbf24", "Auto Focus"),
+            ("🎯", "#ef4444", "6-Axis Align"),
+            ("⚙", "#4ecdc4", "Motion / Hardware"),
+            ("📊", "#10b981", "Data Analysis"),
         ]
         self.sidebar_btns = []
         self.btn_group = QButtonGroup(self)
         self.btn_group.setExclusive(True)
 
-        for i, (icon, color) in enumerate(icons):
+        for i, (icon, color, name) in enumerate(icons):
             btn = QPushButton(icon)
+            btn.setToolTip(name)
             btn.setFixedSize(45, 45)
             btn.setCheckable(True)
             btn.setStyleSheet(
@@ -656,6 +657,14 @@ class LayoutBuilderMixin:
         cl.addLayout(conn_row)
         p_lay.addWidget(conn_grp)
 
+        # 연결 후에만 표시되는 설정 섹션 컨테이너
+        self.cam_connected_settings = QWidget()
+        cam_settings_lay = QVBoxLayout(self.cam_connected_settings)
+        cam_settings_lay.setContentsMargins(0, 0, 0, 0)
+        cam_settings_lay.setSpacing(8)
+        self.cam_connected_settings.setVisible(False)
+        p_lay.addWidget(self.cam_connected_settings)
+
         acq_grp = self._make_section("IMAGE ACQUISITION", "#22d3ee")
         al = QVBoxLayout(acq_grp.content_widget)
         al.setSpacing(8)
@@ -694,7 +703,7 @@ class LayoutBuilderMixin:
         fps_lay.addWidget(self.spin_fps, 1)
         fps_lay.addWidget(self.btn_apply_fps)
         al.addWidget(self.sec_fps)
-        p_lay.addWidget(acq_grp)
+        cam_settings_lay.addWidget(acq_grp)
 
         self.sec_adc = self._make_section("ADC SETTINGS", "#22d3ee")
         adl = QVBoxLayout(self.sec_adc.content_widget)
@@ -719,7 +728,7 @@ class LayoutBuilderMixin:
             adl.addLayout(row)
         self.btn_apply_adc = self._style_btn("APPLY ADC", "#14b8a6")
         adl.addWidget(self.btn_apply_adc)
-        p_lay.addWidget(self.sec_adc)
+        cam_settings_lay.addWidget(self.sec_adc)
 
         self.sec_temp = self._make_section("TEMPERATURE", "#22d3ee")
         tl = QVBoxLayout(self.sec_temp.content_widget)
@@ -746,7 +755,7 @@ class LayoutBuilderMixin:
         for item in (self.lbl_temp_read, self.lbl_temp_set, self.lbl_temp_state):
             item.setStyleSheet("color: #94a3b8; font-size: 12px; font-weight: bold;")
             tl.addWidget(item)
-        p_lay.addWidget(self.sec_temp)
+        cam_settings_lay.addWidget(self.sec_temp)
 
         save_grp = self._make_section("SAVE", "#22d3ee")
         sl = QVBoxLayout(save_grp.content_widget)
