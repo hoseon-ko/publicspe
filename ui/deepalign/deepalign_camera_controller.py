@@ -65,7 +65,7 @@ class CameraControllerMixin(CameraHubMixin):
         # Hikvision 등 일부 카메라 SDK는 Live 스트리밍 도중 별도 스레드에서
         # 프레임 버퍼를 당겨오면(segfault) 프로그램이 즉시 강제 종료됩니다.
         # 따라서 Snap 전에 Live를 안전하게 정지합니다.
-        self._was_live_before_snap = getattr(self, "_is_live", False)
+        self._was_live_before_snap = getattr(self, "_hub_live_active", False)
         if self._was_live_before_snap:
             self._stop_hub_live()
 
