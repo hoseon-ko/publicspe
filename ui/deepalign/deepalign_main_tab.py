@@ -425,6 +425,8 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self.btn_af_set_z.clicked.connect(self.af_panel.set_z_base)
         self.af_panel.run_requested.connect(self._on_af_run_requested)
         self.af_panel.stop_requested.connect(self._on_af_stop_requested)
+        self.af_panel.kimm_card.btn_connect.clicked.connect(self._on_af_kimm_connect_clicked)
+        self.af_panel.kimm_card.btn_disconnect.clicked.connect(self._on_af_kimm_disconnect_clicked)
 
         # ── Master bar — Align 탭 ─────────────────────────────────────
         self.btn_align_enable.clicked.connect(self.align_panel.enable_all)
@@ -894,8 +896,26 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self._af_worker.start()
 
     def _on_af_stop_requested(self):
-        if self._af_worker is not None and self._af_worker.isRunning():
-            self._af_worker.request_stop()
+        """AutoFocusPanel에서 중단 버튼 클릭 시 호출."""
+        if self._af_worker:
+            self._af_worker.stop()
+
+    def _on_af_kimm_connect_clicked(self):
+        if not self._session_hub: return
+        ip = self.af_panel.edit_kimm_ip.text().strip() or "192.168.1.100"
+        try:
+            self._session_hub.kimm_connect(ip, 5000)
+            dev_logger.info(f"[DeepAlign] KIMM Z Connecting to {ip}...")
+        except Exception as e:
+            dev_logger.error(f"[DeepAlign] KIMM Connect error: {e}")
+
+    def _on_af_kimm_disconnect_clicked(self):
+        if not self._session_hub: return
+        try:
+            self._session_hub.kimm_disconnect()
+            dev_logger.info("[DeepAlign] KIMM Z Disconnecting...")
+        except Exception as e:
+            dev_logger.error(f"[DeepAlign] KIMM Disconnect error: {e}")
 
     # ── Kinematic Calc ────────────────────────────────────────────────────────
 

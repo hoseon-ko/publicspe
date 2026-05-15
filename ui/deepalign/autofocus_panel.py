@@ -17,13 +17,14 @@ import numpy as np
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QDoubleSpinBox, QSpinBox,
-    QComboBox, QProgressBar, QFrame, QSizePolicy,
+    QComboBox, QProgressBar, QFrame, QSizePolicy, QLineEdit,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal
 
 import pyqtgraph as pg
 
 from theme.styles import Fonts, Sizes, C_ACCENT, C_BORDER, C_BG_DARK, C_BG_MED, C_TEXT_DIM
+from ui.widgets.kimm_z_card import KimmZCard
 
 _FC  = Fonts.MONO
 _FS  = Sizes.CTRL
@@ -102,16 +103,10 @@ class AutoFocusPanel(QWidget):
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
-        self._session_hub = None
         self._running   = False
         self._z_data:  list[float] = []
         self._sh_data: list[float] = []
         self._best_z:  float | None = None
-
-        self._refresh_timer = QTimer(self)
-        self._refresh_timer.setInterval(500)
-        self._refresh_timer.timeout.connect(self._update_current_pos)
-
         self._build_ui()
 
     # ── UI 구성 ───────────────────────────────────────────────────────
@@ -121,55 +116,15 @@ class AutoFocusPanel(QWidget):
         root.setContentsMargins(4, 4, 4, 4)
         root.setSpacing(6)
 
-        # ── 0. 수동 제어 (KIMM Z) ─────────────────────────────────────
-        root.addWidget(self._section_label("Z-STAGE CONTROL"))
+        # ── 0. KIMM Z 제어 카드 (공통 위젯 사용) ───────────────────────
+        self.kimm_card = KimmZCard()
+        self.kimm_card.set_center_requested.connect(lambda z: self.spin_center.setValue(z))
+        root.addWidget(self.kimm_card)
 
-        # 1) 현재 위치 & Set as Center
-        pos_row = QHBoxLayout()
-        self.lbl_stage_pos = QLabel("Current Z: — µm")
-        self.lbl_stage_pos.setStyleSheet(
-            f"color: {C_ACCENT}; font-family: '{_FC}'; font-size: 16px; font-weight: bold;"
-        )
-        pos_row.addWidget(self.lbl_stage_pos, 1)
-
-        self.btn_set_center = QPushButton("SET AS CENTER")
-        self.btn_set_center.setFixedWidth(110)
-        self.btn_set_center.setStyleSheet(_btn_qss(C_ACCENT))
-        self.btn_set_center.clicked.connect(self._on_set_center)
-        pos_row.addWidget(self.btn_set_center)
-        root.addLayout(pos_row)
-
-        # 2) 조그 제어 (MotionTab 스타일: 10/100/1000)
-        jog_row = QHBoxLayout()
-        jog_row.setSpacing(4)
-        for delta in [-1000, -100, -10, 10, 100, 1000]:
-            btn = QPushButton(f"{delta:+} ")
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setStyleSheet(_btn_qss("#4ecdc4").replace("padding: 4px 10px", "padding: 4px 2px"))
-            btn.clicked.connect(lambda _, d=delta: self._move_rel(d))
-            jog_row.addWidget(btn)
-        root.addLayout(jog_row)
-
-        # 3) 절대 이동 (MotionTab 스타일)
-        abs_row = QHBoxLayout()
-        abs_row.setSpacing(4)
-        self.spin_abs_z = QDoubleSpinBox()
-        self.spin_abs_z.setRange(-1e6, 1e6)
-        self.spin_abs_z.setDecimals(2)
-        self.spin_abs_z.setSuffix("  µm")
-        self.spin_abs_z.setStyleSheet(_SPIN_QSS)
-
-        self.btn_go_abs = QPushButton("MOVE ABS")
-        self.btn_go_abs.setStyleSheet(_btn_qss(C_ACCENT))
-        self.btn_go_abs.clicked.connect(self._move_abs)
-
-        abs_row.addWidget(self.spin_abs_z, 1)
-        abs_row.addWidget(self.btn_go_abs, 0)
-        root.addLayout(abs_row)
-
+        root.addSpacing(4)
         root.addWidget(_sep_h())
 
-        # ── 1. 범위 설정 ──────────────────────────────────────────────
+        # ── 1. 오토포커스 스캔 설정 ────────────────────────────────────
         root.addWidget(self._section_label("Z SCAN RANGE"))
 
         grid = QGridLayout()
@@ -473,22 +428,7 @@ class AutoFocusPanel(QWidget):
     # ── 하드웨어 연동 메서드 ──────────────────────────────────────────
 
     def bind_session_hub(self, hub):
-        self._session_hub = hub
-        if hub:
-            self._refresh_timer.start()
-        else:
-            self._refresh_timer.stop()
-
-    def _update_current_pos(self):
-        if not self._session_hub: return
-        try:
-            # Hub에서 현재 Z 위치 가져오기
-            z = self._session_hub.kimm_get_z()
-            self.lbl_stage_pos.setText(f"Current Z: {z:+.2f} µm")
-            if not self.spin_abs_z.hasFocus():
-                self.spin_abs_z.setValue(z)
-        except Exception:
-            self.lbl_stage_pos.setText("Current Z: Offline")
+        self.kimm_card.bind_session_hub(hub)
 
     def _on_set_center(self):
         if not self._session_hub: return

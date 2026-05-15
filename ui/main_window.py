@@ -50,7 +50,6 @@ class MainWindow(QMainWindow):
     def __init__(self, spe_class=None):
         super().__init__()
         self._spe_class = spe_class
-        self.acs_ctrl = AcsStageController()
         self.session_hub = DeviceSessionHub(self)
         self.session_hub.register_camera_hal("hikvision", HikvisionCameraAdapter)
         self.session_hub.register_camera_hal("picam", PicamCameraAdapter)
@@ -143,7 +142,7 @@ class MainWindow(QMainWindow):
         self.stack.setStyleSheet("background: #0a0f1e;")
 
         # ── 모드별 탭 인스턴스 생성 ─────────────────────────────────
-        self.live_tab = LiveTab(acs_ctrl=self.acs_ctrl)
+        self.live_tab = LiveTab(session_hub=self.session_hub)
         self.live_tab.status_message.connect(self._on_status)
         self.live_tab.camera_connected.connect(self._on_camera_connected)
         self.live_tab.camera_disconnected.connect(self._on_camera_disconnected)
@@ -165,7 +164,7 @@ class MainWindow(QMainWindow):
         self.af_tab.af_starting.connect(self.live_tab.stop_live)
         self.af_tab.af_done.connect(self.live_tab.resume_live)
 
-        self.kin_tab = KinematicTab(acs_ctrl=self.acs_ctrl)
+        self.kin_tab = KinematicTab(session_hub=self.session_hub)
         self.kin_tab.log_message.connect(self._on_status)
         self.kin_tab.kin_starting.connect(self.live_tab.stop_live)
         self.kin_tab.kin_done.connect(self.live_tab.resume_live)
@@ -249,29 +248,8 @@ class MainWindow(QMainWindow):
         self.live_tab.camera_connected.connect(self.kin_tab.set_shared_cameraera)
         self.live_tab.camera_disconnected.connect(self.kin_tab.clear_shared_cameraera)
 
-        # ACS 스테이지 공유: Live ↔ Kinematic
-        self.live_tab.acs_stage_panel.acs_connected.connect(self.kin_tab.set_acs_ctrl)
-        self.live_tab.acs_stage_panel.acs_disconnected.connect(self.kin_tab.clear_acs_ctrl)
-
-        # Kinematic 탭에서 직접 연결한 경우 Live 탭에도 전파
-        self.kin_tab.acs_panel.acs_connected.connect(self.live_tab.acs_stage_panel.set_controller)
-        self.kin_tab.acs_panel.acs_disconnected.connect(lambda: self.live_tab.acs_stage_panel.set_controller(None))
-
-        # SessionHub ↔ ACS 연동 (Live 탭): ACS 연결 시 MotionHub에도 등록
-        self.live_tab.acs_stage_panel.acs_connected.connect(
-            self.session_hub.attach_acs_controller
-        )
-        self.live_tab.acs_stage_panel.acs_disconnected.connect(
-            self.session_hub.detach_acs
-        )
-
-        # SessionHub ↔ ACS 연동 (DeepAlign 탭): DeepAlign 자체 ACS 패널도 MotionHub에 등록
-        self.deep_align_tab.align_panel.acs_connected.connect(
-            self.session_hub.attach_acs_controller
-        )
-        self.deep_align_tab.align_panel.acs_disconnected.connect(
-            self.session_hub.detach_acs
-        )
+        # SessionHub ↔ ACS 연동 (Live 탭 / Kinematic 탭 / DeepAlign 탭)
+        # 이제 각 탭의 acs_stage_panel 또는 acs_panel이 bind_session_hub를 호출하도록 내부 수정됨.
 
         self.scan_tab.set_motor_panel(self.live_tab.motor_panel)
 

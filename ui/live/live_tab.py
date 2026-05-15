@@ -1,4 +1,4 @@
-﻿"""
+"""
 ui/live/live_tab.py
 Live Control 탭 — QMainWindow 기반 도킹 레이아웃.
 
@@ -216,7 +216,7 @@ class _ProcessWorker(QObject):
 class LiveTab(QMainWindow):
     """
     Live Control 탭.
-    QTabWidget 임베드용: setWindowFlags(Widget) + menuBar 숨김.
+    QTabWidget 임베드용: setWindowFlags(Qt.WindowType.Widget) + menuBar 숨김.
     """
 
     status_message      = pyqtSignal(str)
@@ -248,9 +248,9 @@ class LiveTab(QMainWindow):
             self._last_display_t = 0.0  # 스냅/정지 상태에서도 즉시 redraw
             self._proc_worker.submit(self._last_raw)
 
-    def __init__(self, parent=None, acs_ctrl: AcsStageController = None):
+    def __init__(self, parent=None, session_hub=None):
         super().__init__(parent)
-        self.acs_ctrl = acs_ctrl
+        self._session_hub = session_hub
         self.setWindowFlags(Qt.WindowType.Widget)
         self.menuBar().setVisible(False)
 
@@ -416,7 +416,9 @@ class LiveTab(QMainWindow):
 
         # ACS 6축 키네마틱 스테이지 섹션 (기본 접힘)
         self._sec_acs = CollapsibleSection("⬡  ACS 6-AXIS KINEMATIC", accent="#7a6aaa", collapsed=True)
-        self.acs_stage_panel = AcsStagePanel(ctrl=self.acs_ctrl)
+        self.acs_stage_panel = AcsStagePanel()
+        if self._session_hub:
+            self.acs_stage_panel.bind_session_hub(self._session_hub)
         self._sec_acs.add_widget(self.acs_stage_panel)
         sidebar_v.addWidget(self._sec_acs)
 

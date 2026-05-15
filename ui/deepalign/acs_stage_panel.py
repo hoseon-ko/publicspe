@@ -326,6 +326,8 @@ class AcsStagePanel(QWidget):
 
         if ctrl:
             QTimer.singleShot(100, lambda: self.set_controller(ctrl))
+        else:
+            self._set_disconnected_ui()
 
     # ── UI 구성 ───────────────────────────────────────────────────────
 
