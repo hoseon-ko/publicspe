@@ -953,6 +953,11 @@ class PicamCamera(BaseCamera):
         self._require_connected()
         return self._wrapper.set_exposure_ms(ms)
 
+    def get_frame_total_s(self) -> float:
+        """노출 + 리드아웃 시간(초). PicamCameraAdapter.get_frame_total_s()가 참조."""
+        self._require_connected()
+        return self._wrapper._get_frame_total_s()
+
     def snap(self) -> np.ndarray:
         self._require_connected()
         # timeout=None → PicamCameraWrapper._auto_timeout() 자동 계산

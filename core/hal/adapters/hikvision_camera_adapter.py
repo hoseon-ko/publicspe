@@ -96,10 +96,23 @@ class HikvisionCameraAdapter(CameraHal):
             raise HalCommandError(f"Hikvision get exposure failed: {exc}", cause=exc) from exc
 
     def get_frame_total_s(self) -> float:
-        """프레임 총 시간: Hikvision은 readout time 정보 미지원, 노출 시간만 사용"""
+        """프레임 총 시간(초).
+
+        MVS SDK AcquisitionFrameRate는 FPS 잠금/비잠금 모두에서
+        exposure + readout을 반영한 실제 달성 가능 프레임레이트를 반환하므로
+        1/fps 가 가장 정확한 프레임 주기 추정값이다.
+        FPS 읽기 실패 시 노출 시간으로 폴백.
+        """
         try:
-            ms = self.get_exposure_ms()
-            total_s = max(0.005, ms / 1000.0)
+            exp_s = max(0.005, self.get_exposure_ms() / 1000.0)
+            try:
+                fps = self.get_fps()
+                if fps > 0:
+                    total_s = max(1.0 / fps, exp_s)
+                else:
+                    total_s = exp_s
+            except Exception:
+                total_s = exp_s
             cam_logger.debug(f"[HikvisionCameraAdapter] get_frame_total_s succeeded s={total_s}")
             return total_s
         except Exception as exc:
