@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-"""Camera HAL protocol definitions."""
-
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from typing import Callable, Protocol, runtime_checkable
 
