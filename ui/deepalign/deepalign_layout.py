@@ -50,6 +50,9 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QAction
 
+from theme.styles import (
+    C_BG_DEEP, C_BG_DARK, C_BG_MED, C_BORDER, C_TEXT, C_TEXT_DIM, C_TEXT_DEAD,
+)
 from ui.plot_panel import PlotPanel, HistogramPanel
 from ui.file_list_panel import FileListPanel
 from ui.frame_grid_panel import FrameGridPanel
@@ -61,7 +64,7 @@ class LayoutBuilderMixin:
     def _create_icon_sidebar(self):
         sidebar = QFrame()
         sidebar.setFixedWidth(65)
-        sidebar.setStyleSheet("background-color: #020617; border-right: 1px solid #1e293b;")
+        sidebar.setStyleSheet(f"background-color: {C_BG_DEEP}; border-right: 1px solid #1e293b;")
         lay = QVBoxLayout(sidebar)
         lay.setContentsMargins(0, 25, 0, 25)
         lay.setSpacing(25)
@@ -147,7 +150,7 @@ class LayoutBuilderMixin:
     def _create_kinem_calc_section(self) -> QWidget:
         """KINEMATIC CALC 섹션 — 3개 볼 위치 입력 + 형상 설정 + 결과 표시."""
         _C_ACCENT    = "#aa7acc"
-        _C_BG        = "#080e1e"
+        _C_BG        = C_BG_DEEP
         _C_BD        = "#2a1a4a"
         _C_TEXT      = "#c0a8ff"
         _C_TEXT_DIM  = "#6a5a8a"
@@ -268,25 +271,26 @@ class LayoutBuilderMixin:
             QMainWindow.DockOption.AllowTabbedDocks |
             QMainWindow.DockOption.AnimatedDocks
         )
-        host.setStyleSheet("QMainWindow { background: #060d19; }")
+        host.setStyleSheet(f"QMainWindow {{ background: {C_BG_DEEP}; }}")
 
         self.cam_viewer = DeepAlignViewerV2Adapter()
         self.cam_viewer.set_external_render_control(True)
         host.setCentralWidget(self.cam_viewer)
 
         # Analysis Docks
-        self.plot_panel = PlotPanel("PROFILE")
         self.plot_panel = PlotPanel("Profile")
         self.dock_plot = self._wrap_dock(
             "dock_plot", "📈  PROFILE PLOT",
             self.plot_panel, Qt.DockWidgetArea.BottomDockWidgetArea, host
         )
+        self.dock_plot.setVisible(False)
 
         self.hist_panel = HistogramPanel()
         self.dock_hist = self._wrap_dock(
             "dock_histogram", "📊  HISTOGRAM",
             self.hist_panel, Qt.DockWidgetArea.BottomDockWidgetArea, host
         )
+        self.dock_hist.setVisible(False)
 
         self.file_list_panel = FileListPanel()
         self.dock_files = self._wrap_dock(
@@ -331,11 +335,11 @@ class LayoutBuilderMixin:
         self.analysis_toolbar = QToolBar("Analysis")
         self.analysis_toolbar.setObjectName("analysis_toolbar")
         self.analysis_toolbar.setIconSize(QSize(18, 18))
-        self.analysis_toolbar.setStyleSheet("""
-            QToolBar { background: #0a0f1e; border-bottom: 1px solid #1a4060; padding: 2px 6px; spacing: 4px; }
-            QToolButton { background: #0d1e38; color: #4ecdc4; border: 1px solid #1a4060; border-radius: 3px; padding: 3px 8px; font-weight: bold; font-size: 11px; }
-            QToolButton:hover { background: #1a3a60; }
-            QToolButton:checked { background: #1a3010; color: #4ecdc4; border-color: #2a6020; }
+        self.analysis_toolbar.setStyleSheet(f"""
+            QToolBar {{ background: {C_BG_DARK}; border-bottom: 1px solid #1a4060; padding: 2px 6px; spacing: 4px; }}
+            QToolButton {{ background: #0d1e38; color: #4ecdc4; border: 1px solid #1a4060; border-radius: 3px; padding: 3px 8px; font-weight: bold; font-size: 11px; }}
+            QToolButton:hover {{ background: #1a3a60; }}
+            QToolButton:checked {{ background: #1a3010; color: #4ecdc4; border-color: #2a6020; }}
         """)
         host.addToolBar(Qt.ToolBarArea.TopToolBarArea, self.analysis_toolbar)
         self.analysis_toolbar.setVisible(False)
@@ -357,7 +361,7 @@ class LayoutBuilderMixin:
         ]:
             act = QAction(text, self)
             act.setCheckable(True)
-            act.setChecked(True)
+            act.setChecked(dock.isVisible())
             act.triggered.connect(dock.setVisible)
             self.analysis_toolbar.addAction(act)
             self.dock_toggles[dock.objectName()] = act
@@ -384,7 +388,7 @@ class LayoutBuilderMixin:
 
         # ── 패널 1: 썸네일 리스트 ─────────────────────────────────────
         frames_widget = QWidget()
-        frames_widget.setStyleSheet("background:#0a0f1e;")
+        frames_widget.setStyleSheet(f"background:{C_BG_DARK};")
         frames_layout = QVBoxLayout(frames_widget)
         frames_layout.setContentsMargins(6, 4, 6, 4)
         frames_layout.setSpacing(4)
@@ -405,7 +409,7 @@ class LayoutBuilderMixin:
         self.da_frame_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.da_frame_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.da_frame_list.setStyleSheet(
-            "QListWidget { background:#080e1e; border:1px solid #0f3460; color:#c0d0ff; }"
+            f"QListWidget {{ background:{C_BG_DEEP}; border:1px solid #0f3460; color:#c0d0ff; }}"
             "QListWidget::item { padding:2px; border:1px solid #0f2040; }"
             "QListWidget::item:selected { background:#1a3a60; border:1px solid #4ecdc4; }"
         )
@@ -422,7 +426,7 @@ class LayoutBuilderMixin:
         self.da_log.setReadOnly(True)
         self.da_log.setMinimumHeight(40)
         self.da_log.setStyleSheet(
-            "QTextEdit { background:#080e1e; border:1px solid #0f3460;"
+            f"QTextEdit {{ background:{C_BG_DEEP}; border:1px solid #0f3460;"
             " color:#00cc88; font-family:'Courier New'; font-size:12px; }"
         )
         splitter.addWidget(self.da_log)
@@ -439,10 +443,10 @@ class LayoutBuilderMixin:
         self.da_table.horizontalHeader().setStretchLastSection(True)
         self.da_table.setMinimumHeight(40)
         self.da_table.setStyleSheet(
-            "QTableWidget { background:#080e1e; gridline-color:#0f3460;"
+            f"QTableWidget {{ background:{C_BG_DEEP}; gridline-color:#0f3460;"
             " color:#c0d0ff; font-family:'Courier New'; font-size:12px;"
             " border:none; }"
-            "QHeaderView::section { background:#0f1729; color:#4ecdc4;"
+            f"QHeaderView::section {{ background:{C_BG_MED}; color:#4ecdc4;"
             " border:1px solid #0f3460; font-weight:bold;"
             " padding:4px 2px; }"
             "QTableWidget::item:selected { background:#1a3a60; }"
@@ -463,7 +467,7 @@ class LayoutBuilderMixin:
 
         # ── 패널 1: 썸네일 ────────────────────────────────────────────
         frames_widget = QWidget()
-        frames_widget.setStyleSheet("background:#0a0f1e;")
+        frames_widget.setStyleSheet(f"background:{C_BG_DARK};")
         frames_layout = QVBoxLayout(frames_widget)
         frames_layout.setContentsMargins(6, 4, 6, 4)
         frames_layout.setSpacing(4)
@@ -484,7 +488,7 @@ class LayoutBuilderMixin:
         self.af_frame_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.af_frame_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.af_frame_list.setStyleSheet(
-            "QListWidget { background:#080e1e; border:1px solid #0f3460; color:#c0d0ff; }"
+            f"QListWidget {{ background:{C_BG_DEEP}; border:1px solid #0f3460; color:#c0d0ff; }}"
             "QListWidget::item { padding:2px; border:1px solid #0f2040; }"
             "QListWidget::item:selected { background:#1a3a60; border:1px solid #4ecdc4; }"
         )
@@ -501,8 +505,8 @@ class LayoutBuilderMixin:
         # ── 패널 3: 결과 테이블 ───────────────────────────────────────
         tbl_header = QLabel("RESULTS TABLE")
         tbl_header.setStyleSheet(
-            "color:#4ecdc4; font-size:13px; font-weight:bold;"
-            " letter-spacing:2px; background:#0a0f1e; padding:4px 6px;"
+            f"color:#4ecdc4; font-size:13px; font-weight:bold;"
+            f" letter-spacing:2px; background:{C_BG_DARK}; padding:4px 6px;"
         )
 
         self.af_table = QTableWidget()
@@ -513,16 +517,16 @@ class LayoutBuilderMixin:
         )
         self.af_table.setMinimumHeight(40)
         self.af_table.setStyleSheet(
-            "QTableWidget { background:#080e1e; gridline-color:#0f3460;"
+            f"QTableWidget {{ background:{C_BG_DEEP}; gridline-color:#0f3460;"
             " color:#c0d0ff; font-family:'Courier New'; font-size:12px; border:none; }"
-            "QHeaderView::section { background:#0f1729; color:#4ecdc4;"
+            f"QHeaderView::section {{ background:{C_BG_MED}; color:#4ecdc4;"
             " border:1px solid #0f3460; font-weight:bold; padding:4px 2px; }"
             "QTableWidget::item:selected { background:#1a3a60; }"
         )
         self.af_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
 
         tbl_widget = QWidget()
-        tbl_widget.setStyleSheet("background:#0a0f1e;")
+        tbl_widget.setStyleSheet(f"background:{C_BG_DARK};")
         tbl_lay = QVBoxLayout(tbl_widget)
         tbl_lay.setContentsMargins(0, 0, 0, 0)
         tbl_lay.setSpacing(0)
@@ -538,64 +542,64 @@ class LayoutBuilderMixin:
         lay = QVBoxLayout(page)
         lay.setContentsMargins(0, 0, 0, 0)
 
-        editor_combo_style = """
-            QComboBox {
-                background: #0b1220;
+        editor_combo_style = f"""
+            QComboBox {{
+                background: {C_BG_DEEP};
                 color: #22d3ee;
-                border: 1px solid #475569;
+                border: 1px solid {C_BORDER};
                 border-radius: 4px;
                 padding: 2px 8px;
                 min-height: 24px;
                 font-size: 12px;
                 font-weight: 800;
-            }
-            QComboBox:hover {
+            }}
+            QComboBox:hover {{
                 border-color: #22d3ee;
-            }
-            QComboBox::drop-down {
+            }}
+            QComboBox::drop-down {{
                 border: none;
                 width: 20px;
-            }
+            }}
         """
-        editor_spin_style = """
-            QAbstractSpinBox {
-                background: #0b1220;
+        editor_spin_style = f"""
+            QAbstractSpinBox {{
+                background: {C_BG_DEEP};
                 color: #22d3ee;
-                border: 1px solid #475569;
+                border: 1px solid {C_BORDER};
                 border-radius: 4px;
                 padding: 2px 8px;
                 min-height: 24px;
                 font-size: 12px;
                 font-weight: 800;
-            }
-            QAbstractSpinBox:hover {
+            }}
+            QAbstractSpinBox:hover {{
                 border-color: #22d3ee;
-            }
+            }}
             QAbstractSpinBox::up-button,
-            QAbstractSpinBox::down-button {
+            QAbstractSpinBox::down-button {{
                 width: 16px;
-                background: #0f172a;
+                background: {C_BG_MED};
                 border-left: 1px solid #334155;
-            }
+            }}
             QAbstractSpinBox::up-button:hover,
-            QAbstractSpinBox::down-button:hover {
+            QAbstractSpinBox::down-button:hover {{
                 background: #172036;
-            }
+            }}
         """
-        editor_line_style = """
-            QLineEdit {
-                background: #0b1220;
+        editor_line_style = f"""
+            QLineEdit {{
+                background: {C_BG_DEEP};
                 color: #22d3ee;
-                border: 1px solid #475569;
+                border: 1px solid {C_BORDER};
                 border-radius: 4px;
                 padding: 2px 8px;
                 min-height: 24px;
                 font-size: 12px;
                 font-weight: 800;
-            }
-            QLineEdit:hover {
+            }}
+            QLineEdit:hover {{
                 border-color: #22d3ee;
-            }
+            }}
         """
 
         scroll = QScrollArea()
@@ -623,7 +627,7 @@ class LayoutBuilderMixin:
         lbl_vendor = QLabel(" VENDOR:")
         lbl_vendor.setFixedWidth(80)
         lbl_vendor.setStyleSheet(
-            "color: #94a3b8; font-size: 12px; font-weight: bold;"
+            f"color: {C_TEXT_DIM}; font-size: 12px; font-weight: bold;"
             " border-right: 1px solid #1e293b; padding: 0 6px;"
             " background: rgba(30,41,59,0.2);"
         )
@@ -639,7 +643,7 @@ class LayoutBuilderMixin:
         self.cam_list.setFixedHeight(85)
         self.cam_list.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         self.cam_list.setStyleSheet(
-            "background: #020617; border: 1px solid #1e293b; color: #94a3b8; font-size: 11px;"
+            f"background: {C_BG_DEEP}; border: 1px solid #1e293b; color: {C_TEXT_DIM}; font-size: 11px;"
         )
         cl.addWidget(self.cam_list)
 
@@ -673,7 +677,7 @@ class LayoutBuilderMixin:
 
         exp_row = QHBoxLayout()
         lbl_exp = QLabel("Exposure (ms):")
-        lbl_exp.setStyleSheet("color: #94a3b8; font-size: 12px; font-weight: bold;")
+        lbl_exp.setStyleSheet(f"color: {C_TEXT_DIM}; font-size: 12px; font-weight: bold;")
         self.spin_exposure = QDoubleSpinBox()
         self.spin_exposure.setRange(0.01, 1_000_000.0)
         self.spin_exposure.setDecimals(2)
@@ -691,7 +695,7 @@ class LayoutBuilderMixin:
         fps_lay = QHBoxLayout(self.sec_fps)
         fps_lay.setContentsMargins(0, 0, 0, 0)
         self.check_fps_lock = QCheckBox("Lock FPS")
-        self.check_fps_lock.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        self.check_fps_lock.setStyleSheet(f"color: {C_TEXT_DIM}; font-size: 12px;")
         self.spin_fps = QDoubleSpinBox()
         self.spin_fps.setRange(0.1, 1000.0)
         self.spin_fps.setValue(30.0)
@@ -722,7 +726,7 @@ class LayoutBuilderMixin:
         ]:
             row = QHBoxLayout()
             lbl = QLabel(lbl_text)
-            lbl.setStyleSheet("color: #94a3b8; font-size: 12px; font-weight: bold;")
+            lbl.setStyleSheet(f"color: {C_TEXT_DIM}; font-size: 12px; font-weight: bold;")
             cb.setStyleSheet(editor_combo_style)
             row.addWidget(lbl)
             row.addWidget(cb, 1)
@@ -737,7 +741,7 @@ class LayoutBuilderMixin:
         tl.setContentsMargins(10, 10, 10, 10)
         trow = QHBoxLayout()
         lbl_temp = QLabel("Setpoint (C):")
-        lbl_temp.setStyleSheet("color: #94a3b8; font-size: 12px; font-weight: bold;")
+        lbl_temp.setStyleSheet(f"color: {C_TEXT_DIM}; font-size: 12px; font-weight: bold;")
         self.spin_temp = QDoubleSpinBox()
         self.spin_temp.setRange(-100.0, 50.0)
         self.spin_temp.setValue(-70.0)
@@ -754,7 +758,7 @@ class LayoutBuilderMixin:
         self.lbl_temp_set = QLabel("Setpoint: ---")
         self.lbl_temp_state = QLabel("Status: ---")
         for item in (self.lbl_temp_read, self.lbl_temp_set, self.lbl_temp_state):
-            item.setStyleSheet("color: #94a3b8; font-size: 12px; font-weight: bold;")
+            item.setStyleSheet(f"color: {C_TEXT_DIM}; font-size: 12px; font-weight: bold;")
             tl.addWidget(item)
         cam_settings_lay.addWidget(self.sec_temp)
 
@@ -764,7 +768,7 @@ class LayoutBuilderMixin:
         bl.setSpacing(7)
         bl.setContentsMargins(10, 10, 10, 10)
 
-        _lbl_s = "color: #94a3b8; font-size: 12px; font-weight: bold;"
+        _lbl_s = f"color: {C_TEXT_DIM}; font-size: 12px; font-weight: bold;"
 
         # Frames count
         bg_frames_row = QHBoxLayout()
@@ -788,12 +792,12 @@ class LayoutBuilderMixin:
         self.btn_bg_browse = QPushButton("📁")
         self.btn_bg_browse.setFixedWidth(30)
         self.btn_bg_browse.setToolTip("저장 폴더 선택")
-        self.btn_bg_browse.setStyleSheet("""
-            QPushButton {
-                background: #0f172a; color: #e2e8f0;
+        self.btn_bg_browse.setStyleSheet(f"""
+            QPushButton {{
+                background: {C_BG_MED}; color: {C_TEXT};
                 border: 1px solid #334155; border-radius: 4px; font-weight: 900;
-            }
-            QPushButton:hover { border-color: #a855f7; color: #a855f7; }
+            }}
+            QPushButton:hover {{ border-color: #a855f7; color: #a855f7; }}
         """)
         bg_name_row.addWidget(lbl_bgn)
         bg_name_row.addWidget(self.edit_bg_filename, 1)
@@ -804,6 +808,7 @@ class LayoutBuilderMixin:
         bg_action_row = QHBoxLayout()
         self.btn_bg_capture = self._style_btn("▶  CAPTURE BG", "#a855f7")
         self.btn_bg_load    = self._style_btn("📂  LOAD SPE...", "#a855f7")
+        self.btn_bg_capture.setEnabled(False)
         bg_action_row.addWidget(self.btn_bg_capture)
         bg_action_row.addWidget(self.btn_bg_load)
         bl.addLayout(bg_action_row)
@@ -816,22 +821,22 @@ class LayoutBuilderMixin:
 
         # Status label
         self.lbl_bg_status = QLabel("No background set")
-        self.lbl_bg_status.setStyleSheet("color: #64748b; font-size: 11px; font-weight: bold;")
+        self.lbl_bg_status.setStyleSheet(f"color: {C_TEXT_DEAD}; font-size: 11px; font-weight: bold;")
         self.lbl_bg_status.setWordWrap(True)
         bl.addWidget(self.lbl_bg_status)
 
         # Use BG checkbox
         self.check_use_bg = QCheckBox("Use Background Subtraction")
         self.check_use_bg.setEnabled(False)
-        self.check_use_bg.setStyleSheet("""
-            QCheckBox { color: #e2e8f0; font-size: 13px; font-weight: 700; spacing: 8px; }
-            QCheckBox::indicator {
+        self.check_use_bg.setStyleSheet(f"""
+            QCheckBox {{ color: {C_TEXT}; font-size: 13px; font-weight: 700; spacing: 8px; }}
+            QCheckBox::indicator {{
                 width: 16px; height: 16px; border-radius: 3px;
-                border: 1px solid #64748b; background: #020617;
-            }
-            QCheckBox::indicator:hover { border-color: #a855f7; }
-            QCheckBox::indicator:checked { border-color: #a855f7; background: #a855f7; }
-            QCheckBox:disabled { color: #475569; }
+                border: 1px solid #64748b; background: {C_BG_DEEP};
+            }}
+            QCheckBox::indicator:hover {{ border-color: #a855f7; }}
+            QCheckBox::indicator:checked {{ border-color: #a855f7; background: #a855f7; }}
+            QCheckBox:disabled {{ color: {C_TEXT_DEAD}; }}
         """)
         bl.addWidget(self.check_use_bg)
 
@@ -849,7 +854,7 @@ class LayoutBuilderMixin:
         il.setSpacing(8)
         il.setContentsMargins(10, 10, 10, 10)
 
-        _lbl_s2 = "color: #94a3b8; font-size: 12px; font-weight: bold;"
+        _lbl_s2 = f"color: {C_TEXT_DIM}; font-size: 12px; font-weight: bold;"
         _radio_style = """
             QRadioButton {
                 color: #e2e8f0; font-size: 13px; font-weight: 700; spacing: 8px;
@@ -871,15 +876,15 @@ class LayoutBuilderMixin:
         # Use checkbox
         self.check_use_proc = QCheckBox("Use Image Processing")
         self.check_use_proc.setEnabled(False)
-        self.check_use_proc.setStyleSheet("""
-            QCheckBox { color: #e2e8f0; font-size: 13px; font-weight: 700; spacing: 8px; }
-            QCheckBox::indicator {
+        self.check_use_proc.setStyleSheet(f"""
+            QCheckBox {{ color: {C_TEXT}; font-size: 13px; font-weight: 700; spacing: 8px; }}
+            QCheckBox::indicator {{
                 width: 16px; height: 16px; border-radius: 3px;
-                border: 1px solid #64748b; background: #020617;
-            }
-            QCheckBox::indicator:hover  { border-color: #0ea5e9; }
-            QCheckBox::indicator:checked { border-color: #0ea5e9; background: #0ea5e9; }
-            QCheckBox:disabled { color: #475569; }
+                border: 1px solid #64748b; background: {C_BG_DEEP};
+            }}
+            QCheckBox::indicator:hover  {{ border-color: #0ea5e9; }}
+            QCheckBox::indicator:checked {{ border-color: #0ea5e9; background: #0ea5e9; }}
+            QCheckBox:disabled {{ color: {C_TEXT_DEAD}; }}
         """)
         il.addWidget(self.check_use_proc)
 
@@ -912,7 +917,7 @@ class LayoutBuilderMixin:
         il.addWidget(ip_div)
 
         self.lbl_proc_status = QLabel("No image loaded")
-        self.lbl_proc_status.setStyleSheet("color: #64748b; font-size: 11px; font-weight: bold;")
+        self.lbl_proc_status.setStyleSheet(f"color: {C_TEXT_DEAD}; font-size: 11px; font-weight: bold;")
         self.lbl_proc_status.setWordWrap(True)
         il.addWidget(self.lbl_proc_status)
 
@@ -926,7 +931,7 @@ class LayoutBuilderMixin:
 
         save_count_row = QHBoxLayout()
         lbl_count = QLabel("Frame To Save:")
-        lbl_count.setStyleSheet("color: #94a3b8; font-size: 12px; font-weight: bold;")
+        lbl_count.setStyleSheet(f"color: {C_TEXT_DIM}; font-size: 12px; font-weight: bold;")
         self.spin_frame_to_save = QSpinBox()
         self.spin_frame_to_save.setRange(1, 100)
         self.spin_frame_to_save.setValue(10)
@@ -947,27 +952,27 @@ class LayoutBuilderMixin:
         self.check_add_time = QCheckBox("Add Time")
         self.check_add_time.setChecked(True)
         for chk in (self.check_inc_name, self.check_add_date, self.check_add_time):
-            chk.setStyleSheet("""
-                QCheckBox {
-                    color: #e2e8f0;
+            chk.setStyleSheet(f"""
+                QCheckBox {{
+                    color: {C_TEXT};
                     font-size: 13px;
                     font-weight: 700;
                     spacing: 8px;
-                }
-                QCheckBox::indicator {
+                }}
+                QCheckBox::indicator {{
                     width: 16px;
                     height: 16px;
                     border-radius: 3px;
                     border: 1px solid #64748b;
-                    background: #020617;
-                }
-                QCheckBox::indicator:hover {
+                    background: {C_BG_DEEP};
+                }}
+                QCheckBox::indicator:hover {{
                     border-color: #22d3ee;
-                }
-                QCheckBox::indicator:checked {
+                }}
+                QCheckBox::indicator:checked {{
                     border-color: #22d3ee;
                     background: #22d3ee;
-                }
+                }}
             """)
 
         self.cb_date_fmt = QComboBox(); self.cb_date_fmt.addItems(["YYYY-Month-DD", "YYYY-MM-DD"])
@@ -977,18 +982,18 @@ class LayoutBuilderMixin:
             cb.setStyleSheet("color: #14b8a6; font-size: 12px; font-weight: bold;")
 
         self.btn_browse_folder.setStyleSheet(
-            """
-            QPushButton {
-                background: #0f172a;
-                color: #e2e8f0;
+            f"""
+            QPushButton {{
+                background: {C_BG_MED};
+                color: {C_TEXT};
                 border: 1px solid #334155;
                 border-radius: 4px;
                 font-weight: 900;
-            }
-            QPushButton:hover {
+            }}
+            QPushButton:hover {{
                 border-color: #22d3ee;
                 color: #22d3ee;
-            }
+            }}
         """
         )
 
@@ -997,7 +1002,7 @@ class LayoutBuilderMixin:
 
         row_folder = QHBoxLayout()
         lbl_folder = QLabel("Save In:")
-        lbl_folder.setStyleSheet("color: #94a3b8; font-size: 12px; font-weight: bold;")
+        lbl_folder.setStyleSheet(f"color: {C_TEXT_DIM}; font-size: 12px; font-weight: bold;")
         row_folder.addWidget(lbl_folder)
         row_folder.addWidget(self.edit_folder, 1)
         row_folder.addWidget(self.btn_browse_folder)
@@ -1005,49 +1010,49 @@ class LayoutBuilderMixin:
 
         row_name = QHBoxLayout()
         lbl_name = QLabel("File Name:")
-        lbl_name.setStyleSheet("color: #94a3b8; font-size: 12px; font-weight: bold;")
+        lbl_name.setStyleSheet(f"color: {C_TEXT_DIM}; font-size: 12px; font-weight: bold;")
         row_name.addWidget(lbl_name)
         row_name.addWidget(self.edit_file_base, 1)
         sl.addLayout(row_name)
 
         naming_box = QGroupBox("Naming Options")
         naming_box.setStyleSheet(
-            """
-            QGroupBox {
-                color: #e2e8f0;
+            f"""
+            QGroupBox {{
+                color: {C_TEXT};
                 font-size: 13px;
                 font-weight: 800;
-                background: #020817;
-                border: 1px solid #475569;
+                background: {C_BG_DEEP};
+                border: 1px solid {C_BORDER};
                 border-radius: 8px;
                 margin-top: 10px;
                 padding-top: 10px;
-            }
-            QGroupBox::title {
+            }}
+            QGroupBox::title {{
                 subcontrol-origin: margin;
                 left: 8px;
                 padding: 0 6px;
-                color: #e2e8f0;
-                background: #020817;
-            }
-            QGroupBox QLabel {
-                color: #cbd5e1;
+                color: {C_TEXT};
+                background: {C_BG_DEEP};
+            }}
+            QGroupBox QLabel {{
+                color: {C_TEXT_DIM};
                 font-size: 12px;
                 font-weight: 700;
-            }
-            QGroupBox QComboBox {
-                background: #0b1220;
+            }}
+            QGroupBox QComboBox {{
+                background: {C_BG_DEEP};
                 color: #22d3ee;
-                border: 1px solid #475569;
+                border: 1px solid {C_BORDER};
                 border-radius: 4px;
                 padding: 2px 8px;
                 min-height: 24px;
-            }
-            QGroupBox QComboBox:disabled {
-                color: #64748b;
+            }}
+            QGroupBox QComboBox:disabled {{
+                color: {C_TEXT_DEAD};
                 border-color: #334155;
-                background: #0a0f1a;
-            }
+                background: {C_BG_DEEP};
+            }}
         """
         )
         nl = QVBoxLayout(naming_box)
@@ -1233,10 +1238,10 @@ class LayoutBuilderMixin:
         self.list_an_gallery.setIconSize(QSize(100, 100))
         self.list_an_gallery.setSpacing(10)
         self.list_an_gallery.setResizeMode(QListWidget.ResizeMode.Adjust)
-        self.list_an_gallery.setStyleSheet("""
-            QListWidget { background: #080e1e; border: 1px solid #1e293b; border-radius: 4px; }
-            QListWidget::item { color: #94a3b8; font-size: 10px; font-weight: bold; }
-            QListWidget::item:selected { background: #1e293b; color: #38bdf8; border: 1px solid #38bdf8; }
+        self.list_an_gallery.setStyleSheet(f"""
+            QListWidget {{ background: {C_BG_DEEP}; border: 1px solid #1e293b; border-radius: 4px; }}
+            QListWidget::item {{ color: {C_TEXT_DIM}; font-size: 10px; font-weight: bold; }}
+            QListWidget::item:selected {{ background: #1e293b; color: #38bdf8; border: 1px solid #38bdf8; }}
         """)
         glay.addWidget(self.list_an_gallery)
         
@@ -1253,7 +1258,7 @@ class LayoutBuilderMixin:
     def _create_master_bar(self):
         bar = QFrame()
         bar.setFixedHeight(75)
-        bar.setStyleSheet("background-color: #020617; border-top: none;")
+        bar.setStyleSheet(f"background-color: {C_BG_DEEP}; border-top: none;")
         lay = QHBoxLayout(bar)
         lay.setContentsMargins(15, 10, 15, 5)
         lay.setSpacing(25)
@@ -1335,7 +1340,7 @@ class LayoutBuilderMixin:
         prog_lay.addLayout(top_row)
 
         self.prog_container = QFrame(); self.prog_container.setFixedHeight(22)
-        self.prog_container.setStyleSheet("background: #0f172a; border-radius: 11px; border: 1px solid #1e293b;")
+        self.prog_container.setStyleSheet(f"background: {C_BG_MED}; border-radius: 11px; border: 1px solid #1e293b;")
 
         self.prog_grid = QGridLayout(self.prog_container)
         self.prog_grid.setContentsMargins(0, 0, 0, 0)
@@ -1367,7 +1372,7 @@ class LayoutBuilderMixin:
             ("BUFFER",     "---",      "lbl_tel_buffer"),
         ]:
             vbox = QVBoxLayout(); vbox.setSpacing(2)
-            ll = QLabel(label); ll.setStyleSheet("color: #64748b; font-size: 9px; font-weight: 900; border: none;")
+            ll = QLabel(label); ll.setStyleSheet(f"color: {C_TEXT_DEAD}; font-size: 9px; font-weight: 900; border: none;")
             vv = QLabel(val);   vv.setStyleSheet("color: #14b8a6; font-size: 11px; font-weight: 900; border: none;")
             setattr(self, attr, vv)
             vbox.addWidget(ll); vbox.addWidget(vv)

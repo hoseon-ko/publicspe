@@ -113,6 +113,7 @@ class MotionTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._live_tab = None
+        self._session_hub = None
         self._calc = KinematicCalc()
         self._pico_positions: list[Optional[int]] = [None, None, None, None]
         self._acs_positions: list[float] = [0.0] * 6
@@ -159,6 +160,10 @@ class MotionTab(QWidget):
     def bind_live_tab(self, live_tab):
         self._live_tab = live_tab
         self._sync_connection_fields_from_live()
+        self._refresh_from_sources()
+
+    def bind_session_hub(self, session_hub):
+        self._session_hub = session_hub
         self._refresh_from_sources()
 
     def cleanup(self):
@@ -415,6 +420,7 @@ class MotionTab(QWidget):
         lay = QVBoxLayout(card)
         lay.setContentsMargins(8, 8, 8, 8)
         lay.setSpacing(7)
+        lay.addWidget(_card_title("PICOMOTOR  8742"))
 
         conn_panel = _section_box("PICOMOTOR 8742", C_ACCENT)
         conn_l = conn_panel.content_layout()
@@ -424,8 +430,8 @@ class MotionTab(QWidget):
         self.btn_pico_disconnect = QPushButton("DISCONNECT")
         self.btn_pico_connect.setStyleSheet(BTN_SMALL)
         self.btn_pico_disconnect.setStyleSheet(BTN_SMALL.replace(C_ACCENT, C_DANGER))
-        self.btn_pico_connect.clicked.connect(lambda: self._call_live_panel("motor_panel", "_on_connect"))
-        self.btn_pico_disconnect.clicked.connect(lambda: self._call_live_panel("motor_panel", "_on_disconnect"))
+        self.btn_pico_connect.clicked.connect(self._connect_pico_from_motion)
+        self.btn_pico_disconnect.clicked.connect(self._disconnect_pico_from_motion)
         _fix_h(self.btn_pico_connect, 34)
         _fix_h(self.btn_pico_disconnect, 34)
         conn_row.addWidget(self.btn_pico_connect)
@@ -504,6 +510,7 @@ class MotionTab(QWidget):
         lay = QVBoxLayout(card)
         lay.setContentsMargins(8, 8, 8, 8)
         lay.setSpacing(7)
+        lay.addWidget(_card_title("KIMM  FINE STAGE"))
 
         conn_panel = _section_box("KIMM FINE STAGE (Z)", C_ACCENT)
         conn_l = conn_panel.content_layout()
@@ -538,7 +545,7 @@ class MotionTab(QWidget):
         self.btn_kimm_connect.setStyleSheet(BTN_SMALL)
         self.btn_kimm_disconnect.setStyleSheet(BTN_SMALL.replace(C_ACCENT, C_DANGER))
         self.btn_kimm_connect.clicked.connect(self._connect_kimm_from_motion)
-        self.btn_kimm_disconnect.clicked.connect(lambda: self._call_live_panel("kimm_z_panel", "_on_disconnect"))
+        self.btn_kimm_disconnect.clicked.connect(self._disconnect_kimm_from_motion)
         _fix_h(self.btn_kimm_connect, 34)
         _fix_h(self.btn_kimm_disconnect, 34)
         btn_row.addWidget(self.btn_kimm_connect)
@@ -635,6 +642,7 @@ class MotionTab(QWidget):
         lay = QVBoxLayout(card)
         lay.setContentsMargins(8, 8, 8, 8)
         lay.setSpacing(7)
+        lay.addWidget(_card_title("ACS  6-AXIS  KINEMATIC"))
 
         conn_panel = _section_box("CONNECTION", C_ACCENT)
         conn_l = conn_panel.content_layout()
@@ -672,7 +680,7 @@ class MotionTab(QWidget):
         self.btn_acs_connect.setStyleSheet(BTN_SMALL)
         self.btn_acs_disconnect.setStyleSheet(BTN_SMALL.replace(C_ACCENT, C_DANGER))
         self.btn_acs_connect.clicked.connect(self._connect_acs_from_motion)
-        self.btn_acs_disconnect.clicked.connect(lambda: self._call_live_panel("acs_stage_panel", "_on_disconnect"))
+        self.btn_acs_disconnect.clicked.connect(self._disconnect_acs_from_motion)
         _fix_h(self.btn_acs_connect, 34)
         _fix_h(self.btn_acs_disconnect, 34)
         btn_row.addWidget(self.btn_acs_connect)
@@ -1034,18 +1042,24 @@ class MotionTab(QWidget):
     # ------------------------------------------------------------------
 
     def _pico_ctrl(self):
+        if self._session_hub:
+            return self._session_hub.pico_controller
         if not self._live_tab:
             return None
         panel = getattr(self._live_tab, "motor_panel", None)
         return getattr(panel, "controller", None) if panel else None
 
     def _kimm_ctrl(self):
+        if self._session_hub:
+            return self._session_hub.kimm_controller
         if not self._live_tab:
             return None
         panel = getattr(self._live_tab, "kimm_z_panel", None)
         return getattr(panel, "controller", None) if panel else None
 
     def _acs_ctrl(self):
+        if self._session_hub:
+            return self._session_hub.acs_controller
         if not self._live_tab:
             return None
         panel = getattr(self._live_tab, "acs_stage_panel", None)
@@ -1063,21 +1077,89 @@ class MotionTab(QWidget):
                 self.log_message.emit(f"{panel_name}.{method_name} failed: {e}")
         self._refresh_from_sources()
 
+    def _connect_pico_from_motion(self):
+        if self._session_hub:
+            def _do():
+                try:
+                    self._session_hub.connect_pico()
+                    self.log_message.emit("Picomotor connected")
+                except Exception as e:
+                    self.log_message.emit(f"Pico connect failed: {e}")
+                self._refresh_from_sources()
+            self._run_bg("Pico connect", _do)
+        else:
+            self._call_live_panel("motor_panel", "_on_connect")
+
+    def _disconnect_pico_from_motion(self):
+        if self._session_hub:
+            try:
+                self._session_hub.disconnect_pico()
+            except Exception as e:
+                self.log_message.emit(f"Pico disconnect failed: {e}")
+            self._refresh_from_sources()
+        else:
+            self._call_live_panel("motor_panel", "_on_disconnect")
+
     def _connect_kimm_from_motion(self):
-        panel = getattr(self._live_tab, "kimm_z_panel", None) if self._live_tab else None
-        if panel:
-            panel.edit_ip.setText(self.edit_kimm_ip.text().strip())
-            panel.edit_port.setText(self.edit_kimm_port.text().strip())
-        self._call_live_panel("kimm_z_panel", "_on_connect")
+        if self._session_hub:
+            ip = self.edit_kimm_ip.text().strip()
+            port_str = self.edit_kimm_port.text().strip()
+            def _do():
+                try:
+                    self._session_hub.connect_kimm(ip, int(port_str or 5000))
+                    self.log_message.emit(f"KIMM connected: {ip}")
+                except Exception as e:
+                    self.log_message.emit(f"KIMM connect failed: {e}")
+                self._refresh_from_sources()
+            self._run_bg("KIMM connect", _do)
+        else:
+            panel = getattr(self._live_tab, "kimm_z_panel", None) if self._live_tab else None
+            if panel:
+                panel.edit_ip.setText(self.edit_kimm_ip.text().strip())
+                panel.edit_port.setText(self.edit_kimm_port.text().strip())
+            self._call_live_panel("kimm_z_panel", "_on_connect")
+
+    def _disconnect_kimm_from_motion(self):
+        if self._session_hub:
+            try:
+                self._session_hub.disconnect_kimm()
+            except Exception as e:
+                self.log_message.emit(f"KIMM disconnect failed: {e}")
+            self._refresh_from_sources()
+        else:
+            self._call_live_panel("kimm_z_panel", "_on_disconnect")
 
     def _connect_acs_from_motion(self):
-        panel = getattr(self._live_tab, "acs_stage_panel", None) if self._live_tab else None
-        if panel:
-            panel.edit_ip.setText(self.edit_acs_ip.text().strip())
-            panel.edit_port.setText(self.edit_acs_port.text().strip())
-            if hasattr(panel, "check_sim"):
-                panel.check_sim.setChecked(self.check_acs_sim.isChecked())
-        self._call_live_panel("acs_stage_panel", "_on_connect")
+        if self._session_hub:
+            ip = self.edit_acs_ip.text().strip()
+            port_str = self.edit_acs_port.text().strip()
+            use_sim = self.check_acs_sim.isChecked()
+            def _do():
+                try:
+                    self._session_hub.connect_acs(ip, int(port_str or 700))
+                    self.log_message.emit(f"ACS connected: {'SIM' if use_sim else ip}")
+                except Exception as e:
+                    self.log_message.emit(f"ACS connect failed: {e}")
+                self._refresh_from_sources()
+            self._run_bg("ACS connect", _do)
+        else:
+            panel = getattr(self._live_tab, "acs_stage_panel", None) if self._live_tab else None
+            if panel:
+                panel.edit_ip.setText(self.edit_acs_ip.text().strip())
+                panel.edit_port.setText(self.edit_acs_port.text().strip())
+                if hasattr(panel, "check_sim"):
+                    panel.check_sim.setChecked(self.check_acs_sim.isChecked())
+            self._call_live_panel("acs_stage_panel", "_on_connect")
+
+    def _disconnect_acs_from_motion(self):
+        if self._session_hub:
+            try:
+                self._session_hub.disconnect_acs()
+            except Exception as e:
+                self.log_message.emit(f"ACS disconnect failed: {e}")
+            self._refresh_from_sources()
+        else:
+            self._call_live_panel("acs_stage_panel", "_on_disconnect")
 
     def _sync_connection_fields_from_live(self):
         if not self._live_tab:
@@ -1479,9 +1561,16 @@ class MotionTab(QWidget):
         self.log_message.emit("EMERGENCY GLOBAL STOP REQUESTED")
 
     def _reconnect_all(self):
+        if self._session_hub:
+            if not self._pico_ctrl():
+                self._connect_pico_from_motion()
+            if not self._kimm_ctrl():
+                self._connect_kimm_from_motion()
+            if not self._acs_ctrl():
+                self._connect_acs_from_motion()
+            return
         if not self._live_tab:
             return
-        # Reuse the live tab's stored connection UI/state when available.
         actions = []
         if hasattr(self._live_tab, "motor_panel") and not self._pico_ctrl():
             actions.append(getattr(self._live_tab.motor_panel, "_on_connect", None))

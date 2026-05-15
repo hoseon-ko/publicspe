@@ -38,6 +38,7 @@ from ui.deepalign.deepalign_layout import LayoutBuilderMixin
 from ui.deepalign.deepalign_styles import DeepAlignStylesMixin
 from ui.deepalign.deepalign_workers import _AcquireWorker, _SnapWorker, _LiveWorker, _BgCaptureWorker
 from ui.autofocus.af_worker import AutoFocusWorker
+from theme.styles import C_BG_DARK, C_TEXT, C_TEXT_DIM, C_TEXT_DEAD
 from core.logger import dev_logger
 from core.session.session_state import CameraConnectionState
 from core.session.ownership import OWNER_DEEPALIGN
@@ -62,12 +63,12 @@ class _BgProgressOverlay(QWidget):
         # ── 중앙 카드 ──────────────────────────────────────────────
         self._card = QFrame(self)
         self._card.setFixedWidth(320)
-        self._card.setStyleSheet("""
-            QFrame {
-                background: #0a0f1e;
+        self._card.setStyleSheet(f"""
+            QFrame {{
+                background: {C_BG_DARK};
                 border: 2px solid #a855f7;
                 border-radius: 14px;
-            }
+            }}
         """)
 
         cl = QVBoxLayout(self._card)
@@ -84,7 +85,7 @@ class _BgProgressOverlay(QWidget):
 
         self.lbl_frames = QLabel("0 / 0")
         self.lbl_frames.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_frames.setStyleSheet(f"color: #e2e8f0; font-size: 32px; font-weight: 700; {_no_border}")
+        self.lbl_frames.setStyleSheet(f"color: {C_TEXT}; font-size: 32px; font-weight: 700; {_no_border}")
         cl.addWidget(self.lbl_frames)
 
         self.progress_bar = QProgressBar()
@@ -100,7 +101,7 @@ class _BgProgressOverlay(QWidget):
 
         self.lbl_eta = QLabel("Initializing...")
         self.lbl_eta.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_eta.setStyleSheet(f"color: #94a3b8; font-size: 12px; font-weight: 600; {_no_border}")
+        self.lbl_eta.setStyleSheet(f"color: {C_TEXT_DIM}; font-size: 12px; font-weight: 600; {_no_border}")
         cl.addWidget(self.lbl_eta)
 
         btn_cancel = QPushButton("CANCEL")
@@ -444,6 +445,15 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self.btn_toggle_plot_sm.toggled.connect(self.dock_plot.setVisible)
         self.btn_toggle_hist_sm.toggled.connect(self.dock_hist.setVisible)
         self.btn_toggle_roi_sm.toggled.connect(self.dock_roi.setVisible)
+        self.dock_plot.visibilityChanged.connect(
+            lambda visible: self._sync_analysis_dock_toggle(self.dock_plot, self.btn_toggle_plot_sm, visible)
+        )
+        self.dock_hist.visibilityChanged.connect(
+            lambda visible: self._sync_analysis_dock_toggle(self.dock_hist, self.btn_toggle_hist_sm, visible)
+        )
+        self.dock_roi.visibilityChanged.connect(
+            lambda visible: self._sync_analysis_dock_toggle(self.dock_roi, self.btn_toggle_roi_sm, visible)
+        )
         self.btn_reset_dock.clicked.connect(self._on_reset_dock_layout)
 
         # ── Analysis Toolbar Connections ──────────────────────────────
@@ -456,9 +466,12 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self.file_list_panel.frame_changed.connect(self._on_frame_changed)
         self.file_list_panel.file_removed.connect(self.frame_grid_panel.remove_file)
 
-        # Frame Grid Panel
         self.frame_grid_panel.frame_clicked.connect(self._on_grid_frame_clicked)
         self.frame_grid_panel.checked_frames_changed.connect(self._on_checked_frames_changed)
+
+        self._sync_analysis_dock_toggle(self.dock_plot, self.btn_toggle_plot_sm, self.dock_plot.isVisible())
+        self._sync_analysis_dock_toggle(self.dock_hist, self.btn_toggle_hist_sm, self.dock_hist.isVisible())
+        self._sync_analysis_dock_toggle(self.dock_roi, self.btn_toggle_roi_sm, self.dock_roi.isVisible())
 
         # ROI Panel
         self.roi_panel.roi_selected.connect(self._on_roi_selected)
@@ -507,6 +520,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
             self._set_camera_action_state(False)
             return
         self.mirror_panel.bind_session_hub(session_hub)
+        self.motion_panel.bind_session_hub(session_hub)
         try:
             self._session_hub.select_camera_vendor(self._vendor_key())
         except Exception:
@@ -581,7 +595,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
             self.radio_proc_mode1.setEnabled(False)
             self.radio_proc_mode2.setEnabled(False)
             self.lbl_proc_status.setText("No image loaded")
-            self.lbl_proc_status.setStyleSheet("color: #64748b; font-size: 11px; font-weight: bold;")
+            self.lbl_proc_status.setStyleSheet(f"color: {C_TEXT_DEAD}; font-size: 11px; font-weight: bold;")
             return
         shape = self._proc_image.shape
         dims  = f"{shape[1]}×{shape[0]}" if self._proc_image.ndim >= 2 else f"{shape[0]}"
@@ -697,6 +711,8 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
 
     def _bg_update_ui(self, source_name: str = "") -> None:
         has_bg = self._bg_frame is not None
+        can_capture_bg = not self._is_hub_camera_connected()
+        self.btn_bg_capture.setVisible(can_capture_bg)
         self.btn_bg_clear.setEnabled(has_bg)
         self.check_use_bg.setEnabled(has_bg)
         if has_bg:
@@ -705,7 +721,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
             self.lbl_bg_status.setStyleSheet("color: #c084fc; font-size: 11px; font-weight: bold;")
         else:
             self.lbl_bg_status.setText("No background set")
-            self.lbl_bg_status.setStyleSheet("color: #64748b; font-size: 11px; font-weight: bold;")
+            self.lbl_bg_status.setStyleSheet(f"color: {C_TEXT_DEAD}; font-size: 11px; font-weight: bold;")
 
     def _save_settings(self):
         # Camera
@@ -1052,6 +1068,18 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
     def _on_an_fit_clicked(self):
         """이미지 뷰어를 Fit to View 상태로 초기화한다."""
         self.cam_viewer.viewer.autoRange()
+
+    def _sync_analysis_dock_toggle(self, dock, button, visible: bool) -> None:
+        button.blockSignals(True)
+        button.setChecked(bool(visible))
+        button.blockSignals(False)
+
+        if hasattr(self, "dock_toggles"):
+            action = self.dock_toggles.get(dock.objectName())
+            if action is not None:
+                action.blockSignals(True)
+                action.setChecked(bool(visible))
+                action.blockSignals(False)
 
     def _on_gallery_item_double_clicked(self, item: QListWidgetItem):
         """갤러리의 썸네일을 더블 클릭하면 해당 원본 프레임을 뷰어에 표시한다."""

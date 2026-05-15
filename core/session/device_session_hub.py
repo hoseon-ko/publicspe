@@ -999,3 +999,16 @@ class DeviceSessionHub(QObject):
         if hal is None:
             raise HalNotConnectedError("Picomotor HAL is not attached")
         return hal
+
+    # ── 컨트롤러 직접 접근 (MotionTab용) ─────────────────────────────
+    @property
+    def pico_controller(self):
+        return getattr(self._pico_hal, "_controller", None) if self._pico_hal else None
+
+    @property
+    def kimm_controller(self):
+        return getattr(self._kimm_hal, "_controller", None) if self._kimm_hal else None
+
+    @property
+    def acs_controller(self):
+        return getattr(self._acs_hal, "_controller", None) if self._acs_hal else None

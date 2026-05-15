@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButt
 
 
 from theme.styles import (
-    C_BG_MED, C_BORDER, C_TEXT_DIM, Fonts, Sizes
+    C_BG_DEEP, C_BG_MED, C_BORDER, C_TEXT, C_TEXT_DIM, C_TEXT_DEAD, Fonts, Sizes
 )
 
 class DeepAlignStylesMixin:
@@ -67,6 +67,8 @@ class DeepAlignStylesMixin:
         # 카메라 설정 섹션은 연결 시에만 표시
         if hasattr(self, "cam_connected_settings"):
             self.cam_connected_settings.setVisible(connected)
+        if hasattr(self, "btn_bg_capture"):
+            self.btn_bg_capture.setVisible(not connected)
 
         if not connected:
             self.btn_connect.setEnabled(True)
@@ -125,7 +127,7 @@ class DeepAlignStylesMixin:
         header.setFixedHeight(28)
         header.setStyleSheet(
             f"""
-            QPushButton {{ background: #0f172a; color: {color}; font-weight: 900; font-size: 11px;
+            QPushButton {{ background: {C_BG_MED}; color: {color}; font-weight: 900; font-size: 11px;
                            text-align: left; padding: 4px 8px; border: 1px solid #1e293b;
                            }}
             QPushButton:checked {{ border-bottom: none; }}
@@ -142,7 +144,7 @@ class DeepAlignStylesMixin:
         l = QLabel(txt)
         l.setFixedWidth(90)
         l.setStyleSheet(
-            "color: #94a3b8; font-size: 12px; font-weight: bold;"
+            f"color: {C_TEXT_DIM}; font-size: 12px; font-weight: bold;"
             " border-right: 1px solid #1e293b; padding: 0 6px;"
             " background: rgba(30,41,59,0.2);"
         )
@@ -171,7 +173,7 @@ class DeepAlignStylesMixin:
                            border: none; font-weight: 900; padding: 0; }}
             QPushButton:hover {{ background: {color}cc; }}
             QPushButton:pressed {{ background: {color}aa; margin-top: 1px; }}
-            QPushButton:disabled {{ background: #0f172a; border: 1px solid #1e293b; }}
+            QPushButton:disabled {{ background: {C_BG_MED}; border: 1px solid #1e293b; }}
         """
         )
         lay = QVBoxLayout(btn)
@@ -191,25 +193,25 @@ class DeepAlignStylesMixin:
     def _small_toggle_btn(self, text: str) -> QPushButton:
         btn = QPushButton(text)
         btn.setCheckable(True)
-        btn.setChecked(True)
+        btn.setChecked(False)
         btn.setFixedSize(70, 20)
-        btn.setStyleSheet("""
-            QPushButton {
-                background: #0f172a; color: #94a3b8; border: 1px solid #1e293b;
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {C_BG_MED}; color: {C_TEXT_DIM}; border: 1px solid #1e293b;
                 border-radius: 4px; font-size: 10px; font-weight: 800; padding: 2px;
-            }
-            QPushButton:hover { border-color: #3b82f6; color: #3b82f6; background: #1e293b; }
-            QPushButton:checked { background: #1e293b; color: #3b82f6; border-color: #3b82f6; }
+            }}
+            QPushButton:hover {{ border-color: #3b82f6; color: #3b82f6; background: #1e293b; }}
+            QPushButton:checked {{ background: #1e293b; color: #3b82f6; border-color: #3b82f6; }}
         """)
         return btn
 
     def _apply_global_styles(self):
         self.setStyleSheet(
-            """
-            QWidget#deepAlignStack { background-color: #05080c; }
-            QScrollArea { border: none; background: transparent; }
-            QScrollBar:vertical { border: none; background: #05080c; width: 6px; }
-            QScrollBar::handle:vertical { background: #1e293b; border-radius: 3px; }
-            QWidget#deepAlignTab QLabel:disabled { color: #2a3547; }
+            f"""
+            QWidget#deepAlignStack {{ background-color: {C_BG_DEEP}; }}
+            QScrollArea {{ border: none; background: transparent; }}
+            QScrollBar:vertical {{ border: none; background: {C_BG_DEEP}; width: 6px; }}
+            QScrollBar::handle:vertical {{ background: #1e293b; border-radius: 3px; }}
+            QWidget#deepAlignTab QLabel:disabled {{ color: {C_TEXT_DEAD}; }}
         """
         )

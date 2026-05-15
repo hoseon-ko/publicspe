@@ -2,12 +2,30 @@
 
 from __future__ import annotations
 
+import re
 import numpy as np
 
 from core.camera.picamp import PicamCamera, list_devices as picam_list_devices
 from core.hal.camera_hal import CameraCapabilities, CameraDeviceInfo, CameraHal
 from core.hal.errors import HalCommandError, HalConnectionError, HalNotConnectedError
 from core.logger import cam_logger
+
+
+def _extract_serial(item: object, fallback: str) -> str:
+    """Extract Picam serial number from TCameraInfo-like objects or strings."""
+    try:
+        serial = getattr(item, "serial_number", None)
+        if serial is not None:
+            serial_text = str(serial).strip()
+            if serial_text:
+                return serial_text
+    except Exception:
+        pass
+
+    m = re.search(r"serial_number='([^']+)'", fallback)
+    if m:
+        return m.group(1).strip()
+    return fallback
 
 
 class PicamCameraAdapter(CameraHal):
@@ -54,12 +72,13 @@ class PicamCameraAdapter(CameraHal):
         results: list[CameraDeviceInfo] = []
         for i, item in enumerate(devices):
             text = str(item)
+            serial = _extract_serial(item, text if text else str(i))
             results.append(
                 CameraDeviceInfo(
                     vendor="picam",
-                    device_id=text if text else str(i),
+                    device_id=serial,
                     display_name=text if text else f"Picam {i}",
-                    serial=text,
+                    serial=serial,
                 )
             )
         cam_logger.debug(f"[PicamCameraAdapter] list_devices succeeded count={len(results)}")

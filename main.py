@@ -21,9 +21,30 @@ if sys.platform == 'win32':
 import signal
 import threading
 import traceback
-from PyQt6.QtWidgets import QApplication, QMessageBox
+from PyQt6.QtWidgets import QApplication, QMessageBox, QAbstractSpinBox, QComboBox
 from PyQt6.QtGui import QFont
-from PyQt6.QtCore import QTimer, Qt, QMetaObject
+from PyQt6.QtCore import QTimer, Qt, QMetaObject, QObject, QEvent
+
+_SCROLL_GUARDED = (QAbstractSpinBox, QComboBox)
+
+
+class _SpinBoxWheelFilter(QObject):
+    """SpinBox/ComboBox가 마우스 올라가는 것만으로 포커스를 먹지 않도록 하고,
+    포커스 없을 때 휠 스크롤로 값이 바뀌지 않도록 막는 앱 레벨 이벤트 필터."""
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if isinstance(obj, _SCROLL_GUARDED):
+            ev_type = event.type()
+            # 위젯이 생성될 때 포커스 정책을 StrongFocus로 변경
+            # (기본값 WheelFocus = 마우스 올리기만 해도 포커스 획득)
+            if ev_type == QEvent.Type.Polish:
+                obj.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+            # 포커스 없으면 휠 이벤트 무시
+            elif ev_type == QEvent.Type.Wheel:
+                if not obj.hasFocus():
+                    event.ignore()
+                    return True
+        return False
 
 from theme.dark_theme import DARK_THEME_QSS
 from ui.main_window import MainWindow
@@ -85,6 +106,9 @@ def main():
     app.setApplicationName("SpeAnalyze")
     app.setStyle("Fusion")
     app.setStyleSheet(DARK_THEME_QSS)
+
+    _wheel_filter = _SpinBoxWheelFilter(app)
+    app.installEventFilter(_wheel_filter)
 
     font = QFont("Segoe UI", 10)
     app.setFont(font)
