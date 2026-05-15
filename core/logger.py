@@ -94,7 +94,8 @@ def setup_logger() -> logging.Logger:
     
     class HWFilter(logging.Filter):
         def filter(self, record):
-            return "motor" in record.name or "camera" in record.name
+            name = record.name
+            return any(k in name for k in ["motor", "camera", "dev", "cam"])
     hw_handler.addFilter(HWFilter())
     
     # 3. 콘솔 핸들러
@@ -108,7 +109,7 @@ def setup_logger() -> logging.Logger:
     
     # 4. UI 브릿지 핸들러
     ui_handler = UIBridgeHandler()
-    ui_handler.setLevel(logging.DEBUG)
+    ui_handler.setLevel(logging.INFO)  # UI 콘솔에는 INFO 이상만 표시 (DEBUG 차단)
     ui_handler.setFormatter(logging.Formatter('%(message)s'))  # UI 포맷은 자체 시간 표시 사용
     root_logger.addHandler(ui_handler)
     

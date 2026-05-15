@@ -207,23 +207,45 @@ class HikvisionCamera(BaseCamera):
         # live 스트림을 죽인다. 두 경우 모두 _sdk_lock으로 GetImageBuffer를 직렬화한다.
         was_grabbing = self._grabbing
         if not was_grabbing:
-            self._cam.MV_CC_StartGrabbing()
+            ret = self._cam.MV_CC_StartGrabbing()
+            if ret != 0:
+                raise RuntimeError(f"StartGrabbing 실패 (에러코드: {ret})")
+            time.sleep(0.05)  # 센서 안정화 및 버퍼 충전 대기
         try:
             out = MV_FRAME_OUT()
             with self._sdk_lock:
                 ret = self._cam.MV_CC_GetImageBuffer(out, 3000)
                 if ret != 0:
-                    raise RuntimeError(f"프레임 취득 실패: {ret}")
-                pBuf = cast(out.pBufAddr, c_void_p).value
+                    raise RuntimeError(f"프레임 취득 실패 (에러코드: {ret})")
+                
+                p_addr = out.pBufAddr
+                if not p_addr:
+                    self._cam.MV_CC_FreeImageBuffer(out)
+                    raise RuntimeError("프레임 버퍼 포인터가 NULL입니다.")
+                    
+                pBuf = cast(p_addr, c_void_p).value
+                if pBuf is None:
+                    self._cam.MV_CC_FreeImageBuffer(out)
+                    raise RuntimeError("프레임 버퍼 주소가 올바르지 않습니다.")
+                    
                 h, w = out.stFrameInfo.nHeight, out.stFrameInfo.nWidth
                 n = out.stFrameInfo.nFrameLen
+                
+                # 안전한 슬라이싱을 위해 크기 검증
+                actual_pixels = h * w
+                if n < actual_pixels:
+                    self._cam.MV_CC_FreeImageBuffer(out)
+                    raise RuntimeError(f"프레임 크기 부족: expected {actual_pixels}, got {n}")
+                    
                 raw = np.frombuffer(
                     (c_ubyte * n).from_address(pBuf), dtype=np.uint8
-                )[:h * w].reshape(h, w).copy()
+                )[:actual_pixels].reshape(h, w).copy()
+                
                 self._cam.MV_CC_FreeImageBuffer(out)
             return raw
         finally:
             if not was_grabbing:
+                time.sleep(0.05)  # SDK 강제종료 방지를 위한 지연
                 self._cam.MV_CC_StopGrabbing()
 
     def start_live(self, frame_cb: Callable[[np.ndarray], None]) -> None:

@@ -1,4 +1,4 @@
-﻿"""
+"""
 ui/main_window.py
 통합 메인 윈도우 — LightField 스타일.
 
@@ -521,9 +521,10 @@ class MainWindow(QMainWindow):
 
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_log)
 
-    def _log(self, msg: str, category: str = "sys"):
+    def _log(self, msg: str, category: str = "sys", levelno: int = 20):
         """전역 로깅 콜백 — 카테고리에 맞춰 UI 업데이트."""
         from datetime import datetime
+        import logging
         ts = datetime.now().strftime("%H:%M:%S")
         ts_html = f"<span style='color:#4a5a7a; font-family: {Fonts.MONO}; font-size:11px;'>[{ts}]</span>"
         
@@ -533,10 +534,16 @@ class MainWindow(QMainWindow):
             cat_tag = f"<span style='color:{tag_color}; font-weight:bold;'>[{category.upper()}]</span> "
 
         color = "#c0d0ff"
-        msg_lower = msg.lower()
-        if any(x in msg_lower for x in ["성공", "connected", "ok", "success"]): color = "#4ecdc4"
-        elif any(x in msg_lower for x in ["실패", "failed", "error", "위반", "❌"]): color = "#e94560"
-        elif any(x in msg_lower for x in ["⚠", "⚠️", "warning"]): color = "#ffe66d"
+        if levelno >= logging.ERROR:
+            color = "#e94560"
+        elif levelno >= logging.WARNING:
+            color = "#ffe66d"
+        elif levelno <= logging.DEBUG:
+            color = "#6080a0"
+        else:
+            msg_lower = msg.lower()
+            if any(x in msg_lower for x in ["성공", "connected", "ok", "success"]): 
+                color = "#4ecdc4"
 
         msg_html = f"<span style='color:{color}; font-family: {Fonts.MONO};'>{msg}</span>"
         html = f"{ts_html} {cat_tag}{msg_html}"

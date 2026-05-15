@@ -187,20 +187,23 @@ class DeviceSessionHub(QObject):
     # ──────────────────────────────────────────────────────────
 
     def snap(self, owner: str):
+        # 락을 설정 확인에만 사용하고 실제 노출 구간에서는 해제
+        # → 노출 시간 동안 메인 스레드가 온도 폴링 등으로 블로킹되는 현상 방지
         with self._camera_lock:
             _ = validate_owner(owner)
             hal = self._require_camera_hal()
-            try:
-                raw = hal.snap()
-                self._last_frame = raw
-                self.publish_frame(raw, raw, source="hub")
-                return raw
-            except Exception as exc:
-                dev_logger.exception(
-                    f"[DeviceSessionHub] snap failed owner={owner}"
-                )
-                self.publish_error("camera", f"snap failed: {exc}", source="hub")
-                raise
+
+        try:
+            raw = hal.snap()
+        except Exception as exc:
+            dev_logger.exception(f"[DeviceSessionHub] snap failed owner={owner}")
+            self.publish_error("camera", f"snap failed: {exc}", source="hub")
+            raise
+
+        with self._camera_lock:
+            self._last_frame = raw
+            self.publish_frame(raw, raw, source="hub")
+        return raw
 
     def acquire_with_progress(
         self,

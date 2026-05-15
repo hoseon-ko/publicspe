@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import math
 from pathlib import Path
 import time
 
@@ -60,11 +61,29 @@ class CameraControllerMixin(CameraHubMixin):
         if not self._is_hub_camera_connected():
             dev_logger.debug("[DeepAlign] snap ignored (hub camera disconnected)")
             return
+            
+        # Hikvision 등 일부 카메라 SDK는 Live 스트리밍 도중 별도 스레드에서
+        # 프레임 버퍼를 당겨오면(segfault) 프로그램이 즉시 강제 종료됩니다.
+        # 따라서 Snap 전에 Live를 안전하게 정지합니다.
+        self._was_live_before_snap = getattr(self, "_is_live", False)
+        if self._was_live_before_snap:
+            self._stop_hub_live()
+
         snap_fn = lambda: self._session_hub.snap(OWNER_DEEPALIGN)
 
         self._snap_in_progress = True
         self._set_camera_action_state(True, busy=True)
-        self._snap_expected_s = max(0.05, self._estimate_frame_seconds())
+        # adaptive 값이 있으면 유지, 없으면 HAL 초기값 사용
+        # 매번 HAL로 덮으면 EMA 학습이 무의미해짐
+        hal_s = max(0.05, self._estimate_frame_seconds())
+        if self._snap_expected_s <= 0.05:
+            self._snap_expected_s = hal_s
+        else:
+            # HAL 변화(노출 변경 등)를 40% 반영, 기존 학습값 60% 유지
+            self._snap_expected_s = 0.6 * self._snap_expected_s + 0.4 * hal_s
+        dev_logger.debug(
+            f"[DeepAlign] snap start expected={self._snap_expected_s:.3f}s hal={hal_s:.3f}s"
+        )
         self._snap_started_at = time.monotonic()
         self._set_master_progress(0)
         self._snap_progress_timer.start()
@@ -86,12 +105,10 @@ class CameraControllerMixin(CameraHubMixin):
             return
         elapsed = max(0.0, time.monotonic() - self._snap_started_at)
         expected = max(0.05, self._snap_expected_s)
-        # 예상 시간 초과 시 서서히 올라가되 99%에서 멈춤
-        if elapsed <= expected:
-            ratio = elapsed / expected
-        else:
-            ratio = 0.99 - (0.04 / (1.0 + (elapsed - expected)))
-        self._set_master_progress(int(min(0.99, ratio) * 100.0))
+        # exp 기반 단조증가: elapsed=expected 시 ~95%, 그 이후도 계속 증가, 99%에서 cap
+        # 불연속/역주행 없음, 예상 초과 후에도 항상 가시적으로 올라감
+        ratio = min(0.99, 1.0 - math.exp(-3.0 * elapsed / expected))
+        self._set_master_progress(int(ratio * 100.0))
 
     def _on_acquire_progress_tick(self) -> None:
         if not self._acq.running:
@@ -106,12 +123,8 @@ class CameraControllerMixin(CameraHubMixin):
         elapsed = max(0.0, now_mono - self._acq.frame_started_at)
 
         completed = max(0, min(self._acq.cur, self._acq.total))
-        # 예상 초과 시 서서히 1.0에 접근, 0.99 cap (snap과 동일 패턴)
-        if elapsed <= expected:
-            in_frame_ratio = elapsed / expected
-        else:
-            in_frame_ratio = 1.0 - (0.04 / (1.0 + (elapsed - expected)))
-        in_frame_ratio = min(0.99, in_frame_ratio)
+        # exp 기반 단조증가 (snap과 동일)
+        in_frame_ratio = min(0.99, 1.0 - math.exp(-3.0 * elapsed / expected))
 
         overall_ratio = overall_progress_ratio(completed, self._acq.total, in_frame_ratio)
         self._set_master_progress(int(overall_ratio * 100.0))
@@ -119,9 +132,11 @@ class CameraControllerMixin(CameraHubMixin):
 
     def _on_snap_success(self, raw) -> None:
         actual_s = time.monotonic() - self._snap_started_at
-        # 실제 경과 시간을 다음 스냅 추정에 반영 (지수 평균, α=0.3)
-        if self._snap_expected_s > 0.05:
-            self._snap_expected_s = 0.7 * self._snap_expected_s + 0.3 * max(0.05, actual_s)
+        # EMA로 실제 시간 학습: 다음 snap 클릭 시 HAL과 60/40으로 혼합됨
+        self._snap_expected_s = 0.6 * self._snap_expected_s + 0.4 * max(0.05, actual_s)
+        dev_logger.debug(
+            f"[DeepAlign] snap done actual={actual_s:.3f}s adaptive_next={self._snap_expected_s:.3f}s"
+        )
         self._snap_in_progress = False
         self._snap_progress_timer.stop()
         self._set_master_progress(100)
@@ -132,6 +147,9 @@ class CameraControllerMixin(CameraHubMixin):
         self._add_to_gallery(raw, f"Snap_{ts}")
 
         dev_logger.debug(f"[DeepAlign] snap completed actual_s={actual_s:.3f}")
+        
+        if getattr(self, "_was_live_before_snap", False):
+            self._start_hub_live()
 
     def _on_snap_error(self, msg: str) -> None:
         self._snap_in_progress = False
@@ -139,6 +157,9 @@ class CameraControllerMixin(CameraHubMixin):
         self._set_master_progress(0)
         self._set_camera_action_state(self._is_hub_camera_connected(), busy=False)
         dev_logger.error(f"[DeepAlign] snap failed: {msg}")
+        
+        if getattr(self, "_was_live_before_snap", False):
+            self._start_hub_live()
 
     def _cleanup_snap_thread(self) -> None:
         if self._snap_worker is not None:
@@ -613,8 +634,8 @@ class CameraControllerMixin(CameraHubMixin):
         if self._session_hub is None or not self._is_hub_camera_connected():
             self._stop_temp_polling()
             return
-        # acquire_with_progress가 _camera_lock을 보유 중이면 건너뜀 (UI 블로킹 방지)
-        if self._acq.running:
+        # snap/acquire 워커가 _camera_lock을 보유 중이면 건너뜀 (UI 블로킹 방지)
+        if self._acq.running or self._snap_in_progress:
             return
         try:
             reading, setpoint, status = self._session_hub.camera_get_temperature(OWNER_DEEPALIGN)
