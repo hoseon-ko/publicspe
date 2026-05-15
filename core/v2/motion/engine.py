@@ -97,6 +97,11 @@ class MotionEngineV2(QObject):
         now = time.time()
         elapsed_ms = (now - self._state_start_time) * 1000
         
+        if not self._hal:
+            if self._state not in (MotionState.IDLE, MotionState.FAULTED):
+                self._handle_error("Hardware HAL disconnected during operation")
+            return
+
         if self._state == MotionState.ENABLING:
             self.step_progress.emit("Unlocking Axes", 10)
             self._hal.enable_all()
@@ -111,6 +116,7 @@ class MotionEngineV2(QObject):
         elif self._state == MotionState.MOVING:
             self.step_progress.emit("Moving to Target", 30)
             for i, val in enumerate(self._target_joints):
+                if not self._hal: break
                 self._hal.move_to(i, val)
             self._transition(MotionState.WAIT_INPOS)
 

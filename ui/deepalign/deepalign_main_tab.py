@@ -29,8 +29,8 @@ from ui.file_list_panel import SpeFileItem
 from core.async_worker import SpeLoadWorker
 
 from ui.deepalign.mirror_motor_panel import MirrorMotorPanel
-from ui.live.autofocus_panel import AutoFocusPanel
-from ui.live.acs_stage_panel import AcsStagePanel
+from ui.deepalign.autofocus_panel import AutoFocusPanel
+from ui.deepalign.acs_stage_panel import AcsStagePanel
 from ui.motion.motion_tab import MotionTab
 from ui.deepalign.deepalign_camera_controller import CameraControllerMixin
 from ui.deepalign.deepalign_frame_pipeline import FramePipelineMixin
@@ -522,6 +522,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self.mirror_panel.bind_session_hub(session_hub)
         self.motion_panel.bind_session_hub(session_hub)
         self.align_panel.bind_session_hub(session_hub)
+        self.af_panel.bind_session_hub(session_hub)
         try:
             self._session_hub.select_camera_vendor(self._vendor_key())
         except Exception:

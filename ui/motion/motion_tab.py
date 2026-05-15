@@ -22,7 +22,7 @@ from theme.styles import (
     C_ACCENT, C_DANGER, C_WARN, C_BORDER, C_BG_DEEP, C_BG_DARK, C_TEXT, C_TEXT_DIM, C_TEXT_DEAD,
     Fonts, BTN_SMALL, SPIN_STYLE, EDIT_STYLE, CHECKBOX_STYLE, lbl,
 )
-from ui.live.motor_panel import MotorCard
+from ui.widgets.motor_card import MotorCard
 from ui.widgets.collapsible_section import CollapsibleSection
 from core.v2.motion.hybrid_hub import HybridMotionHubV2
 from core.v2.motion.engine import MotionState, MotionResult
@@ -145,7 +145,7 @@ class MotionTab(QWidget):
         self.log_message.connect(self._record_log_message)
 
         # V2 Hybrid Motion Hub Integration
-        self._hub = HybridMotionHubV2()
+        self._hub = HybridMotionHubV2(self)
         self._hub.any_busy_changed.connect(self._on_hub_busy_changed)
         self._hub.global_state_changed.connect(self._on_hub_state_summary)
         self._hub.emergency_occurred.connect(lambda msg: self.log_message.emit(f"!!! {msg} !!!"))
@@ -185,6 +185,8 @@ class MotionTab(QWidget):
     def cleanup(self):
         if self._refresh_timer.isActive():
             self._refresh_timer.stop()
+        if self._hub:
+            self._hub.stop_all_immediate()
 
     # ── DeepAlign Master Bar 공개 API ─────────────────────────────────────────
 
@@ -1466,17 +1468,30 @@ class MotionTab(QWidget):
     # ------------------------------------------------------------------
 
     def _on_pico_move_requested(self, motor_num: int, steps: int):
-        if steps == 0:
-            self._hub.move_pico(motor_num - 1, 0)
-            self.log_message.emit(f"PICO M{motor_num} Zero requested")
+        # 1. UI 피드백 (깜빡임)
+        self._pico_cards[motor_num - 1].flash_moving(steps)
+
+        # 2. SessionHub(안정화 모드)를 통한 직접 제어
+        if self._session_hub is not None:
+            try:
+                if steps == 0:
+                    # ZERO는 컨트롤러 직접 호출 (Hub에서 미지원 시 대비)
+                    pico = self._pico_ctrl()
+                    if pico and pico.is_connected:
+                        pico.zero(motor_num)
+                        self.log_message.emit(f"PICO M{motor_num}: ZERO OK")
+                else:
+                    self._session_hub.pico_move_relative(motor_num, steps)
+                    sign = "+" if steps > 0 else ""
+                    self.log_message.emit(f"PICO M{motor_num}: {sign}{steps} steps → Sent")
+            except Exception as e:
+                self.log_message.emit(f"PICO M{motor_num} 오류: {e}")
         else:
+            # Fallback (Hub V2) - SessionHub가 없는 경우만 사용
             self._hub.move_pico(motor_num - 1, steps)
-            self.log_message.emit(f"PICO M{motor_num} Move: {steps} steps")
 
     def _pico_zero_all(self):
-        self.log_message.emit("PICO Zero All requested (Sequential V2)")
-        for i in range(4):
-            self._hub.move_pico(i, 0)
+        self.log_message.emit("PICO Zero All requested")
         pico = self._pico_ctrl()
         if not pico or not pico.is_connected:
             return
@@ -1500,14 +1515,22 @@ class MotionTab(QWidget):
 
     def _kimm_abs_move(self):
         target = self.spin_kimm_abs.value()
-        res = self._hub.move_kimm_z(target, settling_ms=200)
-        self.log_message.emit(f"KIMM Move to {target}um: {res.message}")
+        if self._session_hub:
+            try:
+                self._session_hub.kimm_move_to_z(target)
+                self.log_message.emit(f"KIMM Move to {target}um → Sent")
+            except Exception as e:
+                self.log_message.emit(f"KIMM Move 오류: {e}")
+        else:
+            res = self._hub.move_kimm_z(target, settling_ms=200)
+            self.log_message.emit(f"KIMM Move to {target}um (HubV2): {res.message}")
 
     def _kimm_jog(self, delta: float):
-        # Hybrid Hub doesn't have a relative jog yet, but we can compute it
         if self._kimm_z is not None:
             target = self._kimm_z + delta
-            self._hub.move_kimm_z(target, settling_ms=50)
+            # We can use the SpinBox to update and then call move
+            self.spin_kimm_abs.setValue(target)
+            self._kimm_abs_move()
 
     def _acs_sync_actual(self):
         acs = self._acs_ctrl()
@@ -1551,35 +1574,63 @@ class MotionTab(QWidget):
         self.kin_result.setPlainText("\n".join(lines))
 
     def _acs_execute_move(self):
-        if self._last_cal_pos is None:
-            self._acs_calc_only()
-        if self._last_cal_pos is None:
-            return
-
-        cal_pos = list(self._last_cal_pos)
-        settle = self.spin_settle.value()
+        self._apply_kinematic_settings_from_ui()
+        v = {name: spin.value() for name, spin in self._dof_fields.items()}
         
-        res = self._hub.move_acs_6dof(cal_pos, settling_ms=settle)
-        self.log_message.emit(f"ACS Kinematic Move: {res.message}")
+        if self._session_hub:
+            try:
+                # Use stable MotionHub inside SessionHub
+                self._session_hub.motion().move_to_cartesian(
+                    v["Tx"], v["Ty"], v["Tz"], 
+                    v["Rx"], v["Ry"], v["Rz"]
+                )
+                self.log_message.emit("ACS Kinematic Move → Sequence Initiated")
+            except Exception as e:
+                self.log_message.emit(f"ACS Move 오류: {e}")
+        else:
+            # Fallback to Hub V2 if needed (uses joint targets calculated previously)
+            if self._last_cal_pos is None: self._acs_calc_only()
+            if self._last_cal_pos is not None:
+                cal_pos = list(self._last_cal_pos)
+                settle = self.spin_settle.value()
+                res = self._hub.move_acs_6dof(cal_pos, settling_ms=settle)
+                self.log_message.emit(f"ACS Kinematic Move (HubV2): {res.message}")
 
     def _acs_enable_all(self):
-        acs = self._acs_ctrl()
-        if acs and acs.is_connected:
-            self._run_bg("ACS enable all", acs.enable_all)
+        if self._session_hub:
+            self._run_bg("ACS enable all", self._session_hub.acs_enable_all)
+        else:
+            acs = self._acs_ctrl()
+            if acs and acs.is_connected:
+                self._run_bg("ACS enable all", acs.enable_all)
 
     def _acs_disable_all(self):
-        acs = self._acs_ctrl()
-        if acs and acs.is_connected:
-            self._run_bg("ACS disable all", acs.disable_all)
+        if self._session_hub:
+            self._run_bg("ACS disable all", self._session_hub.acs_disable_all)
+        else:
+            acs = self._acs_ctrl()
+            if acs and acs.is_connected:
+                self._run_bg("ACS disable all", acs.disable_all)
 
     def _acs_stop_all(self):
-        acs = self._acs_ctrl()
-        if acs and acs.is_connected:
-            self._run_bg("ACS stop all", acs.stop_all)
+        if self._session_hub:
+            self._run_bg("ACS stop all", self._session_hub.acs_stop_all)
+        else:
+            acs = self._acs_ctrl()
+            if acs and acs.is_connected:
+                self._run_bg("ACS stop all", acs.stop_all)
 
     def _all_stop(self):
-        self._hub.stop_all_immediate()
-        self.log_message.emit("EMERGENCY GLOBAL STOP REQUESTED")
+        if self._session_hub:
+            self._session_hub.acs_stop_all()
+            pico = self._pico_ctrl()
+            if pico: pico.stop_all()
+            kimm = self._kimm_ctrl()
+            if kimm: kimm.stop()
+            self.log_message.emit("EMERGENCY GLOBAL STOP (SessionHub Path)")
+        else:
+            self._hub.stop_all_immediate()
+            self.log_message.emit("EMERGENCY GLOBAL STOP (HubV2 Path)")
 
     def _reconnect_all(self):
         if self._session_hub:

@@ -427,6 +427,10 @@ class AcsStageController(QObject):
         self._worker = AcsWorker()
         self._worker.set_connection_params(*self._conn_info)
         self._worker.moveToThread(self._thread)
+        
+        # 스레드 종료 시 워커 자동 삭제 예약
+        self._thread.finished.connect(self._worker.deleteLater)
+        
         self._thread.started.connect(self._worker.setup)
 
         # 워커 -> 컨트롤러 (데이터 스트림)
@@ -449,24 +453,32 @@ class AcsStageController(QObject):
 
     def stop_polling(self):
         if self._thread and self._thread.isRunning():
+            dev_logger.info("[ACS] Stopping polling thread...")
             if self._worker:
-                # 시그널 연결 해제
+                # 시그널 연결 해제 (명령 스트림 차단)
                 try:
-                    self._cmd_enable.disconnect(self._worker.set_enable)
-                    self._cmd_enable_all.disconnect(self._worker.set_enable_all)
-                    self._cmd_disable_all.disconnect(self._worker.set_disable_all)
-                    self._cmd_move_to.disconnect(self._worker.move_to)
-                    self._cmd_stop_axis.disconnect(self._worker.stop_axis)
-                    self._cmd_stop_all.disconnect(self._worker.stop_all)
+                    self._cmd_enable.disconnect()
+                    self._cmd_enable_all.disconnect()
+                    self._cmd_disable_all.disconnect()
+                    self._cmd_move_to.disconnect()
+                    self._cmd_stop_axis.disconnect()
+                    self._cmd_stop_all.disconnect()
                 except Exception:
                     pass
                 
+                # 워커 정지 명령 (Queued)
                 QMetaObject.invokeMethod(self._worker, "stop",
                                          Qt.ConnectionType.QueuedConnection)
+            
             self._thread.quit()
-            if not self._thread.wait(3000):
-                log.warning("[ACS] Worker thread did not stop in time - forcing terminate")
+            if not self._thread.wait(2000):
+                dev_logger.warning("[ACS] Worker thread quit timeout - forcing terminate")
                 self._thread.terminate()
-                self._thread.wait(1000)
+                if not self._thread.wait(2000):
+                    dev_logger.error("[ACS] Worker thread FAILED to terminate even after force")
+            
+            dev_logger.info("[ACS] Polling thread stopped safely")
+
+        # 스레드가 완전히 멈춘 후 참조 해제
         self._worker = None
         self._thread = None
