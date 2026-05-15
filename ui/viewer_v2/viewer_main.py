@@ -248,26 +248,26 @@ class SpeImageViewerV2(QWidget):
             self.view.set_image(pix, w, h, image)
             
             # 2. 히스토그램 업데이트
+            # 2. 히스토그램 위젯 업데이트 (데이터 발송은 하지 않음)
             self._hist_widget.update_image(image, self._state.colormap)
-            counts, bin_edges = np.histogram(image, bins=256)
-            self.histogram_updated.emit(counts, bin_edges)
             
             # 3. 전역 통계
-            f_data = image.astype(np.float32)
-            self._last_stats = (float(np.min(f_data)), float(np.max(f_data)), float(np.mean(f_data)))
-            
-            # 4. 분석 데이터 갱신 (프로파일/히스토그램 실시간화)
-            # 전문 ROI 또는 기본 ROI가 활성화되어 있으면 해당 데이터를 매 프레임 다시 추출하여 emit 함
+            # 4. 분석 데이터 갱신
             sel_id = self.view.interactions._selected_roi_id
             if sel_id is not None and sel_id != -1:
-                # 전문 ROI (Line, Box, Hist)
+                # 전문 ROI (Line, Box, Hist)가 있으면 해당 분석 수행
                 self._on_roi_selected(sel_id)
             elif not self._state.selected_roi.isNull():
-                # 기본 드래그 ROI
+                # 기본 드래그 ROI가 있으면 해당 분석 수행
                 self._on_basic_roi_updated(self._state.selected_roi)
             else:
-                # 선택 영역 없음 -> 전체 평균 프로파일 표시
-                self._on_reset_requested()
+                # ROI가 없으면: 
+                # 위젯 프로파일(Ruler)은 전체 평균을 보여주지만,
+                # 외부 독 패널(PlotPanel)로는 시그널을 보내지 않음
+                if self._img_data is not None:
+                    x_prof = np.mean(self._img_data, axis=0)
+                    y_prof = np.mean(self._img_data, axis=1)
+                    self.ruler_system.set_profiles(x_prof, y_prof)
 
                 
             self._refresh_display()
@@ -439,25 +439,31 @@ class SpeImageViewerV2(QWidget):
                 pts = roi.get_points() # x0, y0, x1, y1
                 x0, y0, x1, y1 = pts
                 
-                # Line 타입이면 점 프로파일, 아니면 영역 프로파일
-                if roi.roi_type == 'Line':
-                    xp, yp = ImageProvider.get_point_profile(self._img_data, int(x0), int(y0))
-                    self.profile_updated.emit(xp, f"ROI #{roi_id} (X)") # 호환성을 위해 하나만 발송
-                else:
-                    xp, yp = ImageProvider.get_roi_profile(self._img_data, x0, y0, x1, y1)
-                    self.multi_profile_updated.emit(xp, yp)
+                # 1. Line/Box 타입: 프로파일 데이터 처리
+                if roi.roi_type in ('Line', 'Box'):
+                    # 외부 PlotPanel용 데이터 추출 (Line은 1D, Box는 2D)
+                    if roi.roi_type == 'Line':
+                        prof = ImageProvider.get_line_profile(self._img_data, x0, y0, x1, y1)
+                        self.profile_updated.emit(prof, f"ROI #{roi_id} (Line)")
+                    else:
+                        xp, yp = ImageProvider.get_roi_profile(self._img_data, x0, y0, x1, y1)
+                        self.multi_profile_updated.emit(xp, yp)
+
+                    # [센스 구현] 내부 위젯(Ruler)은 ROI가 선이든 박스든 항상 해당 영역의 X/Y 평균을 보여줌
+                    # (Line일 경우에도 영역 평균을 보여주거나, 혹은 포인트 프로파일로 대체 가능)
+                    rxp, ryp = ImageProvider.get_roi_profile(self._img_data, x0, y0, x1, y1)
+                    self.ruler_system.set_profiles(rxp, ryp)
                 
-                if xp.size > 0:
-                    self.ruler_system.set_profiles(xp, yp)
-                
-                # Histogram ROI인 경우 히스토그램 발송
-                if roi.roi_type == 'Hist':
+                # 2. Hist 타입: 히스토그램 데이터만 처리
+                elif roi.roi_type == 'Hist':
                     ix0, ix1 = int(min(x0, x1)), int(max(x0, x1))
                     iy0, iy1 = int(min(y0, y1)), int(max(y0, y1))
                     sub = self._img_data[iy0:iy1, ix0:ix1]
                     if sub.size > 0:
                         counts, bin_edges = np.histogram(sub, bins=256)
                         self.histogram_updated.emit(counts, bin_edges)
+                    # Hist 선택 시에도 위젯은 이전 프로파일을 유지하거나 전체 평균으로 초기화
+                    self.ruler_system.set_profiles(np.array([]), np.array([]))
 
                 
                 # ROI Range 모드가 켜져 있으면 실시간 스케일링
@@ -496,20 +502,23 @@ class SpeImageViewerV2(QWidget):
 
     def _on_reset_requested(self):
         try:
-            # 1. 상태 리셋 (ROI 제거, 십자선 숨기기)
+            # 1. 상태 리셋
             self._state.update_roi(QRectF())
             self._state.toggle_crosshair(False)
             
-            # 2. 데이터 리셋 (전체 영역 평균 프로파일)
+            # 2. 데이터 리셋 (PlotPanel만 비움)
+            self.profile_updated.emit(np.array([]), "Cleared")
+            self.multi_profile_updated.emit(np.array([]), np.array([]))
+            self.histogram_updated.emit(np.array([]), np.array([]))
+            
+            # 3. 위젯 내부(Ruler)는 센스있게 전체 이미지 X/Y 평균으로 복구
             if self._img_data is not None:
                 x_prof = np.mean(self._img_data, axis=0)
                 y_prof = np.mean(self._img_data, axis=1)
                 self.ruler_system.set_profiles(x_prof, y_prof)
-                self.multi_profile_updated.emit(x_prof, y_prof)
                 
-            # 3. UI 갱신
             self._update_info_text()
-            print("[ViewerV2] Full Reset: ROI/Point cleared, showing full-area average.")
+            print("[ViewerV2] Reset: Ruler restored to full X/Y average.")
         except Exception as e:
             print(f"[ViewerV2:Error] _on_reset_requested failed: {e}")
 

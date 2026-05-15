@@ -7,6 +7,7 @@ import는 성공하며, connect() 시점에 ImportError를 올린다.
 """
 
 from __future__ import annotations
+from core.logger import dev_logger
 
 import sys
 import threading
@@ -145,6 +146,9 @@ class HikvisionCamera(BaseCamera):
         if not _MVS_OK:
             raise RuntimeError(f"MVS SDK를 불러올 수 없습니다: {_MVS_IMPORT_ERROR}")
 
+        # SDK 글로벌 초기화 (여러번 호출해도 무방하거나 첫 연결시 필수)
+        MvCamera.MV_CC_Initialize()
+
         self._dev_list = MV_CC_DEVICE_INFO_LIST()
         MvCamera.MV_CC_EnumDevices(MV_GIGE_DEVICE | MV_USB_DEVICE, self._dev_list)
 
@@ -174,6 +178,14 @@ class HikvisionCamera(BaseCamera):
         if self._cam.MV_CC_OpenDevice() != 0:
             raise RuntimeError("카메라 열기 실패")
 
+        # GigE 카메라의 경우 패킷 사이즈 최적화 필수 (누락시 패킷 로스/프레임 드랍 발생)
+        if dev.nTLayerType == MV_GIGE_DEVICE:
+            nPacketSize = self._cam.MV_CC_GetOptimalPacketSize()
+            if int(nPacketSize) > 0:
+                ret = self._cam.MV_CC_SetIntValue("GevSCPSPacketSize", nPacketSize)
+                if ret != 0:
+                    dev_logger.warning(f"GigE 패킷 사이즈 설정 실패: {ret}")
+
         self._connected = True
 
     def disconnect(self) -> None:
@@ -182,10 +194,16 @@ class HikvisionCamera(BaseCamera):
         if self._cam is not None:
             try:
                 self._cam.MV_CC_CloseDevice()
+                self._cam.MV_CC_DestroyHandle()  # 필수 리소스 해제
             except Exception:
                 pass
         self._connected = False
         self._cam = None
+        
+        try:
+            MvCamera.MV_CC_Finalize()  # SDK 글로벌 리소스 해제
+        except:
+            pass
 
     def get_exposure_ms(self) -> float:
         if not self._connected or self._cam is None:
@@ -211,12 +229,16 @@ class HikvisionCamera(BaseCamera):
         # live 스트림을 죽인다. 두 경우 모두 _sdk_lock으로 GetImageBuffer를 직렬화한다.
         was_grabbing = self._grabbing
         if not was_grabbing:
-            # 단일 프레임 모드로 변경 (0 = SingleFrame)
-            self._cam.MV_CC_SetEnumValue("AcquisitionMode", 0)
-            self._cam.MV_CC_SetEnumValue("TriggerMode", 0)  # Trigger Off (바로 찍히도록)
+            # 단일 프레임 모드로 변경 (1 = SingleFrame)
+            self._cam.MV_CC_SetEnumValue("AcquisitionMode", 1)
+            self._cam.MV_CC_SetEnumValue("TriggerMode", 1)      # Trigger On
+            self._cam.MV_CC_SetEnumValue("TriggerSource", 7)    # Software Trigger
             ret = self._cam.MV_CC_StartGrabbing()
             if ret != 0:
                 raise RuntimeError(f"StartGrabbing 실패 (에러코드: {ret})")
+            ret = self._cam.MV_CC_SetCommandValue("TriggerSoftware")
+            if ret != 0:
+                print(f"소프트웨어 트리거 송신 실패: {ret}")
         try:
             out = MV_FRAME_OUT()
             with self._sdk_lock:

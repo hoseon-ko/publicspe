@@ -56,8 +56,35 @@ class ImageProvider:
         return np.array([]), np.array([])
 
     @staticmethod
+    def get_line_profile(raw: np.ndarray, x0, y0, x1, y1) -> np.ndarray:
+        """두 점 (x0, y0) ~ (x1, y1) 사이를 잇는 선분의 프로파일 추출"""
+        h, w = raw.shape[:2]
+        # 선분 길이 계산
+        length = int(np.hypot(x1 - x0, y1 - y0))
+        if length < 1:
+            return np.array([])
+            
+        # 선분을 따라 좌표 샘플링
+        x = np.linspace(x0, x1, length)
+        y = np.linspace(y0, y1, length)
+        
+        # 유효 범위 제한
+        valid = (x >= 0) & (x < w) & (y >= 0) & (y < h)
+        x, y = x[valid], y[valid]
+        
+        if x.size == 0:
+            return np.array([])
+            
+        # Nearest Neighbor 샘플링 (간단하고 빠름)
+        return raw[y.astype(int), x.astype(int)]
+
+    @staticmethod
     def get_roi_profile(raw: np.ndarray, x0, y0, x1, y1) -> tuple[np.ndarray, np.ndarray]:
-        """ROI 영역의 프로파일 생성"""
+        """
+        ROI 영역을 기반으로 한 센스 있는 프로파일 생성:
+        - X 프로파일: 박스 높이(iy0:iy1) 영역의 가로 평균 단면
+        - Y 프로파일: 박스 너비(ix0:ix1) 영역의 세로 평균 단면
+        """
         h, w = raw.shape[:2]
         ix0, ix1 = sorted([int(x0), int(x1)])
         iy0, iy1 = sorted([int(y0), int(y1)])
@@ -65,11 +92,13 @@ class ImageProvider:
         ix0, ix1 = max(0, ix0), min(w, ix1)
         iy0, iy1 = max(0, iy0), min(h, iy1)
         
+        # X 프로파일: 지정된 Y범위(박스 높이)의 데이터를 가로로 평균 (결과는 가로 폭 W)
         if iy1 > iy0:
             x_prof = np.mean(raw[iy0:iy1, :], axis=0)
         else:
             x_prof = np.array([])
             
+        # Y 프로파일: 지정된 X범위(박스 너비)의 데이터를 세로로 평균 (결과는 세로 높이 H)
         if ix1 > ix0:
             y_prof = np.mean(raw[:, ix0:ix1], axis=1)
         else:

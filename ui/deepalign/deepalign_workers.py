@@ -133,6 +133,47 @@ class _SnapWorker(QObject):
             self.error.emit(str(e))
 
 
+class _BgCaptureWorker(QObject):
+    """N프레임 snap → 평균 → 배경 프레임 반환."""
+
+    progress = pyqtSignal(int, int)   # current, total
+    finished = pyqtSignal(object)     # averaged np.ndarray (원본 dtype)
+    error    = pyqtSignal(str)
+
+    def __init__(self, snap_fn, n_frames: int):
+        super().__init__()
+        self._snap_fn = snap_fn
+        self._n = max(1, int(n_frames))
+        self._stop = False
+
+    def stop(self):
+        self._stop = True
+
+    def run(self):
+        accum = None
+        orig_dtype = None
+        try:
+            for i in range(self._n):
+                if self._stop:
+                    break
+                frame = np.asarray(self._snap_fn())
+                if orig_dtype is None:
+                    orig_dtype = frame.dtype
+                if accum is None:
+                    accum = frame.astype(np.float64)
+                else:
+                    accum += frame.astype(np.float64)
+                self.progress.emit(i + 1, self._n)
+            if accum is not None:
+                avg = (accum / max(1, self._n))
+                if orig_dtype is not None and np.issubdtype(orig_dtype, np.integer):
+                    info = np.iinfo(orig_dtype)
+                    avg = np.clip(avg, info.min, info.max)
+                self.finished.emit(avg.astype(orig_dtype if orig_dtype is not None else np.uint16))
+        except Exception as e:
+            self.error.emit(str(e))
+
+
 class _LiveWorker(QObject):
     """워커 스레드에서 hub.snap() 반복 호출 (메인 스레드 블로킹 방지)"""
 

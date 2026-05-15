@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
     QAbstractSpinBox,
     QButtonGroup,
     QCheckBox,
+    QRadioButton,
     QComboBox,
     QDoubleSpinBox,
     QFrame,
@@ -756,6 +757,167 @@ class LayoutBuilderMixin:
             item.setStyleSheet("color: #94a3b8; font-size: 12px; font-weight: bold;")
             tl.addWidget(item)
         cam_settings_lay.addWidget(self.sec_temp)
+
+        # ── BACKGROUND SUBTRACTION ────────────────────────────────────────────
+        bg_grp = self._make_section("BACKGROUND", "#a855f7")
+        bl = QVBoxLayout(bg_grp.content_widget)
+        bl.setSpacing(7)
+        bl.setContentsMargins(10, 10, 10, 10)
+
+        _lbl_s = "color: #94a3b8; font-size: 12px; font-weight: bold;"
+
+        # Frames count
+        bg_frames_row = QHBoxLayout()
+        lbl_bgf = QLabel("Frames:")
+        lbl_bgf.setStyleSheet(_lbl_s)
+        self.spin_bg_frames = QSpinBox()
+        self.spin_bg_frames.setRange(1, 100)
+        self.spin_bg_frames.setValue(5)
+        self.spin_bg_frames.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.PlusMinus)
+        self.spin_bg_frames.setStyleSheet(editor_spin_style)
+        bg_frames_row.addWidget(lbl_bgf)
+        bg_frames_row.addWidget(self.spin_bg_frames, 1)
+        bl.addLayout(bg_frames_row)
+
+        # Save As filename + browse
+        bg_name_row = QHBoxLayout()
+        lbl_bgn = QLabel("Save As:")
+        lbl_bgn.setStyleSheet(_lbl_s)
+        self.edit_bg_filename = QLineEdit("background")
+        self.edit_bg_filename.setStyleSheet(editor_line_style)
+        self.btn_bg_browse = QPushButton("📁")
+        self.btn_bg_browse.setFixedWidth(30)
+        self.btn_bg_browse.setToolTip("저장 폴더 선택")
+        self.btn_bg_browse.setStyleSheet("""
+            QPushButton {
+                background: #0f172a; color: #e2e8f0;
+                border: 1px solid #334155; border-radius: 4px; font-weight: 900;
+            }
+            QPushButton:hover { border-color: #a855f7; color: #a855f7; }
+        """)
+        bg_name_row.addWidget(lbl_bgn)
+        bg_name_row.addWidget(self.edit_bg_filename, 1)
+        bg_name_row.addWidget(self.btn_bg_browse)
+        bl.addLayout(bg_name_row)
+
+        # Action buttons
+        bg_action_row = QHBoxLayout()
+        self.btn_bg_capture = self._style_btn("▶  CAPTURE BG", "#a855f7")
+        self.btn_bg_load    = self._style_btn("📂  LOAD SPE...", "#a855f7")
+        bg_action_row.addWidget(self.btn_bg_capture)
+        bg_action_row.addWidget(self.btn_bg_load)
+        bl.addLayout(bg_action_row)
+
+        # Divider
+        divider = QFrame()
+        divider.setFrameShape(QFrame.Shape.HLine)
+        divider.setStyleSheet("color: #1e293b;")
+        bl.addWidget(divider)
+
+        # Status label
+        self.lbl_bg_status = QLabel("No background set")
+        self.lbl_bg_status.setStyleSheet("color: #64748b; font-size: 11px; font-weight: bold;")
+        self.lbl_bg_status.setWordWrap(True)
+        bl.addWidget(self.lbl_bg_status)
+
+        # Use BG checkbox
+        self.check_use_bg = QCheckBox("Use Background Subtraction")
+        self.check_use_bg.setEnabled(False)
+        self.check_use_bg.setStyleSheet("""
+            QCheckBox { color: #e2e8f0; font-size: 13px; font-weight: 700; spacing: 8px; }
+            QCheckBox::indicator {
+                width: 16px; height: 16px; border-radius: 3px;
+                border: 1px solid #64748b; background: #020617;
+            }
+            QCheckBox::indicator:hover { border-color: #a855f7; }
+            QCheckBox::indicator:checked { border-color: #a855f7; background: #a855f7; }
+            QCheckBox:disabled { color: #475569; }
+        """)
+        bl.addWidget(self.check_use_bg)
+
+        # Clear button
+        self.btn_bg_clear = self._style_btn("CLEAR", "#64748b")
+        self.btn_bg_clear.setEnabled(False)
+        bl.addWidget(self.btn_bg_clear)
+
+        p_lay.addWidget(bg_grp)
+        # ─────────────────────────────────────────────────────────────────────
+
+        # ── IMAGE PROCESSING ──────────────────────────────────────────────────
+        ip_grp = self._make_section("IMAGE PROCESSING", "#0ea5e9")
+        il = QVBoxLayout(ip_grp.content_widget)
+        il.setSpacing(8)
+        il.setContentsMargins(10, 10, 10, 10)
+
+        _lbl_s2 = "color: #94a3b8; font-size: 12px; font-weight: bold;"
+        _radio_style = """
+            QRadioButton {
+                color: #e2e8f0; font-size: 13px; font-weight: 700; spacing: 8px;
+            }
+            QRadioButton::indicator {
+                width: 15px; height: 15px; border-radius: 8px;
+                border: 1px solid #64748b; background: #020617;
+            }
+            QRadioButton::indicator:hover  { border-color: #0ea5e9; }
+            QRadioButton::indicator:checked {
+                border-color: #0ea5e9; background: #0ea5e9;
+            }
+            QRadioButton:disabled { color: #2a3547; }
+            QRadioButton::indicator:disabled {
+                border-color: #1e293b; background: #0a0f1a;
+            }
+        """
+
+        # Use checkbox
+        self.check_use_proc = QCheckBox("Use Image Processing")
+        self.check_use_proc.setEnabled(False)
+        self.check_use_proc.setStyleSheet("""
+            QCheckBox { color: #e2e8f0; font-size: 13px; font-weight: 700; spacing: 8px; }
+            QCheckBox::indicator {
+                width: 16px; height: 16px; border-radius: 3px;
+                border: 1px solid #64748b; background: #020617;
+            }
+            QCheckBox::indicator:hover  { border-color: #0ea5e9; }
+            QCheckBox::indicator:checked { border-color: #0ea5e9; background: #0ea5e9; }
+            QCheckBox:disabled { color: #475569; }
+        """)
+        il.addWidget(self.check_use_proc)
+
+        # Mode selector
+        mode_row = QHBoxLayout()
+        lbl_mode = QLabel("Mode:")
+        lbl_mode.setStyleSheet(_lbl_s2)
+        self.radio_proc_mode1 = QRadioButton("Mode 1")
+        self.radio_proc_mode2 = QRadioButton("Mode 2")
+        self.radio_proc_mode1.setChecked(True)
+        self.radio_proc_mode1.setEnabled(False)
+        self.radio_proc_mode2.setEnabled(False)
+        for rb in (self.radio_proc_mode1, self.radio_proc_mode2):
+            rb.setStyleSheet(_radio_style)
+        self._proc_mode_group = QButtonGroup()
+        self._proc_mode_group.addButton(self.radio_proc_mode1, 1)
+        self._proc_mode_group.addButton(self.radio_proc_mode2, 2)
+        mode_row.addWidget(lbl_mode)
+        mode_row.addWidget(self.radio_proc_mode1)
+        mode_row.addWidget(self.radio_proc_mode2)
+        mode_row.addStretch()
+        il.addLayout(mode_row)
+
+        self.btn_proc_load = self._style_btn("LOAD IMAGE", "#0ea5e9")
+        il.addWidget(self.btn_proc_load)
+
+        ip_div = QFrame()
+        ip_div.setFrameShape(QFrame.Shape.HLine)
+        ip_div.setStyleSheet("color: #1e293b;")
+        il.addWidget(ip_div)
+
+        self.lbl_proc_status = QLabel("No image loaded")
+        self.lbl_proc_status.setStyleSheet("color: #64748b; font-size: 11px; font-weight: bold;")
+        self.lbl_proc_status.setWordWrap(True)
+        il.addWidget(self.lbl_proc_status)
+
+        p_lay.addWidget(ip_grp)
+        # ─────────────────────────────────────────────────────────────────────
 
         save_grp = self._make_section("SAVE", "#22d3ee")
         sl = QVBoxLayout(save_grp.content_widget)

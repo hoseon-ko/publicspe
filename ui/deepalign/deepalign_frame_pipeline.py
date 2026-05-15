@@ -63,6 +63,9 @@ class FramePipelineMixin:
             vmin = self.cam_viewer.display_vmin
             vmax = self.cam_viewer.display_vmax
 
+        raw = self._apply_background_subtraction(raw)
+        raw = self._apply_proc_image(raw)
+
         worker.submit({
             "raw": raw,
             "cmap": cmap,
@@ -70,6 +73,62 @@ class FramePipelineMixin:
             "vmax": vmax,
             "gallery_label": gallery_label,
         })
+
+    def _apply_proc_image(self, raw: np.ndarray) -> np.ndarray:
+        """로딩된 처리 이미지와 현재 프레임을 Mode에 따라 연산.
+
+        Mode 1: raw - proc  (차감)
+        Mode 2: raw / proc  (나누기)
+        """
+        from core.logger import calc_logger
+
+        if not getattr(self, '_proc_enabled', False):
+            return raw
+        img = getattr(self, '_proc_image', None)
+        if img is None or raw is None or img.shape != raw.shape:
+            return raw
+
+        mode = getattr(self, '_proc_mode', 1)
+        orig_dtype = raw.dtype
+
+        if mode == 1:
+            result = raw.astype(np.float32) - img.astype(np.float32)
+            if np.issubdtype(orig_dtype, np.unsignedinteger):
+                result = np.clip(result, 0, np.iinfo(orig_dtype).max)
+            out = result.astype(orig_dtype)
+            calc_logger.info(
+                f"Mode 1 (sub) | mean={float(np.mean(result)):.4f}"
+                f"  min={float(np.min(result)):.4f}"
+                f"  max={float(np.max(result)):.4f}"
+            )
+
+        elif mode == 2:
+            denom = img.astype(np.float32)
+            denom[denom == 0] = np.nan          # 0 나누기 방지
+            result = raw.astype(np.float32) / denom
+            out = result.astype(np.float32)     # 나눗셈 결과는 float 유지
+            calc_logger.info(
+                f"Mode 2 (div) | mean={float(np.nanmean(result)):.4f}"
+                f"  min={float(np.nanmin(result)):.4f}"
+                f"  max={float(np.nanmax(result)):.4f}"
+            )
+
+        else:
+            return raw
+
+        return out
+
+    def _apply_background_subtraction(self, raw: np.ndarray) -> np.ndarray:
+        """배경 차감 활성화 상태이면 raw에서 _bg_frame을 뺀 값을 반환."""
+        if not getattr(self, '_bg_enabled', False):
+            return raw
+        bg = getattr(self, '_bg_frame', None)
+        if bg is None or raw is None or bg.shape != raw.shape:
+            return raw
+        result = raw.astype(np.int32) - bg.astype(np.int32)
+        if np.issubdtype(raw.dtype, np.unsignedinteger):
+            result = np.clip(result, 0, np.iinfo(raw.dtype).max)
+        return result.astype(raw.dtype)
 
     @pyqtSlot(object, object, str)
     def _on_frame_converted(self, rgb, raw, gallery_label: str) -> None:

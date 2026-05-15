@@ -17,10 +17,11 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget, QSplitter,
-    QFileDialog, QListWidgetItem, QMessageBox
+    QFileDialog, QListWidgetItem, QMessageBox,
+    QFrame, QLabel, QProgressBar, QPushButton,
 )
-from PyQt6.QtCore import Qt, QThread, QTimer, QSettings, pyqtSignal, QSize
-from PyQt6.QtGui import QIcon, QPixmap, QImage
+from PyQt6.QtCore import Qt, QThread, QTimer, QSettings, pyqtSignal, QSize, QEvent
+from PyQt6.QtGui import QIcon, QPixmap, QImage, QPainter, QColor
 from typing import Optional
 import numpy as np
 
@@ -35,7 +36,7 @@ from ui.deepalign.deepalign_camera_controller import CameraControllerMixin
 from ui.deepalign.deepalign_frame_pipeline import FramePipelineMixin
 from ui.deepalign.deepalign_layout import LayoutBuilderMixin
 from ui.deepalign.deepalign_styles import DeepAlignStylesMixin
-from ui.deepalign.deepalign_workers import _AcquireWorker, _SnapWorker, _LiveWorker
+from ui.deepalign.deepalign_workers import _AcquireWorker, _SnapWorker, _LiveWorker, _BgCaptureWorker
 from ui.autofocus.af_worker import AutoFocusWorker
 from core.logger import dev_logger
 from core.session.session_state import CameraConnectionState
@@ -46,6 +47,122 @@ from core.spe_writer import save_spe
 # ─────────────────────────────────────────────────────────────────────────────
 # AutoFocusWorker용 thin proxy: hub API → worker 인터페이스 변환
 # ─────────────────────────────────────────────────────────────────────────────
+
+class _BgProgressOverlay(QWidget):
+    """배경 캡처 중 전체 화면을 어둡게 덮는 모달 오버레이."""
+
+    cancel_requested = pyqtSignal()
+
+    def __init__(self, parent: QWidget):
+        super().__init__(parent)
+        self.hide()
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+        parent.installEventFilter(self)
+
+        # ── 중앙 카드 ──────────────────────────────────────────────
+        self._card = QFrame(self)
+        self._card.setFixedWidth(320)
+        self._card.setStyleSheet("""
+            QFrame {
+                background: #0a0f1e;
+                border: 2px solid #a855f7;
+                border-radius: 14px;
+            }
+        """)
+
+        cl = QVBoxLayout(self._card)
+        cl.setSpacing(16)
+        cl.setContentsMargins(28, 28, 28, 28)
+
+        _no_border = "background: transparent; border: none;"
+
+        title = QLabel("CAPTURING BACKGROUND")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet(f"color: #a855f7; font-size: 11px; font-weight: 900;"
+                            f" letter-spacing: 3px; {_no_border}")
+        cl.addWidget(title)
+
+        self.lbl_frames = QLabel("0 / 0")
+        self.lbl_frames.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_frames.setStyleSheet(f"color: #e2e8f0; font-size: 32px; font-weight: 700; {_no_border}")
+        cl.addWidget(self.lbl_frames)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setFixedHeight(8)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar           { background: #1e293b; border-radius: 4px; border: none; }
+            QProgressBar::chunk   { background: #a855f7; border-radius: 4px; }
+        """)
+        cl.addWidget(self.progress_bar)
+
+        self.lbl_eta = QLabel("Initializing...")
+        self.lbl_eta.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_eta.setStyleSheet(f"color: #94a3b8; font-size: 12px; font-weight: 600; {_no_border}")
+        cl.addWidget(self.lbl_eta)
+
+        btn_cancel = QPushButton("CANCEL")
+        btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_cancel.clicked.connect(self.cancel_requested)
+        btn_cancel.setStyleSheet("""
+            QPushButton {
+                background: transparent; color: #ef4444;
+                border: 1px solid #ef4444; border-radius: 6px;
+                font-weight: 700; font-size: 12px; padding: 9px;
+            }
+            QPushButton:hover { background: rgba(239,68,68,0.15); }
+            QPushButton:pressed { background: rgba(239,68,68,0.30); }
+        """)
+        cl.addWidget(btn_cancel)
+
+        self._start_time: float = 0.0
+
+    # ── public API ────────────────────────────────────────────────────
+
+    def start(self, total: int) -> None:
+        self._start_time = time.monotonic()
+        self.lbl_frames.setText(f"0 / {total}")
+        self.lbl_eta.setText("Initializing...")
+        self.progress_bar.setValue(0)
+        self._fit_to_parent()
+        self._center_card()
+        self.show()
+        self.raise_()
+
+    def update_progress(self, cur: int, total: int) -> None:
+        self.lbl_frames.setText(f"{cur} / {total}")
+        self.progress_bar.setValue(int(cur / max(1, total) * 100))
+        if cur > 0:
+            elapsed = time.monotonic() - self._start_time
+            remaining = (total - cur) * (elapsed / cur)
+            self.lbl_eta.setText(f"Est. remaining:  {remaining:.1f} s")
+
+    # ── internals ─────────────────────────────────────────────────────
+
+    def paintEvent(self, event) -> None:
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor(0, 0, 0, 185))
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._center_card()
+
+    def eventFilter(self, obj, event) -> bool:
+        if obj is self.parent() and event.type() == QEvent.Type.Resize:
+            self._fit_to_parent()
+        return super().eventFilter(obj, event)
+
+    def _fit_to_parent(self) -> None:
+        if self.parent():
+            self.setGeometry(self.parent().rect())
+
+    def _center_card(self) -> None:
+        self._card.adjustSize()
+        cw, ch = self._card.width(), self._card.height()
+        self._card.move((self.width() - cw) // 2, (self.height() - ch) // 2)
+
 
 class _HubCameraProxy:
     """hub.snap(owner) 또는 fallback camera.snap()을 worker 인터페이스로 노출."""
@@ -156,6 +273,19 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         # Acquire 상태 (dataclass로 통합 관리)
         self._acq = AcquireState()
 
+        # Image processing
+        self._proc_image: np.ndarray | None = None
+        self._proc_mode: int = 1
+        self._proc_enabled: bool = False
+
+        # Background subtraction
+        self._bg_frame: np.ndarray | None = None
+        self._bg_enabled: bool = False
+        self._bg_save_folder: str = ""
+        self._bg_capture_thread: QThread | None = None
+        self._bg_capture_worker: _BgCaptureWorker | None = None
+        self._bg_overlay: _BgProgressOverlay | None = None  # init_ui 이후 생성
+
         # Live 진행 타이머
         self._hub_live_progress_timer = QTimer(self)
         self._hub_live_progress_timer.setInterval(20)
@@ -184,6 +314,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self._settings = QSettings("SpeAnalyze", "DeepAlignTab")
 
         self._init_ui()
+        self._bg_overlay = _BgProgressOverlay(self)
         self._init_frame_convert_worker()
         self._restore_settings()
         self._wire_camera_actions()
@@ -354,6 +485,18 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self.cb_time_fmt.currentTextChanged.connect(self._save_settings)
         self.cb_place.currentTextChanged.connect(self._save_settings)
 
+        # ── Image processing ─────────────────────────────────────────
+        self.check_use_proc.toggled.connect(self._on_proc_enable_toggled)
+        self._proc_mode_group.idClicked.connect(self._on_proc_mode_changed)
+        self.btn_proc_load.clicked.connect(self._on_proc_load_clicked)
+
+        # ── Background subtraction ────────────────────────────────────
+        self.check_use_bg.toggled.connect(self._on_bg_enable_toggled)
+        self.btn_bg_capture.clicked.connect(self._on_bg_capture_clicked)
+        self.btn_bg_load.clicked.connect(self._on_bg_load_clicked)
+        self.btn_bg_browse.clicked.connect(self._on_bg_browse_clicked)
+        self.btn_bg_clear.clicked.connect(self._on_bg_clear_clicked)
+
     def bind_live_tab(self, live_tab=None):
         """LiveTab 연동 진입점 — LiveTab 제거 후 호환성 유지용. 실제 동작 없음."""
         self._live_tab = None  # DeepAlign은 SessionHub로 독립 운영
@@ -377,6 +520,192 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
 
     def _on_live_progress_changed(self, value: int):
         self._set_master_progress(value)
+
+    # ─────────────────────────────────────────────────────────────────
+    # Image processing
+    # ─────────────────────────────────────────────────────────────────
+
+    def _on_proc_enable_toggled(self, checked: bool) -> None:
+        self._proc_enabled = checked
+        self.radio_proc_mode1.setEnabled(checked)
+        self.radio_proc_mode2.setEnabled(checked)
+
+    def _on_proc_mode_changed(self, mode_id: int) -> None:
+        self._proc_mode = mode_id
+
+    def _on_proc_load_clicked(self) -> None:
+        start = self.edit_folder.text().strip() or "."
+        path, _ = QFileDialog.getOpenFileName(
+            self, "처리 이미지 파일 선택", start,
+            "All Supported (*.spe *.npy *.npz *.tif *.tiff *.png *.bmp);;"
+            "SPE Files (*.spe);;"
+            "NumPy (*.npy *.npz);;"
+            "Images (*.tif *.tiff *.png *.bmp)"
+        )
+        if not path:
+            return
+        try:
+            ext = Path(path).suffix.lower()
+            if ext == ".spe":
+                from core.spe_reader import SpeFile
+                data = SpeFile(path).data
+                img = data[0] if data.ndim == 3 else data
+            elif ext == ".npz":
+                archive = np.load(path)
+                img = archive[list(archive.keys())[0]]
+            elif ext == ".npy":
+                img = np.load(path)
+            else:
+                try:
+                    import cv2
+                    img = cv2.imread(path, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_GRAYSCALE)
+                    if img is None:
+                        raise ValueError("cv2 load failed")
+                except ImportError:
+                    from PIL import Image
+                    img = np.array(Image.open(path))
+
+            self._proc_image = np.squeeze(img)
+            self._proc_update_ui(Path(path).name)
+        except Exception as e:
+            dev_logger.warning(f"[ProcImage] 로드 실패: {e}")
+            self.lbl_proc_status.setText(f"Load failed: {e}")
+            self.lbl_proc_status.setStyleSheet("color: #ef4444; font-size: 11px; font-weight: bold;")
+
+    def _proc_update_ui(self, filename: str = "") -> None:
+        has_img = self._proc_image is not None
+        self.check_use_proc.setEnabled(has_img)
+        if not has_img:
+            self._proc_enabled = False
+            self.check_use_proc.setChecked(False)
+            self.radio_proc_mode1.setEnabled(False)
+            self.radio_proc_mode2.setEnabled(False)
+            self.lbl_proc_status.setText("No image loaded")
+            self.lbl_proc_status.setStyleSheet("color: #64748b; font-size: 11px; font-weight: bold;")
+            return
+        shape = self._proc_image.shape
+        dims  = f"{shape[1]}×{shape[0]}" if self._proc_image.ndim >= 2 else f"{shape[0]}"
+        self.lbl_proc_status.setText(f"{filename}  ({dims}, {self._proc_image.dtype})")
+        self.lbl_proc_status.setStyleSheet("color: #38bdf8; font-size: 11px; font-weight: bold;")
+
+    # ─────────────────────────────────────────────────────────────────
+    # Background subtraction
+    # ─────────────────────────────────────────────────────────────────
+
+    def _on_bg_enable_toggled(self, checked: bool) -> None:
+        self._bg_enabled = checked
+
+    def _on_bg_capture_clicked(self) -> None:
+        if not self._is_hub_camera_connected():
+            return
+        if self._bg_capture_thread and self._bg_capture_thread.isRunning():
+            return
+
+        # Live 중이면 중단 후 캡처 (snap과 동일 패턴)
+        self._was_live_before_bg = getattr(self, "_hub_live_active", False)
+        if self._was_live_before_bg:
+            self._stop_hub_live()
+
+        n = self.spin_bg_frames.value()
+        snap_fn = lambda: self._session_hub.snap(OWNER_DEEPALIGN)
+
+        self.btn_bg_capture.setEnabled(False)
+        self.btn_bg_load.setEnabled(False)
+        self.lbl_bg_status.setText(f"Capturing 0 / {n} frames...")
+        self.lbl_bg_status.setStyleSheet("color: #facc15; font-size: 11px; font-weight: bold;")
+
+        self._bg_capture_thread = QThread(self)
+        self._bg_capture_worker = _BgCaptureWorker(snap_fn, n)
+        self._bg_capture_worker.moveToThread(self._bg_capture_thread)
+        self._bg_capture_thread.started.connect(self._bg_capture_worker.run)
+        self._bg_capture_worker.progress.connect(self._on_bg_capture_progress)
+        self._bg_capture_worker.finished.connect(self._on_bg_capture_finished)
+        self._bg_capture_worker.error.connect(self._on_bg_capture_error)
+        self._bg_capture_worker.finished.connect(lambda _: self._bg_capture_thread.quit())
+        self._bg_capture_worker.error.connect(lambda _: self._bg_capture_thread.quit())
+        self._bg_capture_thread.finished.connect(self._cleanup_bg_capture_thread)
+        self._bg_overlay.cancel_requested.connect(self._on_bg_capture_cancel)
+        self._bg_overlay.start(n)
+        self._bg_capture_thread.start()
+
+    def _on_bg_capture_progress(self, cur: int, total: int) -> None:
+        self._bg_overlay.update_progress(cur, total)
+
+    def _on_bg_capture_cancel(self) -> None:
+        if self._bg_capture_worker:
+            self._bg_capture_worker.stop()
+        # thread.quit()는 _cleanup에서 처리
+
+    def _on_bg_capture_finished(self, averaged: np.ndarray) -> None:
+        self._bg_frame = averaged
+        # 자동 저장
+        folder = self._bg_save_folder or self.edit_folder.text().strip() or "."
+        stem   = self.edit_bg_filename.text().strip() or "background"
+        fpath  = str(Path(folder) / f"{stem}.spe")
+        try:
+            save_spe(fpath, [self._bg_frame])
+            self._bg_update_ui(source_name=Path(fpath).name)
+        except Exception as e:
+            dev_logger.warning(f"[BG] 자동 저장 실패: {e}")
+            self._bg_update_ui(source_name="Captured (save failed)")
+
+    def _on_bg_capture_error(self, msg: str) -> None:
+        dev_logger.warning(f"[BG] Capture 실패: {msg}")
+        self._bg_update_ui()
+
+    def _cleanup_bg_capture_thread(self) -> None:
+        self._bg_overlay.hide()
+        # cancel 시그널 중복 연결 방지
+        try:
+            self._bg_overlay.cancel_requested.disconnect(self._on_bg_capture_cancel)
+        except Exception:
+            pass
+        self.btn_bg_capture.setEnabled(True)
+        self.btn_bg_load.setEnabled(True)
+        if getattr(self, "_was_live_before_bg", False):
+            self._was_live_before_bg = False
+            self._start_hub_live()
+        self._bg_capture_thread = None
+        self._bg_capture_worker = None
+
+    def _on_bg_load_clicked(self) -> None:
+        from core.spe_reader import SpeFile
+        start_dir = self._bg_save_folder or self.edit_folder.text().strip() or "."
+        path, _ = QFileDialog.getOpenFileName(self, "배경 SPE 파일 선택", start_dir, "SPE Files (*.spe)")
+        if not path:
+            return
+        try:
+            frames = SpeFile(path).data
+            self._bg_frame = frames[0] if frames.ndim == 3 else frames
+            self._bg_update_ui(source_name=Path(path).name)
+        except Exception as e:
+            dev_logger.warning(f"[BG] SPE 로드 실패: {e}")
+
+    def _on_bg_browse_clicked(self) -> None:
+        folder = QFileDialog.getExistingDirectory(
+            self, "배경 저장 폴더 선택",
+            self._bg_save_folder or self.edit_folder.text().strip() or "."
+        )
+        if folder:
+            self._bg_save_folder = folder
+
+    def _on_bg_clear_clicked(self) -> None:
+        self._bg_frame = None
+        self._bg_enabled = False
+        self.check_use_bg.setChecked(False)
+        self._bg_update_ui()
+
+    def _bg_update_ui(self, source_name: str = "") -> None:
+        has_bg = self._bg_frame is not None
+        self.btn_bg_clear.setEnabled(has_bg)
+        self.check_use_bg.setEnabled(has_bg)
+        if has_bg:
+            h, w = self._bg_frame.shape[:2]
+            self.lbl_bg_status.setText(f"{source_name}  ({w}×{h}, {self._bg_frame.dtype})")
+            self.lbl_bg_status.setStyleSheet("color: #c084fc; font-size: 11px; font-weight: bold;")
+        else:
+            self.lbl_bg_status.setText("No background set")
+            self.lbl_bg_status.setStyleSheet("color: #64748b; font-size: 11px; font-weight: bold;")
 
     def _save_settings(self):
         # Camera
@@ -838,7 +1167,15 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
             self.plot_panel.plot_line_overlay(frame.mean(axis=0), label)
 
     def _on_roi_selected(self, roi_id: int):
-        self.cam_viewer.set_active_roi(roi_id, "profile")
+        # ROI ID를 기반으로 실제 ROI 타입(Hist 여부)을 판별하여 적절한 모드 전달
+        rois = self.cam_viewer.viewer.view.interactions._rois
+        roi = rois.get(roi_id)
+        
+        mode = "profile"
+        if roi and getattr(roi, "roi_type", "") == "Hist":
+            mode = "hist"
+            
+        self.cam_viewer.set_active_roi(roi_id, mode)
 
     def _on_roi_deleted(self, roi_id: int):
         self.cam_viewer.delete_roi(roi_id)
