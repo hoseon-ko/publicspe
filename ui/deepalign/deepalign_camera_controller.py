@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 import time
 
-from PyQt6.QtCore import QThread, QTimer
+from PyQt6.QtCore import QThread, QTimer, pyqtSlot
 
 from core.logger import dev_logger
 from core.session.ownership import OWNER_DEEPALIGN
@@ -564,3 +564,35 @@ class CameraControllerMixin(CameraHubMixin):
                 dev_logger.exception("[DeepAlign] adc apply via hub failed")
                 return
         dev_logger.debug("[DeepAlign] adc apply ignored (hub camera disconnected)")
+
+    # ── 온도 폴링 ──────────────────────────────────────────────────────
+
+    def _start_temp_polling(self):
+        if not hasattr(self, "_temp_timer"):
+            self._temp_timer = QTimer(self)
+            self._temp_timer.setInterval(3000)
+            self._temp_timer.timeout.connect(self._poll_temperature)
+        self._temp_timer.start()
+
+    def _stop_temp_polling(self):
+        if hasattr(self, "_temp_timer"):
+            self._temp_timer.stop()
+        self.lbl_temp_read.setText("Reading: —")
+        self.lbl_temp_set.setText("Setpoint: —")
+        self.lbl_temp_state.setText("Status: —")
+
+    @pyqtSlot()
+    def _poll_temperature(self):
+        if self._session_hub is None or not self._is_hub_camera_connected():
+            self._stop_temp_polling()
+            return
+        # acquire_with_progress가 _camera_lock을 보유 중이면 건너뜀 (UI 블로킹 방지)
+        if self._acq.running:
+            return
+        try:
+            reading, setpoint, status = self._session_hub.camera_get_temperature(OWNER_DEEPALIGN)
+            self.lbl_temp_read.setText(f"Reading: {reading}")
+            self.lbl_temp_set.setText(f"Setpoint: {setpoint}")
+            self.lbl_temp_state.setText(f"Status: {status}")
+        except Exception:
+            pass

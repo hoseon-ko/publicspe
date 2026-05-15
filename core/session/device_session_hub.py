@@ -77,6 +77,11 @@ class DeviceSessionHub(QObject):
             dev_logger.exception(f"[DeviceSessionHub] scan_cameras failed vendor={key}")
             self.publish_error("camera", f"scan failed: {exc}", source="hub")
             return []
+        finally:
+            try:
+                hal.disconnect()
+            except Exception:
+                pass
 
     # ──────────────────────────────────────────────────────────
     # 카메라 연결 / 해제

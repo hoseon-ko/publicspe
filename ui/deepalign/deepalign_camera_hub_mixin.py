@@ -52,8 +52,10 @@ class CameraHubMixin:
         dev_logger.debug("[DeepAlign] scan skipped (session hub is not bound)")
 
     def _on_connect_clicked(self):
-        if self._session_hub is not None and not self._scanned_devices:
-            self._on_scan_clicked()
+        if self._session_hub is not None:
+            cached_vendor = getattr(self._scanned_devices[0], "vendor", None) if self._scanned_devices else None
+            if not self._scanned_devices or cached_vendor != self._vendor_key():
+                self._on_scan_clicked()
 
         if self._session_hub is not None and self._scanned_devices:
             idx = max(0, self.cam_list.currentRow())
@@ -76,6 +78,9 @@ class CameraHubMixin:
                 except Exception:
                     pass
                 self._set_camera_action_state(True)
+                has_temp = bool(caps and getattr(caps, "has_temperature", False))
+                if has_temp:
+                    self._start_temp_polling()
                 dev_logger.debug(f"[DeepAlign] connect via hub succeeded device_id={device_id}")
                 return
             except Exception:
@@ -88,6 +93,7 @@ class CameraHubMixin:
 
     def _on_disconnect_clicked(self):
         self._stop_hub_live()
+        self._stop_temp_polling()
         if self._session_hub is not None:
             try:
                 self._session_hub.disconnect_camera(reason="deep_align user request")

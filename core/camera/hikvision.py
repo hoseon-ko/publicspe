@@ -9,6 +9,7 @@ import는 성공하며, connect() 시점에 ImportError를 올린다.
 from __future__ import annotations
 
 import sys
+import threading
 import time
 from ctypes import cast, c_ubyte, c_void_p, POINTER
 from typing import Any, Callable, List, Optional
@@ -63,25 +64,28 @@ class _AcquisitionWorker(QObject):
     """별도 스레드에서 프레임 획득 후 시그널 전달."""
     frame_ready = pyqtSignal(np.ndarray)
 
-    def __init__(self, cam):
+    def __init__(self, cam, sdk_lock: threading.Lock):
         super().__init__()
         self._cam = cam
+        self._sdk_lock = sdk_lock
         self._running = False
 
     def run(self):
         self._running = True
         while self._running:
             out = MV_FRAME_OUT()
-            ret = self._cam.MV_CC_GetImageBuffer(out, 100)
+            with self._sdk_lock:
+                ret = self._cam.MV_CC_GetImageBuffer(out, 100)
+                if ret == 0:
+                    pBuf = cast(out.pBufAddr, c_void_p).value
+                    h = out.stFrameInfo.nHeight
+                    w = out.stFrameInfo.nWidth
+                    n = out.stFrameInfo.nFrameLen
+                    raw = np.frombuffer(
+                        (c_ubyte * n).from_address(pBuf), dtype=np.uint8
+                    )[:h * w].reshape(h, w).copy()
+                    self._cam.MV_CC_FreeImageBuffer(out)
             if ret == 0:
-                pBuf = cast(out.pBufAddr, c_void_p).value
-                h = out.stFrameInfo.nHeight
-                w = out.stFrameInfo.nWidth
-                n = out.stFrameInfo.nFrameLen
-                raw = np.frombuffer(
-                    (c_ubyte * n).from_address(pBuf), dtype=np.uint8
-                )[:h * w].reshape(h, w).copy()
-                self._cam.MV_CC_FreeImageBuffer(out)
                 self.frame_ready.emit(raw)
             else:
                 time.sleep(0.001)
@@ -112,6 +116,7 @@ class HikvisionCamera(BaseCamera):
         self._connected = False
         self._model = "HIKVISION"
         self._serial = ""
+        self._sdk_lock = threading.Lock()
 
     # ── BaseCamera 구현 ───────────────────────────────────────────────
 
@@ -196,22 +201,30 @@ class HikvisionCamera(BaseCamera):
     def snap(self) -> np.ndarray:
         if not self._connected or self._cam is None:
             raise RuntimeError("카메라가 연결되지 않았습니다")
-        self._cam.MV_CC_StartGrabbing()
+        # live 스트림이 없을 때만 StartGrabbing/StopGrabbing을 직접 관리한다.
+        # _grabbing=True이면 _AcquisitionWorker가 이미 스트림을 열고 있으므로
+        # StartGrabbing을 다시 호출하면 SDK 상태가 꼬이고, StopGrabbing은
+        # live 스트림을 죽인다. 두 경우 모두 _sdk_lock으로 GetImageBuffer를 직렬화한다.
+        was_grabbing = self._grabbing
+        if not was_grabbing:
+            self._cam.MV_CC_StartGrabbing()
         try:
             out = MV_FRAME_OUT()
-            ret = self._cam.MV_CC_GetImageBuffer(out, 3000)
-            if ret != 0:
-                raise RuntimeError(f"프레임 취득 실패: {ret}")
-            pBuf = cast(out.pBufAddr, c_void_p).value
-            h, w = out.stFrameInfo.nHeight, out.stFrameInfo.nWidth
-            n = out.stFrameInfo.nFrameLen
-            raw = np.frombuffer(
-                (c_ubyte * n).from_address(pBuf), dtype=np.uint8
-            )[:h * w].reshape(h, w).copy()
-            self._cam.MV_CC_FreeImageBuffer(out)
+            with self._sdk_lock:
+                ret = self._cam.MV_CC_GetImageBuffer(out, 3000)
+                if ret != 0:
+                    raise RuntimeError(f"프레임 취득 실패: {ret}")
+                pBuf = cast(out.pBufAddr, c_void_p).value
+                h, w = out.stFrameInfo.nHeight, out.stFrameInfo.nWidth
+                n = out.stFrameInfo.nFrameLen
+                raw = np.frombuffer(
+                    (c_ubyte * n).from_address(pBuf), dtype=np.uint8
+                )[:h * w].reshape(h, w).copy()
+                self._cam.MV_CC_FreeImageBuffer(out)
             return raw
         finally:
-            self._cam.MV_CC_StopGrabbing()
+            if not was_grabbing:
+                self._cam.MV_CC_StopGrabbing()
 
     def start_live(self, frame_cb: Callable[[np.ndarray], None]) -> None:
         if not self._connected or self._cam is None:
@@ -224,7 +237,7 @@ class HikvisionCamera(BaseCamera):
             raise RuntimeError(f"카메라 시작 실패: {ret}")
 
         self._thread = QThread()
-        self._worker = _AcquisitionWorker(self._cam)
+        self._worker = _AcquisitionWorker(self._cam, self._sdk_lock)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.frame_ready.connect(frame_cb)
