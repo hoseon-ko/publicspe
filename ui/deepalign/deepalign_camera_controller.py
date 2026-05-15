@@ -63,7 +63,8 @@ class CameraControllerMixin(CameraHubMixin):
         snap_fn = lambda: self._session_hub.snap(OWNER_DEEPALIGN)
 
         self._snap_in_progress = True
-        self._snap_expected_s = max(0.02, self._estimate_frame_seconds())
+        self._set_camera_action_state(True, busy=True)
+        self._snap_expected_s = max(0.05, self._estimate_frame_seconds())
         self._snap_started_at = time.monotonic()
         self._set_master_progress(0)
         self._snap_progress_timer.start()
@@ -84,8 +85,13 @@ class CameraControllerMixin(CameraHubMixin):
             self._snap_progress_timer.stop()
             return
         elapsed = max(0.0, time.monotonic() - self._snap_started_at)
-        ratio = min(0.95, elapsed / max(0.02, self._snap_expected_s))
-        self._set_master_progress(int(ratio * 100.0))
+        expected = max(0.05, self._snap_expected_s)
+        # 예상 시간 초과 시 서서히 올라가되 99%에서 멈춤
+        if elapsed <= expected:
+            ratio = elapsed / expected
+        else:
+            ratio = 0.99 - (0.04 / (1.0 + (elapsed - expected)))
+        self._set_master_progress(int(min(0.99, ratio) * 100.0))
 
     def _on_acquire_progress_tick(self) -> None:
         if not self._acq.running:
@@ -103,21 +109,26 @@ class CameraControllerMixin(CameraHubMixin):
         self._update_acquire_times(skip_progress_calc=True)
 
     def _on_snap_success(self, raw) -> None:
+        actual_s = time.monotonic() - self._snap_started_at
+        # 실제 경과 시간을 다음 스냅 추정에 반영 (지수 평균, α=0.3)
+        if self._snap_expected_s > 0.05:
+            self._snap_expected_s = 0.7 * self._snap_expected_s + 0.3 * max(0.05, actual_s)
         self._snap_in_progress = False
         self._snap_progress_timer.stop()
         self._set_master_progress(100)
+        self._set_camera_action_state(self._is_hub_camera_connected(), busy=False)
         self._push_frame(raw)
-        
-        # 갤러리에 추가
+
         ts = datetime.now().strftime("%H:%M:%S")
         self._add_to_gallery(raw, f"Snap_{ts}")
-        
-        dev_logger.debug("[DeepAlign] snap completed")
+
+        dev_logger.debug(f"[DeepAlign] snap completed actual_s={actual_s:.3f}")
 
     def _on_snap_error(self, msg: str) -> None:
         self._snap_in_progress = False
         self._snap_progress_timer.stop()
         self._set_master_progress(0)
+        self._set_camera_action_state(self._is_hub_camera_connected(), busy=False)
         dev_logger.error(f"[DeepAlign] snap failed: {msg}")
 
     def _cleanup_snap_thread(self) -> None:
@@ -179,12 +190,7 @@ class CameraControllerMixin(CameraHubMixin):
         self._set_master_progress(0)
         self.lbl_frame_info.setText(f"FRAME: <font color='#f8fafc'>0 / {frame_count}</font>")
         self._update_acquire_times()
-
-        self.btn_acquire.setEnabled(False)
-        self.btn_live_air.setEnabled(False)
-        self.btn_snap.setEnabled(False)
-        self.btn_connect.setEnabled(False)
-        self.btn_disconnect.setEnabled(False)
+        self._set_camera_action_state(True, busy=True)
 
         self._acq_thread = QThread(self)
         self._acq_worker = _AcquireWorker(
@@ -295,8 +301,7 @@ class CameraControllerMixin(CameraHubMixin):
 
     def _restore_after_acquire(self):
         connected = self._is_hub_camera_connected()
-        self._set_camera_action_state(connected)
-        self.btn_acquire.setEnabled(connected)
+        self._set_camera_action_state(connected, busy=False)
 
     def _build_acquire_save_path(self) -> Path:
         folder = Path(self.edit_folder.text().strip() or "Live_Captures")
@@ -383,6 +388,7 @@ class CameraControllerMixin(CameraHubMixin):
             self._update_dash_label(self.btn_live_air, "LIVE", "")
             return
 
+        self._set_camera_action_state(True, busy=True)
         self._hub_live_progress_started_at = time.monotonic()
         self._set_master_progress(0)
         self._hub_live_progress_timer.start()
@@ -407,6 +413,7 @@ class CameraControllerMixin(CameraHubMixin):
         if self._hub_live_progress_timer.isActive():
             self._hub_live_progress_timer.stop()
         self._set_master_progress(0)
+        self._set_camera_action_state(self._is_hub_camera_connected(), busy=False)
         dev_logger.debug("[DeepAlign] hub live stream stopped")
         if callable(after_stop):
             after_stop()

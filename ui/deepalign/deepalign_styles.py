@@ -57,18 +57,39 @@ class DeepAlignStylesMixin:
         self.prog_grid.setColumnStretch(1, max(0, 100 - pct))
         self.lbl_prog_text.setText(f"{pct}% COMPLETE")
 
-    def _set_camera_action_state(self, connected: bool):
-        self.btn_connect.setEnabled(not connected)
-        self.btn_disconnect.setEnabled(connected)
-        self.btn_apply_exp.setEnabled(connected)
-        self.btn_live_air.setEnabled(connected)
-        self.btn_acquire.setEnabled(connected)
-        self.btn_stop_main.setEnabled(connected)
-        self.btn_snap.setEnabled(connected)
+    def _set_camera_action_state(self, connected: bool, busy: bool = False):
+        """버튼 활성화 상태를 3-state로 관리.
 
+        - not connected : CONNECT만 활성, 나머지 전부 비활성
+        - connected + busy : STOP만 활성, 나머지 전부 비활성
+        - connected + idle : SNAP/LIVE/ACQUIRE/DISCONNECT 활성, STOP 비활성
+        """
         if not connected:
+            self.btn_connect.setEnabled(True)
+            self.btn_disconnect.setEnabled(False)
+            self.btn_apply_exp.setEnabled(False)
+            self.btn_snap.setEnabled(False)
+            self.btn_live_air.setEnabled(False)
+            self.btn_acquire.setEnabled(False)
+            self.btn_stop_main.setEnabled(False)
             self._update_dash_label(self.btn_live_air, "LIVE", "READY")
             self._update_dash_label(self.btn_acquire, "ACQUIRE", "READY")
+        elif busy:
+            self.btn_connect.setEnabled(False)
+            self.btn_disconnect.setEnabled(False)
+            self.btn_apply_exp.setEnabled(False)
+            self.btn_snap.setEnabled(False)
+            self.btn_live_air.setEnabled(False)
+            self.btn_acquire.setEnabled(False)
+            self.btn_stop_main.setEnabled(True)
+        else:
+            self.btn_connect.setEnabled(False)
+            self.btn_disconnect.setEnabled(True)
+            self.btn_apply_exp.setEnabled(True)
+            self.btn_snap.setEnabled(True)
+            self.btn_live_air.setEnabled(True)
+            self.btn_acquire.setEnabled(True)
+            self.btn_stop_main.setEnabled(False)
 
     def _update_dash_label(self, btn: QPushButton, title: str, sub: str):
         layout = btn.layout()
