@@ -68,7 +68,7 @@ class DeepAlignStylesMixin:
         if hasattr(self, "cam_connected_settings"):
             self.cam_connected_settings.setVisible(connected)
         if hasattr(self, "btn_bg_capture"):
-            self.btn_bg_capture.setVisible(not connected)
+            self.btn_bg_capture.setEnabled(connected and not busy)
 
         if not connected:
             self.btn_connect.setEnabled(True)

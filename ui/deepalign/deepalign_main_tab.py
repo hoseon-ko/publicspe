@@ -521,6 +521,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
             return
         self.mirror_panel.bind_session_hub(session_hub)
         self.motion_panel.bind_session_hub(session_hub)
+        self.align_panel.bind_session_hub(session_hub)
         try:
             self._session_hub.select_camera_vendor(self._vendor_key())
         except Exception:
@@ -711,8 +712,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
 
     def _bg_update_ui(self, source_name: str = "") -> None:
         has_bg = self._bg_frame is not None
-        can_capture_bg = not self._is_hub_camera_connected()
-        self.btn_bg_capture.setVisible(can_capture_bg)
+        self.btn_bg_capture.setEnabled(self._is_hub_camera_connected())
         self.btn_bg_clear.setEnabled(has_bg)
         self.check_use_bg.setEnabled(has_bg)
         if has_bg:

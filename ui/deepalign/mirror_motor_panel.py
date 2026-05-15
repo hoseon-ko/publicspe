@@ -256,7 +256,23 @@ class MirrorMotorPanel(QWidget):
 
     def bind_session_hub(self, hub) -> None:
         """DeepAlignMainTab.bind_session_hub()에서 호출 — hub 경유 모드 활성화."""
+        if self._session_hub:
+            try:
+                self._session_hub.event_published.disconnect(self._on_session_event)
+            except Exception:
+                pass
         self._session_hub = hub
+        if hub:
+            hub.event_published.connect(self._on_session_event)
+
+    def _on_session_event(self, event) -> None:
+        from core.session.session_events import SessionEventType
+        if event.event_type == SessionEventType.PICO_CONNECTED:
+            self._start_hub_polling()
+            self._apply_connected(True, "Picomotor 8742")
+        elif event.event_type == SessionEventType.PICO_DISCONNECTED:
+            self._stop_hub_polling()
+            self._apply_connected(False)
 
     def _start_hub_polling(self) -> None:
         if self._poll_timer is not None:

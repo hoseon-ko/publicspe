@@ -163,8 +163,24 @@ class MotionTab(QWidget):
         self._refresh_from_sources()
 
     def bind_session_hub(self, session_hub):
+        if self._session_hub:
+            try:
+                self._session_hub.event_published.disconnect(self._on_session_event)
+            except Exception:
+                pass
         self._session_hub = session_hub
+        if session_hub:
+            session_hub.event_published.connect(self._on_session_event)
         self._refresh_from_sources()
+
+    def _on_session_event(self, event):
+        from core.session.session_events import SessionEventType
+        if event.event_type in (
+            SessionEventType.PICO_CONNECTED,  SessionEventType.PICO_DISCONNECTED,
+            SessionEventType.KIMM_CONNECTED,  SessionEventType.KIMM_DISCONNECTED,
+            SessionEventType.ACS_CONNECTED,   SessionEventType.ACS_DISCONNECTED,
+        ):
+            self._refresh_from_sources()
 
     def cleanup(self):
         if self._refresh_timer.isActive():
@@ -1136,8 +1152,12 @@ class MotionTab(QWidget):
             use_sim = self.check_acs_sim.isChecked()
             def _do():
                 try:
-                    self._session_hub.connect_acs(ip, int(port_str or 700))
-                    self.log_message.emit(f"ACS connected: {'SIM' if use_sim else ip}")
+                    if use_sim:
+                        self._session_hub.connect_acs_simulator()
+                        self.log_message.emit("ACS Simulator connected")
+                    else:
+                        self._session_hub.connect_acs(ip, int(port_str or 700))
+                        self.log_message.emit(f"ACS connected: {ip}")
                 except Exception as e:
                     self.log_message.emit(f"ACS connect failed: {e}")
                 self._refresh_from_sources()
@@ -1254,8 +1274,9 @@ class MotionTab(QWidget):
         for i, lbl_pos in enumerate(self._pico_pos_labels):
             val = self._pico_positions[i] if i < len(self._pico_positions) else None
             lbl_pos.setText(f"{val:,}" if val is not None else "---")
-        for card in self._pico_cards:
+        for i, card in enumerate(self._pico_cards):
             card.set_enabled(pico_ok)
+            card.set_position(self._pico_positions[i] if i < len(self._pico_positions) else None)
         self.btn_pico_connect.setEnabled(not pico_ok)
         self.btn_pico_disconnect.setEnabled(pico_ok)
         self.lbl_hdr_pico_link.setText("Picomotor: LIVE" if pico_ok else "Picomotor: --")

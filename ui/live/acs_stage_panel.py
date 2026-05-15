@@ -295,7 +295,8 @@ class AcsStagePanel(QWidget):
         self._ctrl_ref: list[AcsStageController | None] = [ctrl]
         self._move_btns: list[QPushButton] = []
         self._axis_rows: list[_AxisRow] = []
-        self._motion_widgets: list[QWidget] = [] 
+        self._motion_widgets: list[QWidget] = []
+        self._session_hub = None
         self._settings = QSettings("SpeAnalyze", "MainWindow")
         self._calc = KinematicCalc()
         self._lbl_cur_dof: dict[str, QLabel] = {}
@@ -613,6 +614,27 @@ class AcsStagePanel(QWidget):
         row_set.addWidget(lbl_set)
         row_set.addWidget(self.spin_settle)
         lay.addLayout(row_set)
+
+    # ── SessionHub 연동 ───────────────────────────────────────────────
+
+    def bind_session_hub(self, hub) -> None:
+        if self._session_hub:
+            try:
+                self._session_hub.event_published.disconnect(self._on_session_event)
+            except Exception:
+                pass
+        self._session_hub = hub
+        if hub:
+            hub.event_published.connect(self._on_session_event)
+
+    def _on_session_event(self, event) -> None:
+        from core.session.session_events import SessionEventType
+        if event.event_type == SessionEventType.ACS_CONNECTED:
+            ctrl = getattr(self._session_hub, "acs_controller", None)
+            if ctrl:
+                self.set_controller(ctrl)
+        elif event.event_type == SessionEventType.ACS_DISCONNECTED:
+            self.set_controller(None)
 
     # ── 제어기 주입 (External Injection) ──────────────────────────────
 

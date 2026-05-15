@@ -630,6 +630,19 @@ class DeviceSessionHub(QObject):
             self.publish_error("acs", f"connection failed: {exc}", source="hub")
             raise
 
+    def connect_acs_simulator(self) -> None:
+        from core.hal.adapters import AcsMotionAdapter
+        self._state.motion.acs_connection = DeviceConnectionState.CONNECTING
+        self.publish_status("Connecting ACS Simulator", source="hub")
+        try:
+            hal = AcsMotionAdapter()
+            hal.connect_simulator()
+            self.attach_acs(hal)
+        except Exception as exc:
+            self._state.motion.acs_connection = DeviceConnectionState.ERROR
+            self.publish_error("acs", f"simulator connection failed: {exc}", source="hub")
+            raise
+
     def attach_acs_controller(self, ctrl) -> None:
         """이미 연결된 AcsStageController를 SessionHub / MotionHub에 등록한다.
 

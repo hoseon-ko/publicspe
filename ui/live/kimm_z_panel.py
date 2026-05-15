@@ -46,6 +46,7 @@ class KIMMZPanel(QWidget):
         self._ctrl: KIMMZController | None = None
         self._move_btns: list[QPushButton] = []   # 이동 버튼들 (연결 시 활성화)
         self._settings = QSettings("SpeAnalyze", "MainWindow")
+        self._session_hub = None
 
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(100)
@@ -277,6 +278,53 @@ class KIMMZPanel(QWidget):
         except Exception as e:
             self._log(f"KIMM: 연결 실패 — {e}")
             self._ctrl = None
+
+    # ── SessionHub 연동 ───────────────────────────────────────────────
+
+    def bind_session_hub(self, hub) -> None:
+        if self._session_hub:
+            try:
+                self._session_hub.event_published.disconnect(self._on_session_event)
+            except Exception:
+                pass
+        self._session_hub = hub
+        if hub:
+            hub.event_published.connect(self._on_session_event)
+
+    def _on_session_event(self, event) -> None:
+        from core.session.session_events import SessionEventType
+        if event.event_type == SessionEventType.KIMM_CONNECTED:
+            ctrl = getattr(self._session_hub, "kimm_controller", None)
+            if ctrl:
+                self.set_controller(ctrl)
+        elif event.event_type == SessionEventType.KIMM_DISCONNECTED:
+            self.set_controller(None)
+
+    def set_controller(self, ctrl: "KIMMZController | None") -> None:
+        """외부에서 연결된 컨트롤러를 주입받아 UI를 동기화."""
+        self._ctrl = ctrl
+        if ctrl and ctrl.is_connected:
+            self.lbl_status.setText("● CONNECTED")
+            self.lbl_status.setStyleSheet(lbl(C_ACCENT, mono=True, bold=True))
+            self.btn_connect.setEnabled(False)
+            self.btn_disconnect.setEnabled(True)
+            self.edit_ip.setEnabled(False)
+            self.edit_port.setEnabled(False)
+            for b in self._move_btns:
+                b.setEnabled(True)
+            self._poll_timer.start()
+            self.kimm_connected.emit(ctrl)
+        else:
+            self._poll_timer.stop()
+            self.lbl_status.setText("● DISCONNECTED")
+            self.lbl_status.setStyleSheet(lbl(C_DANGER, mono=True, bold=True))
+            self.btn_connect.setEnabled(True)
+            self.btn_disconnect.setEnabled(False)
+            self.edit_ip.setEnabled(True)
+            self.edit_port.setEnabled(True)
+            for b in self._move_btns:
+                b.setEnabled(False)
+            self.kimm_disconnected.emit()
 
     def _on_disconnect(self):
         self._poll_timer.stop()
