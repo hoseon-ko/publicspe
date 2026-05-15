@@ -141,10 +141,8 @@ class CameraControllerMixin(CameraHubMixin):
         self._snap_progress_timer.stop()
         self._set_master_progress(100)
         self._set_camera_action_state(self._is_hub_camera_connected(), busy=False)
-        self._push_frame(raw)
-
         ts = datetime.now().strftime("%H:%M:%S")
-        self._add_to_gallery(raw, f"Snap_{ts}")
+        self._push_frame(raw, gallery_label=f"Snap_{ts}")
 
         dev_logger.debug(f"[DeepAlign] snap completed actual_s={actual_s:.3f}")
         
@@ -272,11 +270,9 @@ class CameraControllerMixin(CameraHubMixin):
             f"FRAME: <font color='#f8fafc'>{self._acq.cur} / {self._acq.total}</font>"
         )
         self._update_acquire_times(skip_progress_calc=True)
-        self._push_frame(raw)
-
-        if cur == total:
-            ts = datetime.now().strftime("%H:%M:%S")
-            self._add_to_gallery(raw, f"Acq_Last_{ts}")
+        ts = datetime.now().strftime("%H:%M:%S")
+        gallery_label = f"Acq_Last_{ts}" if cur == total else ""
+        self._push_frame(raw, gallery_label=gallery_label)
 
     def _on_acquire_finished(self, frames: list):
         self._acq.running = False
@@ -459,7 +455,7 @@ class CameraControllerMixin(CameraHubMixin):
                     0.8 * self._hub_live_progress_cycle_s + 0.2 * actual_interval
                 )
         self._hub_live_progress_started_at = now
-        self._push_frame(raw)
+        self._push_frame(raw, drop_if_busy=True)
 
     def _on_hub_live_frame_ready(self, rgb, raw) -> None:
         self._on_hub_live_frame(raw)
@@ -491,9 +487,10 @@ class CameraControllerMixin(CameraHubMixin):
 
             # 3) 모든 워커 스레드 순서대로 종료
             _threads = [
-                (getattr(self, "_snap_thread",        None), "snap"),
-                (getattr(self, "_acq_thread",         None), "acquire"),
-                (getattr(self, "_live_worker_thread", None), "live"),
+                (getattr(self, "_snap_thread",          None), "snap"),
+                (getattr(self, "_acq_thread",           None), "acquire"),
+                (getattr(self, "_live_worker_thread",   None), "live"),
+                (getattr(self, "_frame_convert_thread", None), "frame_convert"),
             ]
             for thread, name in _threads:
                 if thread is not None and thread.isRunning():

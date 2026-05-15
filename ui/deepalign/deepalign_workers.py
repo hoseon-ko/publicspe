@@ -5,13 +5,83 @@
 - SNAP
 - LIVE 폴링/스트림 루프
 - ACQUIRE 프레임 시퀀스 및 진행률 콜백
+- 프레임 RGB 변환 (numpy 연산 전담)
 """
 
 from __future__ import annotations
 
 import time
 
-from PyQt6.QtCore import QObject, pyqtSignal
+import numpy as np
+from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot, Qt
+
+
+def _convert_raw_to_rgb(raw, cmap: str, vmin: float, vmax: float) -> np.ndarray:
+    """numpy 변환 전용 함수 — Qt 접근 없음, 어느 스레드에서도 호출 가능."""
+    arr = np.asarray(raw)
+
+    if arr.ndim == 3 and arr.shape[2] == 3:
+        if arr.dtype == np.uint8:
+            return arr
+        return np.clip(arr, 0, 255).astype(np.uint8)
+
+    if arr.ndim != 2:
+        arr = np.asarray(arr).squeeze()
+        if arr.ndim != 2:
+            arr = np.zeros((32, 32), dtype=np.uint8)
+
+    if cmap and str(cmap).lower() != "off":
+        from ui.image_viewer import apply_colormap
+        rgba = apply_colormap(arr.astype(np.float32), str(cmap), vmin=vmin, vmax=vmax)
+        return np.ascontiguousarray(rgba[:, :, :3]).astype(np.uint8)
+
+    _vmin = float(vmin) if vmin is not None else float(np.min(arr))
+    _vmax = float(vmax) if vmax is not None else float(np.max(arr))
+    if _vmax <= _vmin:
+        gray = np.zeros_like(arr, dtype=np.uint8)
+    else:
+        scale = 255.0 / (_vmax - _vmin)
+        gray = np.clip((arr.astype(np.float32) - _vmin) * scale, 0, 255).astype(np.uint8)
+    return np.ascontiguousarray(np.stack([gray, gray, gray], axis=-1))
+
+
+class _FrameConvertWorker(QObject):
+    """raw numpy → RGB 변환을 워커 스레드에서 수행.
+
+    submit()은 메인 스레드에서 호출한다.
+    QueuedConnection으로 _process()가 워커 스레드 이벤트 루프에서 실행됨.
+    변환 완료 후 result_ready 시그널을 emit — Qt가 자동으로 수신측 스레드(메인)로 큐잉.
+    """
+
+    _submit = pyqtSignal(object)
+    result_ready = pyqtSignal(object, object, str)  # rgb, raw, gallery_label
+
+    def __init__(self):
+        super().__init__()
+        self._busy = False
+        # moveToThread 전에 연결해도 됨 — 수신측 thread affinity는 deliver 시점에 적용
+        self._submit.connect(self._process, Qt.ConnectionType.QueuedConnection)
+
+    @property
+    def busy(self) -> bool:
+        return self._busy
+
+    def submit(self, task: dict) -> None:
+        """메인 스레드에서 호출 — QueuedConnection으로 워커 스레드에 전달."""
+        self._submit.emit(task)
+
+    @pyqtSlot(object)
+    def _process(self, task: dict) -> None:
+        self._busy = True
+        try:
+            rgb = _convert_raw_to_rgb(
+                task["raw"], task["cmap"], task["vmin"], task["vmax"]
+            )
+            self.result_ready.emit(rgb, task["raw"], task.get("gallery_label", ""))
+        except Exception:
+            pass
+        finally:
+            self._busy = False
 
 
 class _AcquireWorker(QObject):

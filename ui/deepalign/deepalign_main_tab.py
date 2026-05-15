@@ -184,6 +184,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self._settings = QSettings("SpeAnalyze", "DeepAlignTab")
 
         self._init_ui()
+        self._init_frame_convert_worker()
         self._restore_settings()
         self._wire_camera_actions()
         self._apply_camera_capabilities(None)

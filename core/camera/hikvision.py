@@ -73,9 +73,13 @@ class _AcquisitionWorker(QObject):
     def run(self):
         self._running = True
         while self._running:
+            # 매 루프마다 카메라에 "사진 1장 찍어!" (소프트웨어 트리거) 명령 발송
+            # 파이썬 속도에 맞춰서만 카메라가 사진을 찍으므로 버퍼 폭주가 원천 차단됨
+            self._cam.MV_CC_SetCommandValue("TriggerSoftware")
+            
             out = MV_FRAME_OUT()
             with self._sdk_lock:
-                ret = self._cam.MV_CC_GetImageBuffer(out, 100)
+                ret = self._cam.MV_CC_GetImageBuffer(out, 1000)
                 if ret == 0:
                     pBuf = cast(out.pBufAddr, c_void_p).value
                     h = out.stFrameInfo.nHeight
@@ -207,10 +211,12 @@ class HikvisionCamera(BaseCamera):
         # live 스트림을 죽인다. 두 경우 모두 _sdk_lock으로 GetImageBuffer를 직렬화한다.
         was_grabbing = self._grabbing
         if not was_grabbing:
+            # 단일 프레임 모드로 변경 (0 = SingleFrame)
+            self._cam.MV_CC_SetEnumValue("AcquisitionMode", 0)
+            self._cam.MV_CC_SetEnumValue("TriggerMode", 0)  # Trigger Off (바로 찍히도록)
             ret = self._cam.MV_CC_StartGrabbing()
             if ret != 0:
                 raise RuntimeError(f"StartGrabbing 실패 (에러코드: {ret})")
-            time.sleep(0.05)  # 센서 안정화 및 버퍼 충전 대기
         try:
             out = MV_FRAME_OUT()
             with self._sdk_lock:
@@ -245,7 +251,6 @@ class HikvisionCamera(BaseCamera):
             return raw
         finally:
             if not was_grabbing:
-                time.sleep(0.05)  # SDK 강제종료 방지를 위한 지연
                 self._cam.MV_CC_StopGrabbing()
 
     def start_live(self, frame_cb: Callable[[np.ndarray], None]) -> None:
@@ -254,6 +259,12 @@ class HikvisionCamera(BaseCamera):
         if self._grabbing:
             return
 
+        # 라이브 모드에서는 연속 촬영 모드로 복구 (2 = Continuous)
+        self._cam.MV_CC_SetEnumValue("AcquisitionMode", 2)
+        # 소프트웨어 트리거 활성화 (파이썬 루프 속도에 맞추기 위함)
+        self._cam.MV_CC_SetEnumValue("TriggerMode", 1)      # Trigger On
+        self._cam.MV_CC_SetEnumValue("TriggerSource", 7)    # Software Trigger
+        
         ret = self._cam.MV_CC_StartGrabbing()
         if ret != 0:
             raise RuntimeError(f"카메라 시작 실패: {ret}")
