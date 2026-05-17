@@ -17,7 +17,7 @@ from __future__ import annotations
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QStackedWidget, QStatusBar,
     QLabel, QFrame, QVBoxLayout, QHBoxLayout, QPushButton,
-    QDockWidget, QTextEdit, QTabWidget, QApplication,
+    QDockWidget, QTextEdit, QTabWidget, QApplication, QCheckBox,
 )
 from PyQt6.QtCore import Qt, QSize, QSettings
 from PyQt6.QtGui import QFont, QShortcut, QKeySequence, QPixmap, QPainter
@@ -197,8 +197,41 @@ class MainWindow(QMainWindow):
 
         self._nav_btns[0].setChecked(True)   # Live 기본 선택
 
-        # 헤더 오른쪽: 상태 위젯들
+        # 헤더 오른쪽: 상태 위젯들 및 자동 연동 토글
         hdr_h.addStretch(1)
+
+        # [Auto-Connect Toggle] 세련된 디자인의 자동 연결 체크 스위치
+        self.check_auto_conn = QCheckBox("AUTO CONNECT")
+        self.check_auto_conn.setStyleSheet(f"""
+            QCheckBox {{
+                color: {_TAB_NORMAL};
+                font-family: '{_FC}', 'Segoe UI';
+                font-size: 11px;
+                font-weight: bold;
+                spacing: 6px;
+                margin-right: 12px;
+            }}
+            QCheckBox:hover {{
+                color: #ffffff;
+            }}
+            QCheckBox::indicator {{
+                width: 12px;
+                height: 12px;
+                border: 1px solid {_HDR_BORDER};
+                background: #080e1e;
+                border-radius: 2px;
+            }}
+            QCheckBox::indicator:checked {{
+                background: {C_ACCENT};
+                border-color: {C_ACCENT};
+            }}
+        """)
+        # 영구 저장 상태 복원
+        settings = QSettings("SpeAnalyze", "MainWindow")
+        auto_val = settings.value("app/auto_connect", True)
+        self.check_auto_conn.setChecked(str(auto_val).lower() == 'true' or auto_val is True)
+        self.check_auto_conn.stateChanged.connect(self._on_auto_connect_toggled)
+        hdr_h.addWidget(self.check_auto_conn)
 
         def _vsep():
             f = QFrame()
@@ -585,6 +618,15 @@ class MainWindow(QMainWindow):
 
     def _auto_connect_startup(self):
         """프로그램 실행 0.5초 후 백그라운드에서 모든 하드웨어 연결 자동 시도 (예외 안전)"""
+        # QSettings에서 사용자의 자동 연결 활성화 여부 확인
+        settings = QSettings("SpeAnalyze", "MainWindow")
+        auto_val = settings.value("app/auto_connect", True)
+        auto_connect_enabled = str(auto_val).lower() == 'true' or auto_val is True
+        
+        if not auto_connect_enabled:
+            app_logger.info("[Auto-Connect] 자동 장비 연결 기능이 비활성화 상태입니다. (자동 연결 스킵)")
+            return
+
         import threading
         
         def worker():
@@ -644,4 +686,11 @@ class MainWindow(QMainWindow):
                 app_logger.info("[Auto-Connect] 감지된 카메라 장비가 없어 카메라 연결을 건너뜁니다.")
         except Exception as e:
             app_logger.warning(f"[Auto-Connect] 카메라 자동 연결 실패: {e}")
+
+    def _on_auto_connect_toggled(self):
+        """사용자가 헤더 바에서 AUTO CONNECT 체크박스를 토글할 때 QSettings에 상태 저장"""
+        settings = QSettings("SpeAnalyze", "MainWindow")
+        checked = self.check_auto_conn.isChecked()
+        settings.setValue("app/auto_connect", checked)
+        app_logger.info(f"[Auto-Connect] 자동 연결 기능 설정 변경 -> {'활성화' if checked else '비활성화'}")
 
