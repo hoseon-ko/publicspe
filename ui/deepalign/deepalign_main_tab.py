@@ -28,9 +28,8 @@ import numpy as np
 from ui.file_list_panel import SpeFileItem
 from core.async_worker import SpeLoadWorker
 
-from ui.deepalign.mirror_motor_panel import MirrorMotorPanel
 from ui.deepalign.autofocus_panel import AutoFocusPanel
-from ui.deepalign.acs_stage_panel import AcsStagePanel
+from ui.deepalign.wrappers import DeepAlignAcsPanel, DeepAlignMirrorPanel
 from ui.motion.motion_tab import MotionTab
 from ui.deepalign.deepalign_camera_controller import CameraControllerMixin
 from ui.deepalign.deepalign_frame_pipeline import FramePipelineMixin
@@ -322,10 +321,12 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self._acq_progress_timer.setInterval(20)
         self._acq_progress_timer.timeout.connect(self._on_acquire_progress_tick)
 
-        # ── 기존 패널 인스턴스 생성 (단 1회) ──────────────────────────
-        self.mirror_panel = MirrorMotorPanel()
+        # ── 카드 wrapper 인스턴스 (PicoCard/AcsCard 재활용) ───────────
+        # Mirror/ACS는 ui/widgets/의 카드를 composition으로 wrap. AutoFocus는 원래
+        # KimmZCard를 내부에서 사용 중이므로 그대로 유지.
+        self.mirror_panel = DeepAlignMirrorPanel()
         self.af_panel     = AutoFocusPanel()
-        self.align_panel  = AcsStagePanel()
+        self.align_panel  = DeepAlignAcsPanel()
         self.motion_panel = MotionTab()
 
         # ── 스캔 위젯(장치 패널과 분리, 워크플로우 전용) ─────────────
