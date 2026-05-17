@@ -267,6 +267,7 @@ class KimmZCard(QFrame):
     def _save_settings(self):
         self._settings.setValue("kimm/ip", self.edit_ip.text().strip())
         self._settings.setValue("kimm/port", self.edit_port.text().strip())
+        self._settings.sync()  # 디스크 물리 저장 강제 동기화
 
     def _load_settings(self):
         self.edit_ip.setText(self._settings.value("kimm/ip", "192.168.1.100"))

@@ -522,11 +522,12 @@ class AcsCard(QFrame):
         for i in range(3): self._dof_spins[i+3].setValue(res[i] * 1000)
 
     def _save_settings(self):
-        self._settings.setValue("acs/ip", self.edit_ip.text())
-        self._settings.setValue("acs/port", self.edit_port.text())
+        self._settings.setValue("acs/ip", self.edit_ip.text().strip())
+        self._settings.setValue("acs/port", self.edit_port.text().strip())
         self._settings.setValue("acs/sim", self.check_sim.isChecked())
         self._settings.setValue("acs/dry_run", self.check_dry.isChecked())
         self._settings.setValue("acs/settle", self.spin_settle.value())
+        self._settings.sync()  # 디스크 물리 저장 강제 동기화
 
     def _load_settings(self):
         self.edit_ip.setText(self._settings.value("acs/ip", "10.0.0.100"))
