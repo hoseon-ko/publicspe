@@ -121,9 +121,25 @@ class PicoCard(QFrame):
         lay.addStretch()
 
     def bind_session_hub(self, hub):
+        if self._session_hub:
+            try:
+                self._session_hub.event_published.disconnect(self._on_session_event)
+            except Exception:
+                pass
         self._session_hub = hub
-        if hub: self._poll_timer.start()
-        else: self._poll_timer.stop()
+        if hub:
+            hub.event_published.connect(self._on_session_event)
+            self._poll_timer.start()
+            self.refresh_status()
+        else:
+            self._poll_timer.stop()
+
+    def _on_session_event(self, event):
+        from core.session.session_events import SessionEventType
+        if event.event_type == SessionEventType.PICO_CONNECTED:
+            self.refresh_status()
+        elif event.event_type == SessionEventType.PICO_DISCONNECTED:
+            self.update_status(False, [None] * 4)
 
     def refresh_status(self):
         if not self._session_hub: return

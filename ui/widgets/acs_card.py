@@ -391,9 +391,22 @@ class AcsCard(QFrame):
             self.btn_sync.setEnabled(True)
 
     def bind_session_hub(self, hub):
+        if self._session_hub:
+            try:
+                self._session_hub.event_published.disconnect(self._on_session_event)
+                if hasattr(self._session_hub, "acs_positions_updated"):
+                    self._session_hub.acs_positions_updated.disconnect(self._on_hub_positions)
+                if hasattr(self._session_hub, "acs_states_updated"):
+                    self._session_hub.acs_states_updated.disconnect(self._on_hub_states)
+            except Exception:
+                pass
         self._session_hub = hub
         if hub:
             hub.event_published.connect(self._on_session_event)
+            if hasattr(hub, "acs_positions_updated"):
+                hub.acs_positions_updated.connect(self._on_hub_positions)
+            if hasattr(hub, "acs_states_updated"):
+                hub.acs_states_updated.connect(self._on_hub_states)
             if hub.is_acs_connected():
                 ctrl = getattr(hub, "acs_controller", None)
                 if ctrl: self.set_controller(ctrl)
@@ -402,6 +415,14 @@ class AcsCard(QFrame):
         self._ctrl_ref[0] = ctrl
         if ctrl and ctrl.is_connected:
             self.update_status(True, ctrl.get_positions(), ctrl.get_axis_states())
+
+    def _on_hub_positions(self, pos):
+        if pos:
+            self.update_status(True, pos)
+
+    def _on_hub_states(self, states):
+        if states:
+            self.update_status(True, None, states)
             
     def _on_session_event(self, event):
         from core.session.session_events import SessionEventType

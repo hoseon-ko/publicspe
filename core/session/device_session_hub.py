@@ -38,6 +38,8 @@ class DeviceSessionHub(QObject):
     # ── 집중 관리 폴링 시그널 ────────────────────────────────────────────
     pico_positions_updated    = pyqtSignal(list)           # [p1, p2, p3, p4] (int)
     camera_temperature_updated = pyqtSignal(object, object, object)  # reading, setpoint, status
+    acs_positions_updated     = pyqtSignal(list)           # [j1, j2, j3, j4, j5, j6] (float)
+    acs_states_updated        = pyqtSignal(list)           # [dict, dict, ...] (axis states)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -623,6 +625,10 @@ class DeviceSessionHub(QObject):
     def attach_acs(self, acs_hal: AcsHal) -> None:
         self._acs_hal = acs_hal
         self._motion_hub.attach_acs(acs_hal)
+        if hasattr(acs_hal, "positions_updated"):
+            acs_hal.positions_updated.connect(self.acs_positions_updated.emit)
+        if hasattr(acs_hal, "state_updated"):
+            acs_hal.state_updated.connect(self.acs_states_updated.emit)
         self.mark_acs_connected()
 
     def connect_acs(self, ip: str, port: int) -> None:
@@ -674,6 +680,13 @@ class DeviceSessionHub(QObject):
         """
         if self._acs_hal is not None:
             try:
+                if hasattr(self._acs_hal, "positions_updated"):
+                    self._acs_hal.positions_updated.disconnect(self.acs_positions_updated.emit)
+                if hasattr(self._acs_hal, "state_updated"):
+                    self._acs_hal.state_updated.disconnect(self.acs_states_updated.emit)
+            except Exception:
+                pass
+            try:
                 self._acs_hal = None
                 self._motion_hub._acs_hal = None
             except Exception:
@@ -683,6 +696,13 @@ class DeviceSessionHub(QObject):
 
     def disconnect_acs(self) -> None:
         if self._acs_hal:
+            try:
+                if hasattr(self._acs_hal, "positions_updated"):
+                    self._acs_hal.positions_updated.disconnect(self.acs_positions_updated.emit)
+                if hasattr(self._acs_hal, "state_updated"):
+                    self._acs_hal.state_updated.disconnect(self.acs_states_updated.emit)
+            except Exception:
+                pass
             try:
                 self._acs_hal.disconnect()
             except Exception:
