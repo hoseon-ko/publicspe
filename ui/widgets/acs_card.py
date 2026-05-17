@@ -412,9 +412,24 @@ class AcsCard(QFrame):
             self._on_disconnect()
 
     def _on_disconnect(self):
-        if self._session_hub: self._session_hub.acs_disconnect()
-        elif self._ctrl_ref[0]: self._ctrl_ref[0].disconnect()
-        self._ctrl_ref[0] = None; self._set_disconnected_ui(); self.acs_disconnected.emit()
+        if self._session_hub:
+            try:
+                self.log_message.emit("ACS Stage: Disconnecting...")
+                self._session_hub.acs_disconnect()
+                self.log_message.emit("ACS Stage: Disconnected successfully.")
+            except Exception as e:
+                self.log_message.emit(f"ACS Stage: Disconnect failed: {e}")
+        elif self._ctrl_ref[0]:
+            try:
+                self.log_message.emit("ACS Stage: Disconnecting (Standalone)...")
+                self._ctrl_ref[0].disconnect()
+                self.log_message.emit("ACS Stage: Disconnected (Standalone) successfully.")
+            except Exception as e:
+                self.log_message.emit(f"ACS Stage: Disconnect (Standalone) failed: {e}")
+        
+        self._ctrl_ref[0] = None
+        self._set_disconnected_ui()
+        self.acs_disconnected.emit()
 
     def _on_lost(self): self._on_disconnect(); self.log_message.emit("ACS Connection Lost")
 

@@ -162,17 +162,24 @@ class PicoCard(QFrame):
     def _on_connect_clicked(self):
         if self._session_hub:
             try:
+                self.log_message.emit("PICO Mirror: Connecting...")
                 self._session_hub.connect_pico()
                 self._session_hub.start_pico_polling()
+                self.log_message.emit("PICO Mirror: Connected successfully.")
             except Exception as e:
-                self.log_message.emit(f"PICO Connect Error: {e}")
+                self.log_message.emit(f"PICO Mirror: Connection failed: {e}")
+                self.update_status(False, [None] * 4)
 
     def _on_disconnect_clicked(self):
         if self._session_hub:
             try:
+                self.log_message.emit("PICO Mirror: Disconnecting...")
                 self._session_hub.disconnect_pico()
+                self.log_message.emit("PICO Mirror: Disconnected successfully.")
+                self.update_status(False, [None] * 4)
             except Exception as e:
-                self.log_message.emit(f"PICO Disconnect Error: {e}")
+                self.log_message.emit(f"PICO Mirror: Disconnect failed: {e}")
+                self.update_status(False, [None] * 4)
 
     def _on_move_requested(self, motor_num: int, steps: int):
         if not self._session_hub: return
