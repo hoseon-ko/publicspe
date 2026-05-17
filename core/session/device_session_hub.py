@@ -944,6 +944,12 @@ class DeviceSessionHub(QObject):
     def is_acs_connected(self) -> bool:
         return self._acs_hal is not None
 
+    @property
+    def acs_controller(self):
+        if self._acs_hal and hasattr(self._acs_hal, "_controller"):
+            return self._acs_hal._controller
+        return None
+
     def is_kimm_connected(self) -> bool:
         return self._kimm_hal is not None
 
