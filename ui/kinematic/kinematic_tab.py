@@ -142,8 +142,8 @@ class MotorStressBar(QWidget):
 
 class KinematicTab(QWidget):
     log_message = pyqtSignal(str); kin_starting = pyqtSignal(); kin_done = pyqtSignal()
-    def __init__(self, parent=None, acs_ctrl: AcsStageController = None):
-        super().__init__(parent); self.acs_ctrl = acs_ctrl; self.calc = KinematicCalc(); self.acs_panel = None; self.current_1d_range = (0, 0); self._setup_ui()
+    def __init__(self, parent=None, acs_ctrl: AcsStageController = None, session_hub=None):
+        super().__init__(parent); self.acs_ctrl = acs_ctrl; self.session_hub = session_hub; self.calc = KinematicCalc(); self.acs_panel = None; self.current_1d_range = (0, 0); self._setup_ui()
     def set_acs_ctrl(self, ctrl):
         if self.acs_panel: self.acs_panel.set_controller(ctrl); self.update_analysis()
     def clear_acs_ctrl(self):
@@ -156,7 +156,10 @@ class KinematicTab(QWidget):
     def _setup_ui(self):
         main_layout = QVBoxLayout(self); main_layout.setContentsMargins(5, 5, 5, 5)
         self.splitter = QSplitter(Qt.Orientation.Horizontal); self.splitter.setStyleSheet("QSplitter::handle { background-color: #1e293b; width: 2px; }")
-        self.acs_panel = AcsStagePanel(None, ctrl=self.acs_ctrl); self.acs_panel.log_message.connect(self.log_message.emit); self.splitter.addWidget(self.acs_panel)
+        self.acs_panel = AcsStagePanel(None, ctrl=self.acs_ctrl)
+        if self.session_hub:
+            self.acs_panel.bind_session_hub(self.session_hub)
+        self.acs_panel.log_message.connect(self.log_message.emit); self.splitter.addWidget(self.acs_panel)
         center_widget = QWidget(); center_layout = QVBoxLayout(center_widget)
         map_ctrl_lay = QHBoxLayout(); map_ctrl_lay.addWidget(QLabel("MODE:")); self.combo_plane = QComboBox(); self.combo_plane.addItems(["XY (2D Map)", "XZ (2D Map)", "YZ (2D Map)", "RxRy (2D Map)", "RxRz (2D Map)", "RyRz (2D Map)", "TxRx (2D Map)", "TyRy (2D Map)", "TzRz (2D Map)", "Tx (1D Search)", "Ty (1D Search)", "Tz (1D Search)", "Rx (1D Search)", "Ry (1D Search)", "Rz (1D Search)"]); self.combo_plane.currentIndexChanged.connect(self.update_analysis); map_ctrl_lay.addWidget(self.combo_plane)
         self.lbl_fixed_info = QLabel("Fixed: ..."); self.lbl_fixed_info.setStyleSheet("color: #ffffff; font-size: 11px; font-weight: bold;"); map_ctrl_lay.addWidget(self.lbl_fixed_info); map_ctrl_lay.addStretch(); center_layout.addLayout(map_ctrl_lay)

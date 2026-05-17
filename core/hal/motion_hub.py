@@ -46,6 +46,16 @@ class MotionHub(QObject):
         self._settle_timer.timeout.connect(self._on_settle_timeout)
         self._settle_ms = settle_ms
 
+    def update_kinematics(self, calc: KinematicCalc):
+        """Update the internal kinematic engine with new parameters."""
+        self._kinematics.stage_setup = calc.stage_setup.copy()
+        self._kinematics.encoder_pos = calc.encoder_pos.copy()
+        self._kinematics.plus_limits = calc.plus_limits.copy()
+        self._kinematics.minus_limits = calc.minus_limits.copy()
+        self._kinematics.direction = calc.direction.copy()
+        self._kinematics._mapping = calc._mapping.copy()
+        dev_logger.info("[MotionHub] Kinematics updated from external source")
+
     def attach_acs(self, hal: AcsHal):
         self._acs_hal = hal
         

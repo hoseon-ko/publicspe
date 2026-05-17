@@ -16,7 +16,7 @@ import math
 from pathlib import Path
 import time
 
-from PyQt6.QtCore import QThread, QTimer, pyqtSlot
+from PyQt6.QtCore import QThread, pyqtSlot
 
 from core.logger import dev_logger
 from core.session.ownership import OWNER_DEEPALIGN
@@ -610,40 +610,40 @@ class CameraControllerMixin(CameraHubMixin):
                 return
         dev_logger.debug("[DeepAlign] adc apply ignored (hub camera disconnected)")
 
-    # ── 온도 폴링 ──────────────────────────────────────────────────────
+    # ── 온도 폴링 (Hub-side 집중 관리) ────────────────────────────────
+    # UI QTimer 대신 DeviceSessionHub.start_temp_polling()이 내부적으로 타이머를
+    # 소유하며, 결과를 camera_temperature_updated 시그널로 방출한다.
+    # UI는 해당 시그널만 구독하면 되므로 블로킹 위험이 없다.
 
     def _start_temp_polling(self):
-        if not hasattr(self, "_temp_timer"):
-            self._temp_timer = QTimer(self)
-            self._temp_timer.setInterval(3000)
-            self._temp_timer.timeout.connect(self._poll_temperature)
-        self._temp_timer.start()
+        if self._session_hub is None:
+            return
+        try:
+            self._session_hub.camera_temperature_updated.connect(
+                self._on_hub_temp_updated
+            )
+        except Exception:
+            pass
+        self._session_hub.start_temp_polling(interval_ms=3000)
 
     def _stop_temp_polling(self):
-        if hasattr(self, "_temp_timer"):
-            self._temp_timer.stop()
+        if self._session_hub is not None:
+            try:
+                self._session_hub.camera_temperature_updated.disconnect(
+                    self._on_hub_temp_updated
+                )
+            except Exception:
+                pass
+            self._session_hub.stop_temp_polling()
         self.lbl_temp_read.setText("Reading: —")
         self.lbl_temp_set.setText("Setpoint: —")
         self.lbl_temp_state.setText("Status: —")
 
-    @pyqtSlot()
-    def _poll_temperature(self):
-        if self._session_hub is None or not self._is_hub_camera_connected():
-            self._stop_temp_polling()
-            return
-        # snap/acquire 워커가 _camera_lock을 보유 중이면 건너뜀 (UI 블로킹 방지)
-        if self._acq.running or self._snap_in_progress:
-            return
-        try:
-            reading, setpoint, status = self._session_hub.camera_get_temperature(OWNER_DEEPALIGN)
-            
-            # None 처리를 위해 문자열 변환 시 fallback 적용
-            r_str = f"{float(reading):.2f}" if reading is not None else "—"
-            s_str = f"{float(setpoint):.2f}" if setpoint is not None else "—"
-            st_str = str(status) if status is not None else "—"
-
-            self.lbl_temp_read.setText(f"Reading: {r_str}")
-            self.lbl_temp_set.setText(f"Setpoint: {s_str}")
-            self.lbl_temp_state.setText(f"Status: {st_str}")
-        except Exception:
-            pass
+    @pyqtSlot(object, object, object)
+    def _on_hub_temp_updated(self, reading, setpoint, status):
+        r_str  = f"{float(reading):.2f}"  if reading  is not None else "—"
+        s_str  = f"{float(setpoint):.2f}" if setpoint is not None else "—"
+        st_str = str(status)              if status   is not None else "—"
+        self.lbl_temp_read.setText(f"Reading: {r_str}")
+        self.lbl_temp_set.setText(f"Setpoint: {s_str}")
+        self.lbl_temp_state.setText(f"Status: {st_str}")

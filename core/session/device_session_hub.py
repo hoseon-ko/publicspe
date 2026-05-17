@@ -35,6 +35,10 @@ class DeviceSessionHub(QObject):
     status_message  = pyqtSignal(str)
     frame_ready     = pyqtSignal(object, object)  # rgb, raw
 
+    # ── 집중 관리 폴링 시그널 ────────────────────────────────────────────
+    pico_positions_updated    = pyqtSignal(list)           # [p1, p2, p3, p4] (int)
+    camera_temperature_updated = pyqtSignal(object, object, object)  # reading, setpoint, status
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._state: SessionState = create_default_state()
@@ -47,6 +51,10 @@ class DeviceSessionHub(QObject):
         self._setup_motion_hub_bindings()
         self._last_frame = None
         self._camera_lock = RLock()  # 카메라 관련 작업 직렬화
+
+        # ── Hub-side 폴링 타이머 (UI QTimer 대신 Hub에서 단일 관리) ──────
+        self._pico_poll_timer: object | None = None   # QTimer (lazy import 방지)
+        self._temp_poll_timer: object | None = None
 
     # ──────────────────────────────────────────────────────────
     # 카메라 등록 / 스캔
@@ -736,6 +744,16 @@ class DeviceSessionHub(QObject):
             self.publish_error("acs", f"get_positions failed: {exc}", source="hub")
             raise
 
+    def acs_get_axis_states(self) -> list[dict]:
+        hal = self._require_acs_hal()
+        try:
+            if hasattr(hal, "get_axis_states"):
+                return hal.get_axis_states()
+            return []
+        except Exception as exc:
+            dev_logger.exception("[DeviceSessionHub] acs_get_axis_states failed")
+            return []
+
     # ──────────────────────────────────────────────────────────
     # KIMM 모션
     # ──────────────────────────────────────────────────────────
@@ -811,6 +829,7 @@ class DeviceSessionHub(QObject):
             raise
 
     def disconnect_pico(self) -> None:
+        self.stop_pico_polling()
         if self._pico_hal:
             try:
                 self._pico_hal.disconnect()
@@ -844,6 +863,72 @@ class DeviceSessionHub(QObject):
             )
             self.publish_error("pico", f"get_position failed: {exc}", source="hub")
             raise
+
+    def pico_zero(self, axis: int) -> None:
+        hal = self._require_pico_hal()
+        try:
+            hal.zero(int(axis))
+            self.publish_status(
+                f"Picomotor zero requested: axis={axis}", source="hub"
+            )
+        except Exception as exc:
+            dev_logger.exception(
+                f"[DeviceSessionHub] pico_zero failed axis={axis}"
+            )
+            self.publish_error("pico", f"zero failed: {exc}", source="hub")
+            raise
+
+    def pico_stop_all(self) -> None:
+        hal = self._require_pico_hal()
+        try:
+            hal.stop_all()
+            self.publish_status("Picomotor stop_all requested", source="hub")
+        except Exception as exc:
+            dev_logger.exception("[DeviceSessionHub] pico_stop_all failed")
+            self.publish_error("pico", f"stop_all failed: {exc}", source="hub")
+            raise
+
+    # ── Picomotor Hub-side 폴링 ─────────────────────────────────────────
+
+    def start_pico_polling(self, interval_ms: int = 500) -> None:
+        """Picomotor 위치 폴링을 Hub에서 시작한다. UI QTimer 대신 Hub가 단일 관리."""
+        from PyQt6.QtCore import QTimer
+        if self._pico_poll_timer is not None:
+            return
+        timer = QTimer(self)
+        timer.setInterval(int(interval_ms))
+        timer.timeout.connect(self._on_pico_poll_timeout)
+        timer.start()
+        self._pico_poll_timer = timer
+        dev_logger.info(f"[DeviceSessionHub] Pico polling started interval={interval_ms}ms")
+
+    def stop_pico_polling(self) -> None:
+        """Picomotor 위치 폴링을 Hub에서 중지한다."""
+        if self._pico_poll_timer is not None:
+            self._pico_poll_timer.stop()
+            self._pico_poll_timer = None
+            dev_logger.info("[DeviceSessionHub] Pico polling stopped")
+
+    def _on_pico_poll_timeout(self) -> None:
+        hal = self._pico_hal
+        if hal is None:
+            self.stop_pico_polling()
+            return
+        try:
+            positions = [hal.get_position(ax) for ax in range(1, 5)]
+            self.pico_positions_updated.emit(positions)
+        except Exception as exc:
+            dev_logger.warning(f"[DeviceSessionHub] pico_poll failed: {exc}")
+
+    # ── Connection Helpers ─────────────────────────────────────
+    def is_acs_connected(self) -> bool:
+        return self._acs_hal is not None
+
+    def is_kimm_connected(self) -> bool:
+        return self._kimm_hal is not None
+
+    def is_pico_connected(self) -> bool:
+        return self._pico_hal is not None
 
     # ──────────────────────────────────────────────────────────
     # MotionHub 접근
@@ -960,6 +1045,43 @@ class DeviceSessionHub(QObject):
     # ──────────────────────────────────────────────────────────
     # 내부 헬퍼
     # ──────────────────────────────────────────────────────────
+
+    # ── 카메라 온도 Hub-side 폴링 ───────────────────────────────────────
+
+    def start_temp_polling(self, interval_ms: int = 3000) -> None:
+        """카메라 온도 폴링을 Hub에서 시작한다. UI QTimer 대신 Hub가 단일 관리."""
+        from PyQt6.QtCore import QTimer
+        if self._temp_poll_timer is not None:
+            return
+        timer = QTimer(self)
+        timer.setInterval(int(interval_ms))
+        timer.timeout.connect(self._on_temp_poll_timeout)
+        timer.start()
+        self._temp_poll_timer = timer
+        dev_logger.info(f"[DeviceSessionHub] Temp polling started interval={interval_ms}ms")
+
+    def stop_temp_polling(self) -> None:
+        """카메라 온도 폴링을 Hub에서 중지한다."""
+        if self._temp_poll_timer is not None:
+            self._temp_poll_timer.stop()
+            self._temp_poll_timer = None
+            dev_logger.info("[DeviceSessionHub] Temp polling stopped")
+
+    def _on_temp_poll_timeout(self) -> None:
+        with self._camera_lock:
+            hal = self._camera_hal
+            if hal is None or not hal.is_connected():
+                self.stop_temp_polling()
+                return
+            # snap/acquire 중에는 락 경합 회피를 위해 건너뜀
+            if not hasattr(hal, "get_temperature"):
+                return
+        try:
+            with self._camera_lock:
+                reading, setpoint, status = hal.get_temperature()
+            self.camera_temperature_updated.emit(reading, setpoint, status)
+        except Exception as exc:
+            dev_logger.warning(f"[DeviceSessionHub] temp_poll failed: {exc}")
 
     def _setup_motion_hub_bindings(self) -> None:
         self._motion_hub.state_changed.connect(self._on_motion_state_changed)

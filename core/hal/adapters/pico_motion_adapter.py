@@ -72,6 +72,35 @@ class PicoMotionAdapter(PicoHal):
             dev_logger.exception(f"[PicoMotionAdapter] get_position failed axis={axis}")
             raise HalCommandError(f"Picomotor get_position failed: {exc}", cause=exc) from exc
 
+    def get_all_positions(self) -> list[int]:
+        ctrl = self._require_connected()
+        try:
+            return [int(p) for p in ctrl.get_all_positions()]
+        except Exception as exc:
+            dev_logger.exception("[PicoMotionAdapter] get_all_positions failed")
+            raise HalCommandError(f"Picomotor get_all_positions failed: {exc}", cause=exc) from exc
+
+    def zero(self, axis: int) -> None:
+        dev_logger.debug(f"[PicoMotionAdapter] zero requested axis={axis}")
+        ctrl = self._require_connected()
+        motor = self._to_motor_index(axis)
+        try:
+            ctrl.zero(motor)
+            dev_logger.debug(f"[PicoMotionAdapter] zero succeeded axis={axis}")
+        except Exception as exc:
+            dev_logger.exception(f"[PicoMotionAdapter] zero failed axis={axis}")
+            raise HalCommandError(f"Picomotor zero failed: {exc}", cause=exc) from exc
+
+    def stop_all(self) -> None:
+        dev_logger.debug("[PicoMotionAdapter] stop_all requested")
+        ctrl = self._require_connected()
+        try:
+            ctrl.stop_all()
+            dev_logger.debug("[PicoMotionAdapter] stop_all succeeded")
+        except Exception as exc:
+            dev_logger.exception("[PicoMotionAdapter] stop_all failed")
+            raise HalCommandError(f"Picomotor stop_all failed: {exc}", cause=exc) from exc
+
     def _require_connected(self) -> PicomotorController:
         if self._controller is None or not self._controller.is_connected:
             raise HalNotConnectedError("Picomotor is not connected")
