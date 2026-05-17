@@ -211,10 +211,11 @@ class KimmZCard(QFrame):
             port_str = self.edit_port.text().strip()
             port = int(port_str) if port_str else 5000
             try:
+                self.log_message.emit(f"KIMM Fine Stage: Connecting to {ip}:{port}...")
                 self._session_hub.kimm_connect(ip, port)
-                self.log_message.emit(f"KIMM Fine Stage Connected to {ip}:{port}")
+                self.log_message.emit(f"KIMM Fine Stage: Connected to {ip}:{port} successfully.")
             except Exception as e:
-                self.log_message.emit(f"KIMM Connection Failed: {e}")
+                self.log_message.emit(f"KIMM Fine Stage: Connection to {ip}:{port} failed: {e}")
 
     def _on_disconnect_clicked(self):
         if self._session_hub: self._session_hub.kimm_disconnect()

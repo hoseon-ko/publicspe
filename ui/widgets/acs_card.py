@@ -346,18 +346,33 @@ class AcsCard(QFrame):
         
         if self._session_hub:
             try:
+                if sim:
+                    self.log_message.emit("ACS Stage: Connecting to Simulator...")
+                else:
+                    self.log_message.emit(f"ACS Stage: Connecting to {ip}:{port}...")
                 self._session_hub.acs_connect(ip, port, sim)
+                if sim:
+                    self.log_message.emit("ACS Stage: Connected to Simulator successfully.")
+                else:
+                    self.log_message.emit(f"ACS Stage: Connected to {ip}:{port} successfully.")
             except Exception as e:
-                self.log_message.emit(f"ACS Connect (Hub) Failed: {e}")
+                target = "Simulator" if sim else f"{ip}:{port}"
+                self.log_message.emit(f"ACS Stage: Connection to {target} failed: {e}")
         else:
             ctrl = AcsStageController()
             try:
-                if sim: ctrl.connect_simulator()
-                else: ctrl.connect(ip, port)
+                if sim:
+                    self.log_message.emit("ACS Stage: Connecting to Simulator (Standalone)...")
+                    ctrl.connect_simulator()
+                else:
+                    self.log_message.emit(f"ACS Stage: Connecting to {ip}:{port} (Standalone)...")
+                    ctrl.connect(ip, port)
                 self.set_controller(ctrl)
-                self.log_message.emit("ACS Connected (Standalone)")
+                target = "Simulator" if sim else f"{ip}:{port}"
+                self.log_message.emit(f"ACS Stage: Connected to {target} (Standalone) successfully.")
             except Exception as e:
-                self.log_message.emit(f"ACS Connect Failed: {e}")
+                target = "Simulator" if sim else f"{ip}:{port}"
+                self.log_message.emit(f"ACS Stage: Connection to {target} (Standalone) failed: {e}")
 
     def update_status(self, connected, pos, states=None):
         if not connected:
