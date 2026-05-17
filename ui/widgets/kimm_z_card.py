@@ -171,13 +171,17 @@ class KimmZCard(QFrame):
         """내부 타이머에 의한 자체 폴링 (세션 허브가 직접 연결된 경우)"""
         if not self._session_hub: return
         try:
-            # HubV2 또는 SessionHub 대응
-            z = self._session_hub.kimm_get_z()
-            connected = True
+            connected = False
             if hasattr(self._session_hub, 'is_kimm_connected'):
-                connected = self._session_hub.is_kimm_connected()
+                connected = bool(self._session_hub.is_kimm_connected())
+            
+            if connected:
+                z = self._session_hub.kimm_get_z()
+            else:
+                z = None
             self.update_status(connected, z, False)
-        except: pass
+        except Exception as e:
+            self.update_status(False, None, False)
 
     def update_status(self, connected: bool, z: float | None, sim_mode: bool = False):
         """외부(MotionTab 등)에서 폴링된 데이터를 주입받아 UI 갱신"""
@@ -218,7 +222,15 @@ class KimmZCard(QFrame):
                 self.log_message.emit(f"KIMM Fine Stage: Connection to {ip}:{port} failed: {e}")
 
     def _on_disconnect_clicked(self):
-        if self._session_hub: self._session_hub.kimm_disconnect()
+        if self._session_hub:
+            try:
+                self.log_message.emit("KIMM Fine Stage: Disconnecting...")
+                self._session_hub.kimm_disconnect()
+                self.log_message.emit("KIMM Fine Stage: Disconnected successfully.")
+                self.update_status(False, None, False)
+            except Exception as e:
+                self.log_message.emit(f"KIMM Fine Stage: Disconnect failed: {e}")
+                self.update_status(False, None, False)
 
     def _on_jog_clicked(self, delta: float):
         if self._session_hub:
