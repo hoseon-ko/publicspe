@@ -930,6 +930,32 @@ class DeviceSessionHub(QObject):
     def is_pico_connected(self) -> bool:
         return self._pico_hal is not None
 
+    # ── Compatibility Aliases (UI 호출 명칭 호환 레이어) ──────────────────
+    def acs_connect(self, ip: str, port: int, sim: bool = False) -> None:
+        if sim:
+            self.connect_acs_simulator()
+        else:
+            self.connect_acs(ip, port)
+
+    def acs_disconnect(self) -> None:
+        self.disconnect_acs()
+
+    def kimm_connect(self, ip: str, port: int = 5000) -> None:
+        self.connect_kimm(ip, port)
+
+    def kimm_disconnect(self) -> None:
+        self.disconnect_kimm()
+
+    def kimm_stop(self) -> None:
+        self.publish_status("KIMM Z-stage stop requested (best-effort)", source="hub")
+        dev_logger.info("[DeviceSessionHub] kimm_stop called (no-op by protocol)")
+
+    def pico_connect(self, *args, **kwargs) -> None:
+        self.connect_pico(*args, **kwargs)
+
+    def pico_disconnect(self) -> None:
+        self.disconnect_pico()
+
     # ──────────────────────────────────────────────────────────
     # MotionHub 접근
     # ──────────────────────────────────────────────────────────
