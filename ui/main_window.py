@@ -64,6 +64,9 @@ class MainWindow(QMainWindow):
         self._restore_settings()
         self._setup_shortcuts()
 
+        # 시작 0.5초 후 백그라운드 장비 자동 연동 수행 (예외 안전)
+        QTimer.singleShot(500, self._auto_connect_startup)
+
     def _setup_shortcuts(self):
         # UI 디버깅용 스크린샷 덤프 (Ctrl+Alt+S)
         self.sc_dump = QShortcut(QKeySequence("Ctrl+Alt+S"), self)
@@ -579,4 +582,66 @@ class MainWindow(QMainWindow):
             
         self.save_all_settings()
         super().closeEvent(event)
+
+    def _auto_connect_startup(self):
+        """프로그램 실행 0.5초 후 백그라운드에서 모든 하드웨어 연결 자동 시도 (예외 안전)"""
+        import threading
+        
+        def worker():
+            app_logger.info("[Auto-Connect] 백그라운드 자동 장비 연결 시퀀스 가동...")
+            
+            # 1. Picomotor 자동 연결
+            try:
+                app_logger.info("[Auto-Connect] Picomotor 연결 시도...")
+                self.session_hub.connect_pico()
+                self.session_hub.start_pico_polling()
+                app_logger.info("[Auto-Connect] Picomotor 연결 성공.")
+            except Exception as e:
+                app_logger.warning(f"[Auto-Connect] Picomotor 연결 스킵 (점유 또는 장치 없음): {e}")
+
+            # 2. KIMM Z-Stage 자동 연결
+            try:
+                kimm_settings = QSettings("SpeAnalyze", "MainWindow")
+                ip = kimm_settings.value("kimm/ip", "192.168.1.100")
+                port_val = kimm_settings.value("kimm/port", "5000")
+                port = int(port_val) if port_val else 5000
+                app_logger.info(f"[Auto-Connect] KIMM Z-Stage 연결 시도 ({ip}:{port})...")
+                self.session_hub.kimm_connect(ip, port)
+                app_logger.info("[Auto-Connect] KIMM Z-Stage 연결 성공.")
+            except Exception as e:
+                app_logger.warning(f"[Auto-Connect] KIMM Z-Stage 연결 스킵 (타임아웃 또는 점유): {e}")
+
+            # 3. ACS Stage 자동 연결
+            try:
+                acs_settings = QSettings("SpeAnalyze", "MainWindow")
+                ip = acs_settings.value("acs/ip", "10.0.0.100")
+                port_val = acs_settings.value("acs/port", "700")
+                port = int(port_val) if port_val else 700
+                sim_val = acs_settings.value("acs/sim", False)
+                sim = str(sim_val).lower() == 'true' or sim_val is True
+                app_logger.info(f"[Auto-Connect] ACS Stage 연결 시도 ({ip}:{port}, sim={sim})...")
+                self.session_hub.acs_connect(ip, port, sim)
+                app_logger.info("[Auto-Connect] ACS Stage 연결 성공.")
+            except Exception as e:
+                app_logger.warning(f"[Auto-Connect] ACS Stage 연결 스킵 (타임아웃 또는 점유): {e}")
+
+            # 4. 카메라 자동 연결 트리거 (GUI 스레드에서 수행하도록 QTimer 사용)
+            QTimer.singleShot(0, self._auto_connect_camera_on_gui)
+
+        t = threading.Thread(target=worker, daemon=True, name="StartupAutoConnect")
+        t.start()
+
+    def _auto_connect_camera_on_gui(self):
+        """메인 GUI 스레드에서 안전하게 카메라 자동 연결 수행"""
+        try:
+            # 1. 카메라 스캔 수행
+            self.live_tab._scan_cameras()
+            # 2. 리스트에 발견된 장비가 있으면 첫 번째 장비 자동 연결 시도
+            if self.live_tab.camera_panel.camera_list.count() > 0:
+                app_logger.info("[Auto-Connect] 발견된 카메라 자동 연결 시도...")
+                self.live_tab._connect_camera(0)
+            else:
+                app_logger.info("[Auto-Connect] 감지된 카메라 장비가 없어 카메라 연결을 건너뜁니다.")
+        except Exception as e:
+            app_logger.warning(f"[Auto-Connect] 카메라 자동 연결 실패: {e}")
 
