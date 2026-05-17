@@ -109,7 +109,8 @@ class LayoutBuilderMixin:
         if hasattr(self, "master_btn_stack"):
             self.master_btn_stack.setCurrentIndex(min(idx, self.master_btn_stack.count() - 1))
 
-    def _wrap_panel(self, panel: QWidget) -> QWidget:
+    def _wrap_panel(self, panel: QWidget, extras: list[QWidget] | None = None) -> QWidget:
+        """패널을 스크롤 영역에 감싼다. extras가 있으면 패널 아래에 순서대로 추가."""
         page = QWidget()
         lay = QVBoxLayout(page)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -122,13 +123,16 @@ class LayoutBuilderMixin:
         c_lay = QVBoxLayout(container)
         c_lay.setContentsMargins(0, 0, 0, 0)
         c_lay.addWidget(panel)
+        if extras:
+            for w in extras:
+                c_lay.addWidget(w)
 
         scroll.setWidget(container)
         lay.addWidget(scroll)
         return page
 
     def _create_align_page(self) -> QWidget:
-        """Align 탭 페이지 — AcsStagePanel + Kinematic Calc 섹션."""
+        """Align 탭 페이지 — AcsStagePanel + AcsScanWidget + Kinematic Calc 섹션."""
         page = QWidget()
         lay = QVBoxLayout(page)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -141,6 +145,7 @@ class LayoutBuilderMixin:
         c_lay = QVBoxLayout(container)
         c_lay.setContentsMargins(0, 0, 0, 0)
         c_lay.addWidget(self.align_panel)
+        c_lay.addWidget(self.acs_scan)              # 분리된 스캔 위젯
         c_lay.addWidget(self._create_kinem_calc_section())
 
         scroll.setWidget(container)

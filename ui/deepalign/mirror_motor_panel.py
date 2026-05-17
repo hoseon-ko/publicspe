@@ -210,9 +210,6 @@ class MirrorMotorPanel(QWidget):
     disconnected      = pyqtSignal()
     positions_updated = pyqtSignal(list)
     log_message       = pyqtSignal(str)
-    # SCAN — list[(motor_1based, target_steps_abs)], settle_ms, avg_frames
-    scan_requested    = pyqtSignal(list, int, int)
-    scan_stop_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -322,102 +319,7 @@ class MirrorMotorPanel(QWidget):
             _fix_h(b, 30)
             btn_row2.addWidget(b)
         root.addLayout(btn_row2)
-
-        # ── 5. SCAN ──────────────────────────────────────────────────────────
-        self._build_scan_section(root)
-
         root.addStretch(1)
-
-    # ── SCAN UI ───────────────────────────────────────────────────────────────
-
-    def _build_scan_section(self, root: QVBoxLayout) -> None:
-        scan_sec = _section_box("SCAN (M1 sweep)", C_ACCENT)
-        sl = scan_sec.content_layout()
-        sl.setSpacing(4)
-        sl.setContentsMargins(6, 6, 6, 6)
-
-        # 파라미터: motor / N steps / step delta / settle / avg
-        grid = QGridLayout()
-        grid.setSpacing(4)
-
-        def _lbl(t: str) -> QLabel:
-            l = QLabel(t)
-            l.setStyleSheet(lbl(C_TEXT_DIM, mono=True))
-            return l
-
-        def _spin(lo: int, hi: int, val: int) -> QSpinBox:
-            s = QSpinBox()
-            s.setRange(lo, hi)
-            s.setValue(val)
-            s.setStyleSheet(_SPIN_STYLE)
-            return s
-
-        self.scan_spin_motor   = _spin(1, 4, 1)
-        self.scan_spin_n       = _spin(2, 999, 5)
-        self.scan_spin_delta   = _spin(-100000, 100000, 100)
-        self.scan_spin_settle  = _spin(0, 10000, 200)
-        self.scan_spin_avg     = _spin(1, 32, 1)
-
-        grid.addWidget(_lbl("Motor"),     0, 0); grid.addWidget(self.scan_spin_motor,  0, 1)
-        grid.addWidget(_lbl("N points"),  0, 2); grid.addWidget(self.scan_spin_n,      0, 3)
-        grid.addWidget(_lbl("Δ steps"),   1, 0); grid.addWidget(self.scan_spin_delta,  1, 1)
-        grid.addWidget(_lbl("Settle ms"), 1, 2); grid.addWidget(self.scan_spin_settle, 1, 3)
-        grid.addWidget(_lbl("Avg frames"),2, 0); grid.addWidget(self.scan_spin_avg,    2, 1)
-        sl.addLayout(grid)
-
-        # Start/Stop + 상태
-        btn_row = QHBoxLayout()
-        self.btn_scan_start = QPushButton("SCAN START")
-        self.btn_scan_stop  = QPushButton("SCAN STOP")
-        self.btn_scan_start.setStyleSheet(BTN_SMALL)
-        self.btn_scan_stop.setStyleSheet(BTN_SMALL.replace(C_ACCENT, C_DANGER))
-        _fix_h(self.btn_scan_start, 30)
-        _fix_h(self.btn_scan_stop,  30)
-        self.btn_scan_stop.setEnabled(False)
-        self.btn_scan_start.clicked.connect(self._on_scan_start)
-        self.btn_scan_stop.clicked.connect(self._on_scan_stop)
-        btn_row.addWidget(self.btn_scan_start)
-        btn_row.addWidget(self.btn_scan_stop)
-        sl.addLayout(btn_row)
-
-        self.lbl_scan_status = QLabel("idle")
-        self.lbl_scan_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_scan_status.setStyleSheet(lbl(C_TEXT_DIM, mono=True))
-        _fix_h(self.lbl_scan_status, 22)
-        sl.addWidget(self.lbl_scan_status)
-
-        root.addWidget(scan_sec)
-
-    def _on_scan_start(self) -> None:
-        motor = int(self.scan_spin_motor.value())
-        n     = int(self.scan_spin_n.value())
-        delta = int(self.scan_spin_delta.value())
-
-        cur = self._ctrl.get_position(motor) if self._ctrl is not None else None
-        if cur is None:
-            self.lbl_scan_status.setText("❌ 위치 조회 실패 (연결?)")
-            self.lbl_scan_status.setStyleSheet(lbl(C_DANGER, mono=True))
-            return
-
-        points = [(motor, int(cur) + delta * i) for i in range(n)]
-        self.scan_requested.emit(
-            points,
-            int(self.scan_spin_settle.value()),
-            int(self.scan_spin_avg.value()),
-        )
-
-    def _on_scan_stop(self) -> None:
-        self.scan_stop_requested.emit()
-
-    def set_scan_status(self, msg: str, kind: str = "info") -> None:
-        """외부(main_tab)에서 스캔 상태 갱신용."""
-        color_map = {"info": C_TEXT_DIM, "ok": C_ACCENT, "warn": C_WARN, "err": C_DANGER}
-        self.lbl_scan_status.setText(msg)
-        self.lbl_scan_status.setStyleSheet(lbl(color_map.get(kind, C_TEXT_DIM), mono=True))
-
-    def set_scan_running(self, running: bool) -> None:
-        self.btn_scan_start.setEnabled(not running)
-        self.btn_scan_stop.setEnabled(running)
 
     # ── 연결 상태 UI 적용 ─────────────────────────────────────────────────────
 
