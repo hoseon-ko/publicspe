@@ -372,11 +372,17 @@ class AcsStagePanel(QWidget):
 
         root.addStretch()
 
+    # ── 키네마틱 스캔 — DOF(Tx/Ty/Tz/Rx/Ry/Rz) sweep 후 KinematicCalc로
+    #    6모터 cal_pos 사전 변환 + 인터락 검증. 워커는 검증된 cal_pos만 받음.
+
+    _SCAN_DOF_LABELS = ["Tx", "Ty", "Tz", "Rx", "Ry", "Rz"]
+    _SCAN_DOF_UNITS  = [" mm", " mm", " mm", " mrad", " mrad", " mrad"]
+    _SCAN_DOF_DECIMALS = [4, 4, 4, 3, 3, 3]
+
     def _build_scan_group(self, lay: QVBoxLayout) -> None:
         lay.setContentsMargins(4, 4, 4, 4)
         lay.setSpacing(4)
 
-        # 축 선택 + N points + delta + settle + avg
         grid = QGridLayout()
         grid.setSpacing(4)
 
@@ -385,20 +391,25 @@ class AcsStagePanel(QWidget):
             x.setStyleSheet(lbl(C_TEXT_DIM, size="11px", mono=True))
             return x
 
-        self.scan_cb_axis = QComboBox()
-        # ACS 축 명: Y1/Z1/X1/Z2/Y2/Z3 (인덱스 0..5)
-        for i, name in enumerate(["Y1", "Z1", "X1", "Z2", "Y2", "Z3"]):
-            self.scan_cb_axis.addItem(f"{i}: {name}", i)
-        self.scan_cb_axis.setStyleSheet(EDIT_STYLE)
+        # DOF 축 선택 (Tx/Ty/Tz/Rx/Ry/Rz)
+        self.scan_cb_dof = QComboBox()
+        for i, name in enumerate(self._SCAN_DOF_LABELS):
+            self.scan_cb_dof.addItem(name, i)
+        self.scan_cb_dof.setStyleSheet(EDIT_STYLE)
+        self.scan_cb_dof.currentIndexChanged.connect(self._on_scan_dof_changed)
+
+        # Start / End / N
+        self.scan_spin_start = QDoubleSpinBox()
+        self.scan_spin_start.setRange(-500.0, 500.0); self.scan_spin_start.setValue(-0.1)
+        self.scan_spin_start.setStyleSheet(_spin_style())
+
+        self.scan_spin_end = QDoubleSpinBox()
+        self.scan_spin_end.setRange(-500.0, 500.0); self.scan_spin_end.setValue(0.1)
+        self.scan_spin_end.setStyleSheet(_spin_style())
 
         self.scan_spin_n = QSpinBox()
         self.scan_spin_n.setRange(2, 999); self.scan_spin_n.setValue(5)
         self.scan_spin_n.setStyleSheet(_spin_style())
-
-        self.scan_spin_delta = QDoubleSpinBox()
-        self.scan_spin_delta.setRange(-50.0, 50.0); self.scan_spin_delta.setDecimals(4)
-        self.scan_spin_delta.setSingleStep(0.1); self.scan_spin_delta.setValue(0.1)
-        self.scan_spin_delta.setStyleSheet(_spin_style())
 
         self.scan_spin_settle = QSpinBox()
         self.scan_spin_settle.setRange(0, 10000); self.scan_spin_settle.setValue(500)
@@ -408,12 +419,21 @@ class AcsStagePanel(QWidget):
         self.scan_spin_avg.setRange(1, 32); self.scan_spin_avg.setValue(1)
         self.scan_spin_avg.setStyleSheet(_spin_style())
 
-        grid.addWidget(_l("Axis"),       0, 0); grid.addWidget(self.scan_cb_axis,    0, 1)
+        grid.addWidget(_l("DOF"),        0, 0); grid.addWidget(self.scan_cb_dof,     0, 1)
         grid.addWidget(_l("N points"),   0, 2); grid.addWidget(self.scan_spin_n,     0, 3)
-        grid.addWidget(_l("Δ (mm/rad)"), 1, 0); grid.addWidget(self.scan_spin_delta, 1, 1)
-        grid.addWidget(_l("Settle ms"),  1, 2); grid.addWidget(self.scan_spin_settle,1, 3)
-        grid.addWidget(_l("Avg frames"), 2, 0); grid.addWidget(self.scan_spin_avg,   2, 1)
+        grid.addWidget(_l("Start"),      1, 0); grid.addWidget(self.scan_spin_start, 1, 1)
+        grid.addWidget(_l("End"),        1, 2); grid.addWidget(self.scan_spin_end,   1, 3)
+        grid.addWidget(_l("Settle ms"),  2, 0); grid.addWidget(self.scan_spin_settle,2, 1)
+        grid.addWidget(_l("Avg frames"), 2, 2); grid.addWidget(self.scan_spin_avg,   2, 3)
         lay.addLayout(grid)
+
+        # 안내 라벨: baseline DOF 출처
+        self.lbl_scan_hint = QLabel(
+            "※ 다른 5 DOF는 위 KINEMATIC MOVE 입력칸의 현재 값을 baseline으로 사용"
+        )
+        self.lbl_scan_hint.setWordWrap(True)
+        self.lbl_scan_hint.setStyleSheet(lbl(C_TEXT_DIM, size="10px"))
+        lay.addWidget(self.lbl_scan_hint)
 
         # Start/Stop
         row = QHBoxLayout()
@@ -433,26 +453,87 @@ class AcsStagePanel(QWidget):
         self.lbl_scan_status.setStyleSheet(lbl(C_TEXT_DIM, mono=True))
         lay.addWidget(self.lbl_scan_status)
 
+        # 초기 단위/decimals 동기화
+        self._on_scan_dof_changed(0)
+
+    def _on_scan_dof_changed(self, idx: int) -> None:
+        """DOF 변경시 start/end spinbox 단위·decimals 갱신."""
+        if not (0 <= idx < 6):
+            return
+        unit = self._SCAN_DOF_UNITS[idx]
+        decs = self._SCAN_DOF_DECIMALS[idx]
+        for sp in (self.scan_spin_start, self.scan_spin_end):
+            sp.setSuffix(unit)
+            sp.setDecimals(decs)
+            sp.setSingleStep(0.01 if decs >= 3 else 0.1)
+
     def _on_scan_start(self) -> None:
         ctrl = self._ctrl_ref[0]
-        if ctrl is None:
+        is_dry = self.check_dry.isChecked()
+        if ctrl is None and not is_dry:
             self.lbl_scan_status.setText("❌ ACS not connected")
             self.lbl_scan_status.setStyleSheet(lbl(C_DANGER, mono=True))
             return
-        axis = int(self.scan_cb_axis.currentData())
-        n = int(self.scan_spin_n.value())
-        delta = float(self.scan_spin_delta.value())
 
-        # 현재 6축 위치 baseline
-        base = np.array([ctrl.get_position(i) for i in range(6)], dtype=float)
-        points: list[np.ndarray] = []
-        for i in range(n):
-            pt = base.copy()
-            pt[axis] = base[axis] + delta * i
-            points.append(pt)
+        dof_idx = int(self.scan_cb_dof.currentData())
+        n       = int(self.scan_spin_n.value())
+        start   = float(self.scan_spin_start.value())
+        end     = float(self.scan_spin_end.value())
+
+        # ── baseline 6 DOF: KINEMATIC MOVE 섹션의 현재 입력값 (Tx Ty Tz Rx Ry Rz)
+        base_dof = [float(s.value()) for s in self._dof_spins]
+        sweep    = np.linspace(start, end, n)
+
+        # ── 각 sweep 포인트마다 DOF 6값 구성 → calc.calculate → cal_pos (6모터)
+        cal_pos_list: list[np.ndarray] = []
+        violations_per_pt: list[tuple[int, float, list[str]]] = []
+        for i, v in enumerate(sweep, 1):
+            dof = base_dof.copy()
+            dof[dof_idx] = float(v)
+            trans  = dof[:3]                              # mm
+            rotate = dof[3:]                              # mrad
+            cal, _ball, ok, vio = self._calc.calculate(trans, rotate)
+            if cal is None:
+                self.lbl_scan_status.setText(f"❌ 변환 실패 (idx={i}): {vio[0] if vio else '?'}")
+                self.lbl_scan_status.setStyleSheet(lbl(C_DANGER, mono=True))
+                return
+            if not ok:
+                violations_per_pt.append((i, float(v), vio))
+                continue
+            cal_pos_list.append(cal)
+
+        # ── 인터락 위반점이 있으면 중단 (kin_result에 상세 로그)
+        if violations_per_pt:
+            self.kin_result.setPlainText(
+                f"❌ 인터락 위반 — {len(violations_per_pt)}/{n} 점 위반\n"
+                + "\n".join(
+                    f"  idx={i:>3}  {self._SCAN_DOF_LABELS[dof_idx]}={v:+.4f}: {vio[0]}"
+                    for i, v, vio in violations_per_pt[:10]
+                )
+                + ("\n  ..." if len(violations_per_pt) > 10 else "")
+                + "\n\n→ 범위/스텝을 줄여 다시 시도하세요."
+            )
+            self.lbl_scan_status.setText(
+                f"❌ 인터락 위반 {len(violations_per_pt)}/{n}점 — 중단"
+            )
+            self.lbl_scan_status.setStyleSheet(lbl(C_DANGER, mono=True))
+            return
+
+        # ── 검증 통과: kin_result에 미리보기
+        label = self._SCAN_DOF_LABELS[dof_idx]
+        unit  = self._SCAN_DOF_UNITS[dof_idx].strip()
+        preview = [f"✓ 키네마틱 스캔 준비: {label} {start:+.4f} → {end:+.4f} {unit}, N={n}"]
+        preview.append(f"  baseline DOF: " + ", ".join(
+            f"{n_}={v:+.4f}" for n_, v in zip(self._SCAN_DOF_LABELS, base_dof)
+        ))
+        preview.append(f"  CalPos 첫/끝 점 (Y1 Z1 X1 Z2 Y2 Z3):")
+        preview.append(f"    [0]   " + " ".join(f"{x:+.4f}" for x in cal_pos_list[0]))
+        if len(cal_pos_list) > 1:
+            preview.append(f"    [{len(cal_pos_list)-1}]   " + " ".join(f"{x:+.4f}" for x in cal_pos_list[-1]))
+        self.kin_result.setPlainText("\n".join(preview))
 
         self.scan_requested.emit(
-            points,
+            cal_pos_list,
             int(self.scan_spin_settle.value()),
             int(self.scan_spin_avg.value()),
         )
