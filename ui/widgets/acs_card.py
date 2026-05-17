@@ -427,6 +427,7 @@ class AcsCard(QFrame):
     def _on_session_event(self, event):
         from core.session.session_events import SessionEventType
         if event.event_type == SessionEventType.ACS_CONNECTED:
+            self._load_settings()  # 실시간 타 탭 입력 동기화
             ctrl = getattr(self._session_hub, "acs_controller", None)
             if ctrl: self.set_controller(ctrl)
         elif event.event_type == SessionEventType.ACS_DISCONNECTED:

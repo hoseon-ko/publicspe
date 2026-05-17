@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, 
     QPushButton, QFrame, QDoubleSpinBox, QLineEdit, QSizePolicy
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QSettings
 from theme.styles import (
     C_ACCENT, C_DANGER, C_WARN, C_BORDER, C_TEXT, C_TEXT_DIM,
     Fonts, BTN_SMALL, SPIN_STYLE, EDIT_STYLE, lbl
@@ -23,6 +23,7 @@ class KimmZCard(QFrame):
         super().__init__(parent)
         self._session_hub = None
         self._jog_btns: list[QPushButton] = []
+        self._settings = QSettings("SpeAnalyze", "MainWindow")
         self.setObjectName("motionCard")
         
         # 스타일 적용 (MotionTab과 동일)
@@ -44,6 +45,7 @@ class KimmZCard(QFrame):
         self._poll_timer.timeout.connect(self._refresh_status)
         
         self._build_ui()
+        self._load_settings()
 
     def _section_box(self, title: str, accent: str) -> CollapsibleSection:
         return CollapsibleSection(title, accent=accent)
@@ -179,6 +181,7 @@ class KimmZCard(QFrame):
     def _on_session_event(self, event):
         from core.session.session_events import SessionEventType
         if event.event_type == SessionEventType.KIMM_CONNECTED:
+            self._load_settings()  # 실시간 타 탭 입력 동기화
             self._refresh_status()
         elif event.event_type == SessionEventType.KIMM_DISCONNECTED:
             self.update_status(False, None, False)
@@ -227,6 +230,7 @@ class KimmZCard(QFrame):
 
     def _on_connect_clicked(self):
         if self._session_hub:
+            self._save_settings()  # 연결 성공 기록용 저장
             ip = self.edit_ip.text().strip()
             port_str = self.edit_port.text().strip()
             port = int(port_str) if port_str else 5000
@@ -255,5 +259,13 @@ class KimmZCard(QFrame):
 
     def _on_go_clicked(self):
         if self._session_hub: self._session_hub.kimm_move_to_z(self.spin_abs.value())
+
+    def _save_settings(self):
+        self._settings.setValue("kimm/ip", self.edit_ip.text().strip())
+        self._settings.setValue("kimm/port", self.edit_port.text().strip())
+
+    def _load_settings(self):
+        self.edit_ip.setText(self._settings.value("kimm/ip", "192.168.1.100"))
+        self.edit_port.setText(self._settings.value("kimm/port", "5000"))
 
 
