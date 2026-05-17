@@ -131,11 +131,12 @@ class AcsWorker(QObject):
 
         # 2. 폴링 타이머 시작
         try:
+            self._is_polling = True
+            self._poll() # 동기식 초기 1회 폴링 강제 실행 (GUI 스레드 대기 해제용)
             self._timer = QTimer()
             self._timer.timeout.connect(self._poll)
             self._timer.setInterval(200)
             self._timer.start()
-            self._is_polling = True
             log.info("[ACS Worker] Polling timer started")
         except Exception as e:
             log.error(f"[ACS Worker] Timer start failed: {e}")
@@ -313,6 +314,10 @@ class AcsStageController(QObject):
         self._last_positions = [0.0] * 6
         self._last_states    = [{"enabled": False, "moving": False, "in_pos": False}] * 6
         
+        # 동기식 초기 연결 대기용 플래그
+        self._first_poll_done = False
+        self._connection_failed = False
+        
         # 소프트 리밋 초기화
         from core.motor.kinematic_calc import DEFAULT_PLUS_LIMITS, DEFAULT_MINUS_LIMITS
         self.plus_limits = DEFAULT_PLUS_LIMITS.copy()
@@ -368,9 +373,13 @@ class AcsStageController(QObject):
     # 상태 조회 (캐시 데이터 사용 - 하드웨어 직접 접근 금지)
     def _update_positions(self, positions):
         self._last_positions = positions
+        self._first_poll_done = True
 
     def _update_states(self, states):
         self._last_states = states
+
+    def _on_worker_connection_lost(self):
+        self._connection_failed = True
 
     def get_position(self, axis: int) -> float:
         if 0 <= axis < 6:
@@ -431,6 +440,9 @@ class AcsStageController(QObject):
         if self._thread and self._thread.isRunning():
             return
 
+        self._first_poll_done = False
+        self._connection_failed = False
+
         self._thread = QThread()
         self._worker = AcsWorker()
         self._worker.set_connection_params(*self._conn_info)
@@ -446,6 +458,7 @@ class AcsStageController(QObject):
         self._worker.states_updated.connect(self._update_states)
         self._worker.positions_updated.connect(self.positions_updated.emit)
         self._worker.states_updated.connect(self.states_updated.emit)
+        self._worker.connection_lost.connect(self._on_worker_connection_lost)
         self._worker.connection_lost.connect(self.connection_lost.emit)
 
         # 컨트롤러 -> 워커 (명령 다운스트림)
@@ -458,6 +471,21 @@ class AcsStageController(QObject):
         self._cmd_stop_all.connect(self._worker.stop_all,           _QC)
 
         self._thread.start()
+
+        # GUI 스레드 블로킹 대기 (첫 폴링 완료 또는 연결 실패 시까지 최대 3초)
+        from PyQt6.QtWidgets import QApplication
+        import time
+        start_t = time.time()
+        while not self._first_poll_done and not self._connection_failed and (time.time() - start_t) < 3.0:
+            QApplication.processEvents()
+            time.sleep(0.01)
+
+        if self._connection_failed:
+            self.stop_polling()
+            raise RuntimeError("ACS hardware connection failed (preflight or setup error)")
+        if not self._first_poll_done:
+            self.stop_polling()
+            raise RuntimeError("ACS hardware connection timed out waiting for first poll")
 
     def stop_polling(self):
         if self._thread and self._thread.isRunning():

@@ -316,6 +316,8 @@ class AcsCard(QFrame):
         lay.addStretch()
 
         # Connect
+        self.edit_ip.textChanged.connect(self._save_settings)
+        self.edit_port.textChanged.connect(self._save_settings)
         self.check_sim.stateChanged.connect(self._save_settings)
         self.check_dry.stateChanged.connect(self._save_settings)
         self.spin_settle.valueChanged.connect(self._save_settings)
@@ -463,19 +465,17 @@ class AcsCard(QFrame):
         for i, row in enumerate(self._axis_rows):
             if i < len(pos) and pos[i] is not None: row.update_position(pos[i])
         
-        if all(p is not None for p in pos[:6]) and not self._is_fwd_calculating:
-            self._is_fwd_calculating = True
-            def run():
-                try:
-                    res = self._calc.calculate_forward(np.array(pos[:6]))
-                    if res is not None:
-                        self._last_actual_dof = res
-                        dofs = ["Rx", "Ry", "Rz", "Tx", "Ty", "Tz"]
-                        for i, dof in enumerate(dofs):
-                            val = res[i] * 1000 if i < 3 else res[i]
-                            self._lbl_cur_dof[dof].setText(f"{val:+.4f}")
-                finally: self._is_fwd_calculating = False
-            threading.Thread(target=run, daemon=True).start()
+        if all(p is not None for p in pos[:6]):
+            try:
+                res = self._calc.calculate_forward(np.array(pos[:6]))
+                if res is not None:
+                    self._last_actual_dof = res
+                    dofs = ["Rx", "Ry", "Rz", "Tx", "Ty", "Tz"]
+                    for i, dof in enumerate(dofs):
+                        val = res[i] * 1000 if i < 3 else res[i]
+                        self._lbl_cur_dof[dof].setText(f"{val:+.4f}")
+            except Exception as e:
+                dev_logger.error(f"[AcsCard] Forward Kinematics calculation error: {e}")
 
     def _on_states(self, states):
         if not states: return

@@ -681,51 +681,78 @@ class AcsStagePanel(QWidget):
             return
  
         self._save_settings()
-        ctrl = AcsStageController()
-        ctrl.dry_run = self.check_dry.isChecked()
- 
-        try:
-            if use_sim:
-                self._log("[ACS] 시뮬레이터 연결 시도...")
-                ctrl.connect_simulator()
-            else:
+        
+        if self._session_hub:
+            try:
                 try:
                     port = int(port_str)
                 except ValueError:
                     self._log("[ACS] Port는 정수여야 합니다")
                     return
-                self._log(f"[ACS] 연결 시도 → {ip}:{port}")
-                ctrl.connect(ip, port)
+                if use_sim:
+                    self._log("[ACS] 시뮬레이터 연결 시도 (SessionHub)...")
+                else:
+                    self._log(f"[ACS] 연결 시도 → {ip}:{port} (SessionHub)...")
+                
+                self._session_hub.acs_connect(ip, port, use_sim)
+                # SessionHub가 이벤트를 발생시키면 _on_session_event -> set_controller가 호출되어 UI가 갱신됩니다.
+            except Exception as e:
+                err_str = str(e)
+                if "No module named 'clr'" in err_str:
+                    err_str = "pythonnet 미설치 (pip install pythonnet)"
+                self._log(f"[ACS] 연결 실패 — {err_str}")
+        else:
+            ctrl = AcsStageController()
+            ctrl.dry_run = self.check_dry.isChecked()
  
-            self._ctrl_ref[0] = ctrl
-            label = "SIMULATOR" if use_sim else f"{ip}:{port_str}"
-            self.lbl_status.setText(f"● CONNECTED  [{label}]")
-            self.lbl_status.setStyleSheet(lbl(C_ACCENT, mono=True, bold=True))
-            self.btn_connect.setEnabled(False)
-            self.btn_disconnect.setEnabled(True)
-            self.edit_ip.setEnabled(False)
-            self.edit_port.setEnabled(False)
-            self.check_sim.setEnabled(False)
-            for b in self._move_btns:
-                b.setEnabled(True)
-            self.acs_connected.emit(ctrl)
-            ctrl.start_polling(self._on_positions, self._on_states, self._on_lost)
-            self._log(f"[ACS] 연결 성공 ({'시뮬레이터' if use_sim else label})")
-        except Exception as e:
-            err_str = str(e)
-            if "No module named 'clr'" in err_str:
-                err_str = "pythonnet 미설치 (pip install pythonnet)"
-            self._log(f"[ACS] 연결 실패 — {err_str}")
-            self._ctrl_ref[0] = None
+            try:
+                if use_sim:
+                    self._log("[ACS] 시뮬레이터 연결 시도 (Standalone)...")
+                    ctrl.connect_simulator()
+                else:
+                    try:
+                        port = int(port_str)
+                    except ValueError:
+                        self._log("[ACS] Port는 정수여야 합니다")
+                        return
+                    self._log(f"[ACS] 연결 시도 → {ip}:{port} (Standalone)")
+                    ctrl.connect(ip, port)
+ 
+                self._ctrl_ref[0] = ctrl
+                label = "SIMULATOR" if use_sim else f"{ip}:{port_str}"
+                self.lbl_status.setText(f"● CONNECTED  [{label}]")
+                self.lbl_status.setStyleSheet(lbl(C_ACCENT, mono=True, bold=True))
+                self.btn_connect.setEnabled(False)
+                self.btn_disconnect.setEnabled(True)
+                self.edit_ip.setEnabled(False)
+                self.edit_port.setEnabled(False)
+                self.check_sim.setEnabled(False)
+                for b in self._move_btns:
+                    b.setEnabled(True)
+                self.acs_connected.emit(ctrl)
+                ctrl.start_polling(self._on_positions, self._on_states, self._on_lost)
+                self._log(f"[ACS] 연결 성공 ({'시뮬레이터' if use_sim else label})")
+            except Exception as e:
+                err_str = str(e)
+                if "No module named 'clr'" in err_str:
+                    err_str = "pythonnet 미설치 (pip install pythonnet)"
+                self._log(f"[ACS] 연결 실패 — {err_str}")
+                self._ctrl_ref[0] = None
 
     def _on_disconnect(self):
-        ctrl = self._ctrl_ref[0]
-        if ctrl:
-            ctrl.disconnect()
-        self._ctrl_ref[0] = None
-        self._set_disconnected_ui()
-        self.acs_disconnected.emit()
-        self._log("[ACS] 연결 해제")
+        if self._session_hub:
+            try:
+                self._session_hub.acs_disconnect()
+            except Exception as e:
+                self._log(f"[ACS] 연결 해제 실패: {e}")
+        else:
+            ctrl = self._ctrl_ref[0]
+            if ctrl:
+                ctrl.disconnect()
+            self._ctrl_ref[0] = None
+            self._set_disconnected_ui()
+            self.acs_disconnected.emit()
+            self._log("[ACS] 연결 해제")
 
     def _set_disconnected_ui(self):
         self.lbl_status.setText("● DISCONNECTED")

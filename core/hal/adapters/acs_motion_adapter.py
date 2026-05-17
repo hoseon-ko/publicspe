@@ -55,6 +55,11 @@ class AcsMotionAdapter(QObject):
         try:
             ctrl = AcsStageController()
             ctrl.connect_simulator()
+            
+            # Connect legacy signals to adapter signals
+            ctrl.positions_updated.connect(self.positions_updated)
+            ctrl.states_updated.connect(self.state_updated)
+            
             ctrl.start_polling()
             self._controller = ctrl
             dev_logger.debug("[AcsMotionAdapter] connect_simulator succeeded")

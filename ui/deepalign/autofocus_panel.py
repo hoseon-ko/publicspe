@@ -428,6 +428,7 @@ class AutoFocusPanel(QWidget):
     # ── 하드웨어 연동 메서드 ──────────────────────────────────────────
 
     def bind_session_hub(self, hub):
+        self._session_hub = hub
         self.kimm_card.bind_session_hub(hub)
 
     def _on_set_center(self):

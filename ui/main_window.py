@@ -177,7 +177,6 @@ class MainWindow(QMainWindow):
         # 탭 버튼 + 스택 등록
         _modes = [
             ("🌌 DeepAlign", self.deep_align_tab),
-            ("📷 Live",      self.live_tab),
             ("📥 Acquire",   self.acq_tab),
             ("🔬 Scan",      self.scan_tab),
             ("🎯 AutoFocus", self.af_tab),
@@ -195,7 +194,7 @@ class MainWindow(QMainWindow):
             self._nav_btns.append(btn)
             self.stack.addWidget(widget)
 
-        self._nav_btns[0].setChecked(True)   # Live 기본 선택
+        self._nav_btns[0].setChecked(True)   # DeepAlign 기본 선택
 
         # 헤더 오른쪽: 상태 위젯들 및 자동 연동 토글
         hdr_h.addStretch(1)
@@ -674,16 +673,95 @@ class MainWindow(QMainWindow):
         t.start()
 
     def _auto_connect_camera_on_gui(self):
-        """메인 GUI 스레드에서 안전하게 카메라 자동 연결 수행"""
+        """메인 GUI 스레드에서 안전하게 카메라 자동 연결 수행 (DeepAlign 탭 기준)"""
         try:
-            # 1. 카메라 스캔 수행
-            self.live_tab._scan_cameras()
-            # 2. 리스트에 발견된 장비가 있으면 첫 번째 장비 자동 연결 시도
-            if self.live_tab.camera_panel.camera_list.count() > 0:
-                app_logger.info("[Auto-Connect] 발견된 카메라 자동 연결 시도...")
-                self.live_tab._connect_camera(0)
+            # 1. QSettings("SpeAnalyze", "DeepAlignTab")에서 저장된 vendor 로드
+            settings = QSettings("SpeAnalyze", "DeepAlignTab")
+            vendor = str(settings.value("camera/vendor", "Simulation")).strip()
+            
+            app_logger.info(f"[Auto-Connect] 저장된 카메라 벤더 로드: {vendor}")
+            
+            # 2. session_hub에 vendor 선택 및 카메라 스캔
+            vendor_key = vendor.lower()
+            if vendor_key in ("simulation", "simulated"):
+                vendor_key = "simulated"
+                
+            self.session_hub.select_camera_vendor(vendor_key)
+            devices = self.session_hub.scan_cameras()
+            
+            if devices:
+                dev = devices[0]
+                device_id = getattr(dev, "device_id", "")
+                app_logger.info(f"[Auto-Connect] 카메라 연결 시도: vendor={vendor}, device={device_id}...")
+                self.session_hub.connect_camera(str(device_id))
+                app_logger.info(f"[Auto-Connect] 카메라 연결 성공: {device_id}")
+                
+                # DeepAlignMainTab UI 갱신을 위해 mixin에 디바이스 목록 바인딩 처리
+                self.deep_align_tab._scanned_devices = list(devices)
+                self.deep_align_tab._populate_camera_list_from_devices(devices)
+                
+                # 콤보박스 선택 인덱스 매칭
+                idx = self.deep_align_tab.cb_vendor.findText(vendor)
+                if idx >= 0:
+                    self.deep_align_tab.cb_vendor.blockSignals(True)
+                    self.deep_align_tab.cb_vendor.setCurrentIndex(idx)
+                    self.deep_align_tab.cb_vendor.blockSignals(False)
+                
+                # 카메라가 연결된 후 capabilities와 settings 적용
+                try:
+                    caps = self.session_hub.camera_get_capabilities()
+                except Exception:
+                    caps = None
+                self.deep_align_tab._apply_camera_capabilities(caps)
+                
+                from core.session.ownership import OWNER_DEEPALIGN
+                try:
+                    ms = float(self.session_hub.camera_get_exposure_ms(OWNER_DEEPALIGN))
+                    self.deep_align_tab.spin_exposure.blockSignals(True)
+                    self.deep_align_tab.spin_exposure.setValue(ms)
+                    self.deep_align_tab.spin_exposure.blockSignals(False)
+                except Exception:
+                    pass
+                
+                # 온도 및 ADC 설정 즉시 동기화
+                if caps and caps.has_temperature:
+                    try:
+                        reading, setpoint, status = self.session_hub.camera_get_temperature(OWNER_DEEPALIGN)
+                        self.deep_align_tab.lbl_temp_read.setText(f"Reading: {reading}")
+                        self.deep_align_tab.lbl_temp_set.setText(f"Setpoint: {setpoint}")
+                        self.deep_align_tab.lbl_temp_state.setText(f"Status: {status}")
+                        if setpoint is not None:
+                            self.deep_align_tab.spin_temp.blockSignals(True)
+                            self.deep_align_tab.spin_temp.setValue(float(setpoint))
+                            self.deep_align_tab.spin_temp.blockSignals(False)
+                    except Exception:
+                        pass
+                
+                if caps and caps.has_adc:
+                    try:
+                        adc_settings = self.session_hub.camera_get_adc_settings(OWNER_DEEPALIGN)
+                        mapping = {
+                            "adc_quality": self.deep_align_tab.cb_adc_quality,
+                            "adc_speed": self.deep_align_tab.cb_adc_speed,
+                            "adc_analog_gain": self.deep_align_tab.cb_adc_gain,
+                            "bit_depth": self.deep_align_tab.cb_adc_bit,
+                        }
+                        for key, cb in mapping.items():
+                            val = adc_settings.get(key)
+                            if val is not None:
+                                cb_idx = cb.findText(str(val))
+                                if cb_idx >= 0:
+                                    cb.blockSignals(True)
+                                    cb.setCurrentIndex(cb_idx)
+                                    cb.blockSignals(False)
+                    except Exception:
+                        pass
+                
+                self.deep_align_tab._set_camera_action_state(True)
+                if caps and getattr(caps, "has_temperature", False):
+                    self.deep_align_tab._start_temp_polling()
             else:
-                app_logger.info("[Auto-Connect] 감지된 카메라 장비가 없어 카메라 연결을 건너뜁니다.")
+                app_logger.info(f"[Auto-Connect] 감지된 {vendor} 카메라 장비가 없어 연결을 건너뜁니다.")
         except Exception as e:
             app_logger.warning(f"[Auto-Connect] 카메라 자동 연결 실패: {e}")
 

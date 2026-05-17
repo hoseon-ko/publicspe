@@ -164,6 +164,10 @@ class KimmZCard(QFrame):
         lay.addStretch()
         self.update_status(False, None)
 
+        # Connect text edits to auto-save settings
+        self.edit_ip.textChanged.connect(self._save_settings)
+        self.edit_port.textChanged.connect(self._save_settings)
+
     def bind_session_hub(self, hub):
         if self._session_hub:
             try:

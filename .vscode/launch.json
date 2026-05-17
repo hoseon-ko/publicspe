@@ -5,13 +5,12 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python: Virtual Env Debug",
-            "type": "debugpy",
+            "name": "Python: Virtual Env Debug (Fixed Path)",
+            "type": "python",
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            // 현재 VS Code 하단에서 선택된 인터프리터를 자동으로 사용
-            "python": "${command:python.interpreterPath}",
+            "python": "C:/Users/admin/source/repos/python/venv311/Scripts/python.exe",
             "justMyCode": false
         }
     ]
