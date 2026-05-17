@@ -377,6 +377,14 @@ class AcsStageController(QObject):
             return self._last_positions[axis]
         return 0.0
 
+    def get_positions(self) -> list[float]:
+        """최신 6축 위치 전체 목록 반환"""
+        return list(self._last_positions)
+
+    def get_axis_states(self) -> list[dict]:
+        """최신 6축 상태 전체 목록 반환"""
+        return list(self._last_states)
+
     def is_enabled(self, axis: int) -> bool:
         if 0 <= axis < 6:
             return self._last_states[axis]["enabled"]
