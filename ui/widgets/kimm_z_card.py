@@ -72,6 +72,16 @@ class KimmZCard(QFrame):
         row_ip.addWidget(self.edit_ip)
         conn_l.addLayout(row_ip)
 
+        row_port = QHBoxLayout()
+        lbl_port = QLabel("PORT")
+        lbl_port.setStyleSheet(lbl(C_TEXT_DIM, mono=True))
+        lbl_port.setFixedWidth(50)
+        self.edit_port = QLineEdit("5000")
+        self.edit_port.setStyleSheet(EDIT_STYLE)
+        row_port.addWidget(lbl_port)
+        row_port.addWidget(self.edit_port)
+        conn_l.addLayout(row_port)
+
         btn_row = QHBoxLayout()
         self.btn_connect = QPushButton("CONNECT")
         self.btn_disconnect = QPushButton("DISCONNECT")
@@ -187,6 +197,8 @@ class KimmZCard(QFrame):
         active = bool(connected or sim_mode)
         self.btn_connect.setEnabled(not active)
         self.btn_disconnect.setEnabled(active)
+        self.edit_ip.setEnabled(not active)
+        self.edit_port.setEnabled(not active)
         
         for btn in self._jog_btns:
             btn.setEnabled(active)
@@ -196,7 +208,9 @@ class KimmZCard(QFrame):
     def _on_connect_clicked(self):
         if self._session_hub:
             ip = self.edit_ip.text().strip()
-            self._session_hub.kimm_connect(ip, 5000)
+            port_str = self.edit_port.text().strip()
+            port = int(port_str) if port_str else 5000
+            self._session_hub.kimm_connect(ip, port)
 
     def _on_disconnect_clicked(self):
         if self._session_hub: self._session_hub.kimm_disconnect()
