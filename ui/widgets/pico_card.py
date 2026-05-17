@@ -41,7 +41,7 @@ class PicoCard(QFrame):
         self._pico_cards: list[MotorCard] = []
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(400)
-        self._poll_timer.timeout.connect(self._refresh_status)
+        self._poll_timer.timeout.connect(self.refresh_status)
         
         self._build_ui()
 
@@ -112,7 +112,7 @@ class PicoCard(QFrame):
         self.btn_refresh.setStyleSheet(BTN_SMALL)
         self.btn_zero_all.clicked.connect(self._on_zero_all_clicked)
         self.btn_stop_all.clicked.connect(self._on_stop_all_clicked)
-        self.btn_refresh.clicked.connect(self._refresh_status)
+        self.btn_refresh.clicked.connect(self.refresh_status)
         btn_row_global.addWidget(self.btn_zero_all)
         btn_row_global.addWidget(self.btn_stop_all)
         btn_row_global.addWidget(self.btn_refresh)
@@ -125,13 +125,17 @@ class PicoCard(QFrame):
         if hub: self._poll_timer.start()
         else: self._poll_timer.stop()
 
-    def _refresh_status(self):
+    def refresh_status(self):
         if not self._session_hub: return
         try:
             connected = self._session_hub.is_pico_connected()
-            positions = self._session_hub.pico_get_all_positions()
+            if connected:
+                positions = [self._session_hub.pico_get_position(ax) for ax in range(1, 5)]
+            else:
+                positions = [None, None, None, None]
             self.update_status(connected, positions)
-        except: pass
+        except Exception as e:
+            self.log_message.emit(f"PICO Status Refresh Error: {e}")
 
     def update_status(self, connected: bool, positions: list[Optional[int]]):
         if connected:
@@ -157,11 +161,18 @@ class PicoCard(QFrame):
 
     def _on_connect_clicked(self):
         if self._session_hub:
-            self._session_hub.pico_connect()
+            try:
+                self._session_hub.connect_pico()
+                self._session_hub.start_pico_polling()
+            except Exception as e:
+                self.log_message.emit(f"PICO Connect Error: {e}")
 
     def _on_disconnect_clicked(self):
         if self._session_hub:
-            self._session_hub.pico_disconnect()
+            try:
+                self._session_hub.disconnect_pico()
+            except Exception as e:
+                self.log_message.emit(f"PICO Disconnect Error: {e}")
 
     def _on_move_requested(self, motor_num: int, steps: int):
         if not self._session_hub: return

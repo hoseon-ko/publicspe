@@ -176,7 +176,12 @@ class MotionTab(QWidget):
 
     def _get_pico_status(self):
         if not self._session_hub: return False, [None]*4
-        return self._session_hub.is_pico_connected(), self._session_hub.pico_get_all_positions()
+        connected = self._session_hub.is_pico_connected()
+        if connected:
+            positions = [self._session_hub.pico_get_position(ax) for ax in range(1, 5)]
+        else:
+            positions = [None] * 4
+        return connected, positions
 
     def _get_kimm_status(self):
         if not self._session_hub: return False, False, None
