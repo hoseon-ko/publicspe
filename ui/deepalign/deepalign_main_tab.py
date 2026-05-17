@@ -38,9 +38,11 @@ from ui.deepalign.deepalign_layout import LayoutBuilderMixin
 from ui.deepalign.deepalign_styles import DeepAlignStylesMixin
 from ui.deepalign.deepalign_workers import (
     _AcquireWorker, _SnapWorker, _LiveWorker, _BgCaptureWorker,
+)
+from ui.deepalign.scan import (
+    MirrorMover, KimmMover, AcsMover,
     _MirrorScanWorker, _KimmScanWorker, _AcsScanWorker,
 )
-from ui.deepalign.deepalign_movers import MirrorMover, KimmMover, AcsMover
 from ui.autofocus.af_worker import AutoFocusWorker
 from theme.styles import C_BG_DARK, C_TEXT, C_TEXT_DIM, C_TEXT_DEAD
 from core.logger import dev_logger
