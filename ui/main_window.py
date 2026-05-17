@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
     QLabel, QFrame, QVBoxLayout, QHBoxLayout, QPushButton,
     QDockWidget, QTextEdit, QTabWidget, QApplication, QCheckBox,
 )
-from PyQt6.QtCore import Qt, QSize, QSettings
+from PyQt6.QtCore import Qt, QSize, QSettings, QTimer
 from PyQt6.QtGui import QFont, QShortcut, QKeySequence, QPixmap, QPainter
 
 from ui.live.live_tab import LiveTab
