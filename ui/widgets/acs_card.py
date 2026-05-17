@@ -316,6 +316,9 @@ class AcsCard(QFrame):
         lay.addStretch()
 
         # Connect
+        self.check_sim.stateChanged.connect(self._save_settings)
+        self.check_dry.stateChanged.connect(self._save_settings)
+        self.spin_settle.valueChanged.connect(self._save_settings)
         self.btn_connect.clicked.connect(self._on_connect)
         self.btn_disconnect.clicked.connect(self._on_disconnect)
         self.btn_en_all.clicked.connect(self._on_enable_all)
@@ -521,7 +524,19 @@ class AcsCard(QFrame):
     def _save_settings(self):
         self._settings.setValue("acs/ip", self.edit_ip.text())
         self._settings.setValue("acs/port", self.edit_port.text())
+        self._settings.setValue("acs/sim", self.check_sim.isChecked())
+        self._settings.setValue("acs/dry_run", self.check_dry.isChecked())
+        self._settings.setValue("acs/settle", self.spin_settle.value())
 
     def _load_settings(self):
         self.edit_ip.setText(self._settings.value("acs/ip", "10.0.0.100"))
         self.edit_port.setText(self._settings.value("acs/port", "700"))
+        
+        sim_val = self._settings.value("acs/sim", False)
+        self.check_sim.setChecked(str(sim_val).lower() == 'true' or sim_val is True)
+        
+        dry_val = self._settings.value("acs/dry_run", False)
+        self.check_dry.setChecked(str(dry_val).lower() == 'true' or dry_val is True)
+        
+        settle_val = self._settings.value("acs/settle", 500)
+        self.spin_settle.setValue(int(settle_val) if settle_val else 500)
