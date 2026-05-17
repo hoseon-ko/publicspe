@@ -36,7 +36,11 @@ from ui.deepalign.deepalign_camera_controller import CameraControllerMixin
 from ui.deepalign.deepalign_frame_pipeline import FramePipelineMixin
 from ui.deepalign.deepalign_layout import LayoutBuilderMixin
 from ui.deepalign.deepalign_styles import DeepAlignStylesMixin
-from ui.deepalign.deepalign_workers import _AcquireWorker, _SnapWorker, _LiveWorker, _BgCaptureWorker
+from ui.deepalign.deepalign_workers import (
+    _AcquireWorker, _SnapWorker, _LiveWorker, _BgCaptureWorker,
+    _MirrorScanWorker, _KimmScanWorker, _AcsScanWorker,
+)
+from ui.deepalign.deepalign_movers import MirrorMover, KimmMover, AcsMover
 from ui.autofocus.af_worker import AutoFocusWorker
 from theme.styles import C_BG_DARK, C_TEXT, C_TEXT_DIM, C_TEXT_DEAD
 from core.logger import dev_logger
@@ -271,6 +275,12 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self._live_worker: Optional[_LiveWorker] = None
         self._af_worker: Optional[AutoFocusWorker] = None
 
+        # SCAN workers (3 hardware, mutually exclusive — only one runs at a time)
+        self._scan_thread: Optional[QThread] = None
+        self._scan_worker: Optional[object] = None
+        self._scan_owner_panel: Optional[object] = None
+        self._scan_acs_mover: Optional[AcsMover] = None
+
         # Acquire 상태 (dataclass로 통합 관리)
         self._acq = AcquireState()
 
@@ -427,6 +437,14 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self.af_panel.stop_requested.connect(self._on_af_stop_requested)
         self.af_panel.kimm_card.btn_connect.clicked.connect(self._on_af_kimm_connect_clicked)
         self.af_panel.kimm_card.btn_disconnect.clicked.connect(self._on_af_kimm_disconnect_clicked)
+
+        # ── SCAN — 3 hardware (mirror/af/acs) ─────────────────────────
+        self.mirror_panel.scan_requested.connect(self._on_mirror_scan_requested)
+        self.mirror_panel.scan_stop_requested.connect(self._on_scan_stop_requested)
+        self.af_panel.scan_requested.connect(self._on_kimm_scan_requested)
+        self.af_panel.scan_stop_requested.connect(self._on_scan_stop_requested)
+        self.align_panel.scan_requested.connect(self._on_acs_scan_requested)
+        self.align_panel.scan_stop_requested.connect(self._on_scan_stop_requested)
 
         # ── Master bar — Align 탭 ─────────────────────────────────────
         self.btn_align_enable.clicked.connect(self.align_panel.enable_all)
@@ -899,6 +917,120 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         """AutoFocusPanel에서 중단 버튼 클릭 시 호출."""
         if self._af_worker:
             self._af_worker.stop()
+
+    # ── SCAN 워커 (mirror / kimm / acs) ────────────────────────────────────
+    # 카메라(snap_fn)는 세 워커가 공용으로 사용. 동시에 1개만 실행.
+
+    def _scan_is_running(self) -> bool:
+        return self._scan_thread is not None and self._scan_thread.isRunning()
+
+    def _scan_snap_fn(self):
+        """3 워커 공용 카메라 스냅."""
+        if self._session_hub is None:
+            raise RuntimeError("session_hub가 없어 snap 불가")
+        return self._session_hub.snap(OWNER_DEEPALIGN)
+
+    def _scan_start(self, panel, worker, on_finished_extra=None) -> None:
+        """공용 워커 부트스트랩: thread 부착, 시그널 연결, start."""
+        self._scan_owner_panel = panel
+        self._scan_worker = worker
+        self._scan_thread = QThread(self)
+        worker.moveToThread(self._scan_thread)
+        self._scan_thread.started.connect(worker.run)
+
+        worker.progress.connect(
+            lambda idx, total: panel.set_scan_status(f"{idx}/{total}")
+        )
+        worker.error.connect(lambda msg: panel.set_scan_status(msg, "err"))
+        worker.log.connect(lambda msg: dev_logger.info(f"[Scan] {msg}"))
+
+        def _on_done(_results):
+            stopped = getattr(worker, "_stop", False)
+            panel.set_scan_status("stopped" if stopped else "done",
+                                  "warn" if stopped else "ok")
+            if on_finished_extra is not None:
+                try: on_finished_extra()
+                except Exception: pass
+            self._scan_thread.quit()
+
+        worker.finished.connect(_on_done)
+        worker.error.connect(lambda _m: self._scan_thread.quit())
+        self._scan_thread.finished.connect(self._scan_cleanup)
+
+        panel.set_scan_running(True)
+        panel.set_scan_status("starting…", "info")
+        self._scan_thread.start()
+
+    def _scan_cleanup(self) -> None:
+        if self._scan_owner_panel is not None:
+            self._scan_owner_panel.set_scan_running(False)
+        self._scan_owner_panel = None
+        self._scan_worker = None
+        self._scan_thread = None
+        self._scan_acs_mover = None
+
+    def _on_scan_stop_requested(self) -> None:
+        if self._scan_worker is not None and hasattr(self._scan_worker, "stop"):
+            self._scan_worker.stop()
+
+    # ── Mirror (Picomotor) ────────────────────────────────────────────────
+    def _on_mirror_scan_requested(self, points: list, settle_ms: int, avg_frames: int) -> None:
+        if self._scan_is_running():
+            self.mirror_panel.set_scan_status("다른 스캔 실행중", "warn"); return
+        pico_ctrl = getattr(self, "_picos", None)
+        if pico_ctrl is None or not getattr(pico_ctrl, "is_connected", False):
+            self.mirror_panel.set_scan_status("Picomotor 미연결", "err"); return
+        if self._session_hub is None or not self._is_hub_camera_connected():
+            self.mirror_panel.set_scan_status("카메라 미연결", "err"); return
+
+        mover = MirrorMover(pico_ctrl)
+        worker = _MirrorScanWorker(
+            mover, self._scan_snap_fn, points,
+            process_fn=None, settle_ms=settle_ms, avg_frames=avg_frames,
+        )
+        self._scan_start(self.mirror_panel, worker)
+
+    # ── KIMM Z ────────────────────────────────────────────────────────────
+    def _on_kimm_scan_requested(self, z_positions: list, settle_ms: int, avg_frames: int) -> None:
+        if self._scan_is_running():
+            self.af_panel.set_scan_status("다른 스캔 실행중"); return
+        if self._session_hub is None or not self._is_hub_camera_connected():
+            self.af_panel.set_scan_status("카메라 미연결"); return
+
+        mover = KimmMover(self._session_hub)
+        worker = _KimmScanWorker(
+            mover, self._scan_snap_fn, z_positions,
+            process_fn=None, settle_ms=settle_ms, avg_frames=avg_frames,
+        )
+        self._scan_start(self.af_panel, worker)
+
+    # ── ACS 6축 ──────────────────────────────────────────────────────────
+    def _on_acs_scan_requested(self, points: list, settle_ms: int, avg_frames: int) -> None:
+        if self._scan_is_running():
+            self.align_panel.set_scan_status("다른 스캔 실행중", "warn"); return
+        acs_ctrl = getattr(self, "_acs", None)
+        if acs_ctrl is None:
+            self.align_panel.set_scan_status("ACS 미연결", "err"); return
+        if self._session_hub is None or not self._is_hub_camera_connected():
+            self.align_panel.set_scan_status("카메라 미연결", "err"); return
+
+        mover = AcsMover(acs_ctrl)
+        try:
+            mover.enable(timeout_ms=2000)
+        except Exception as e:
+            self.align_panel.set_scan_status(f"Servo ON 실패: {e}", "err"); return
+
+        self._scan_acs_mover = mover  # 종료시 disable하기 위해 보관
+        worker = _AcsScanWorker(
+            mover, self._scan_snap_fn, points,
+            process_fn=None, settle_ms=settle_ms, avg_frames=avg_frames,
+        )
+
+        def _disable_after():
+            try: mover.disable()
+            except Exception: pass
+
+        self._scan_start(self.align_panel, worker, on_finished_extra=_disable_after)
 
     def _on_af_kimm_connect_clicked(self):
         if not self._session_hub: return

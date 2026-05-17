@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>DeepAlign — SCAN UI Mockup</title>
+<style>
+  :root {
+    --bg-deep:   #050a15;
+    --bg-dark:   #0a1020;
+    --bg-med:    #0f1729;
+    --bg-light:  #16213e;
+    --bg-input:  #080e1e;
+    --bd:        #1a4060;
+    --bd-hi:     #1a3a60;
+    --bd-accent: #0f3460;
+    --text:      #c0d0ff;
+    --text-dim:  #a0b0d0;
+    --text-dead: #6080a0;
+    --accent:    #4ecdc4;
+    --warn:      #ffe66d;
+    --danger:    #e94560;
+    --info:      #a0c8ff;
+    --mono:      "Courier New", "Consolas", monospace;
+    --acs-purple:#aa7acc;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px;
+    background: #06080f;
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", sans-serif;
+    font-size: 13px;
+  }
+  h1 {
+    color: var(--accent); font-family: var(--mono);
+    font-size: 18px; letter-spacing: 3px; margin: 0 0 4px;
+  }
+  .sub {
+    color: var(--text-dim); font-size: 12px;
+    margin-bottom: 24px;
+  }
+  .panels {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(320px, 380px));
+    gap: 20px;
+  }
+  .panel {
+    background: var(--bg-dark);
+    border: 1px solid var(--bd);
+    border-radius: 6px;
+    padding: 10px;
+  }
+  .panel-title {
+    color: var(--text-dim); font-family: var(--mono);
+    font-size: 11px; letter-spacing: 2px; font-weight: 700;
+    text-transform: uppercase;
+    border-bottom: 1px dashed var(--bd);
+    padding-bottom: 6px; margin-bottom: 10px;
+  }
+  .panel-title .dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    margin-right: 6px; vertical-align: 1px;
+  }
+  .dot.mirror { background: var(--accent); }
+  .dot.af     { background: var(--accent); }
+  .dot.acs    { background: var(--acs-purple); }
+
+  /* CollapsibleSection / _section_box look */
+  .section {
+    background: var(--bg-med);
+    border: 1px solid var(--bd);
+    border-left: 3px solid var(--accent);
+    border-radius: 4px;
+    margin-bottom: 10px;
+  }
+  .section.accent-purple { border-left-color: var(--acs-purple); }
+  .section.accent-danger { border-left-color: var(--danger); }
+  .section-head {
+    padding: 6px 10px;
+    font-family: var(--mono); font-size: 10px;
+    letter-spacing: 2px; font-weight: 700;
+    color: var(--accent);
+    background: rgba(78,205,196,0.04);
+    border-bottom: 1px solid var(--bd);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .section.accent-purple .section-head { color: var(--acs-purple); background: rgba(170,122,204,0.05); }
+  .section.accent-danger .section-head { color: var(--danger);    background: rgba(233,69,96,0.04); }
+  .section-head .chev { color: var(--text-dead); font-size: 9px; }
+  .section-body { padding: 8px; }
+
+  /* upstream "context" sections — collapsed look */
+  .ctx { opacity: 0.55; }
+  .ctx-row {
+    display: flex; justify-content: space-between;
+    padding: 4px 8px; font-family: var(--mono); font-size: 11px;
+    color: var(--text-dim);
+  }
+  .ctx-row + .ctx-row { border-top: 1px dashed rgba(26,64,96,0.5); }
+
+  /* form grid */
+  .grid {
+    display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 6px;
+    align-items: center;
+  }
+  .grid-3 {
+    display: grid; grid-template-columns: auto 1fr; gap: 6px;
+    align-items: center;
+  }
+  label {
+    color: var(--text-dim); font-family: var(--mono); font-size: 11px;
+  }
+  input[readonly], .spin {
+    background: var(--bg-input);
+    border: 1px solid var(--bd-accent);
+    color: var(--text);
+    border-radius: 3px;
+    font-family: var(--mono); font-size: 13px;
+    padding: 3px 6px;
+    width: 100%;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .spin .spin-btns {
+    display: flex; flex-direction: column; gap: 1px;
+    margin-left: 6px;
+  }
+  .spin .spin-btns span {
+    width: 14px; height: 8px; background: #0d1e38;
+    display: inline-block; line-height: 8px; text-align: center;
+    color: var(--text-dim); font-size: 8px;
+  }
+  .combo {
+    background: var(--bg-input);
+    border: 1px solid var(--bd-accent);
+    color: var(--text); border-radius: 3px;
+    font-family: var(--mono); font-size: 13px;
+    padding: 3px 6px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .combo .caret { color: var(--text-dim); font-size: 10px; }
+
+  /* buttons */
+  .btn-row { display: flex; gap: 6px; margin-top: 8px; }
+  .btn {
+    flex: 1; height: 30px; line-height: 28px; text-align: center;
+    background: transparent; border-radius: 3px;
+    font-family: var(--mono); font-size: 12px; font-weight: 700;
+    letter-spacing: 1px; user-select: none;
+  }
+  .btn.accent { color: var(--accent); border: 1px solid var(--accent); }
+  .btn.danger { color: var(--danger); border: 1px solid var(--danger); }
+  .btn.disabled { opacity: 0.4; }
+  .status {
+    margin-top: 8px;
+    font-family: var(--mono); font-size: 12px;
+    color: var(--text-dim);
+    text-align: center; padding: 4px;
+    background: rgba(0,0,0,0.2); border-radius: 3px;
+  }
+  .status.running { color: var(--warn); }
+  .status.ok      { color: var(--accent); }
+  .status.err     { color: var(--danger); }
+  .status.warn    { color: #facc15; }
+
+  /* highlight — newly added sections */
+  .new-tag {
+    display: inline-block;
+    background: var(--accent); color: #001a18;
+    font-size: 8px; font-weight: 900; letter-spacing: 1px;
+    padding: 1px 4px; border-radius: 2px;
+    margin-left: 6px; vertical-align: 1px;
+  }
+
+  /* footer notes */
+  .notes {
+    margin-top: 28px; padding: 14px;
+    background: var(--bg-med); border: 1px solid var(--bd);
+    border-radius: 4px;
+    color: var(--text-dim);
+    font-size: 12px; line-height: 1.6;
+  }
+  .notes code {
+    background: var(--bg-input); padding: 1px 5px; border-radius: 2px;
+    font-family: var(--mono); color: var(--accent); font-size: 12px;
+  }
+  .notes h3 {
+    color: var(--text); margin: 0 0 8px; font-size: 13px; letter-spacing: 1px;
+  }
+  .arch {
+    font-family: var(--mono); font-size: 11px; color: var(--text-dim);
+    background: var(--bg-input); padding: 10px; border-radius: 3px;
+    white-space: pre; overflow-x: auto;
+    border: 1px solid var(--bd);
+  }
+  .arch b { color: var(--accent); }
+  .arch u { color: var(--warn); text-decoration: none; }
+</style>
+</head>
+<body>
+
+<h1>DEEPALIGN — SCAN UI MOCKUP</h1>
+<div class="sub">3 패널 신규 추가 영역 (Mirror / AutoFocus / ACS) — 다크 테마 시뮬레이션</div>
+
+<div class="panels">
+
+  <!-- ──────────────── 1. MIRROR PANEL ──────────────── -->
+  <div class="panel">
+    <div class="panel-title"><span class="dot mirror"></span>Mirror Motor Panel (Picomotor)</div>
+
+    <div class="section ctx">
+      <div class="section-head">PICOMOTOR 8742 <span class="chev">▼</span></div>
+      <div class="section-body">
+        <div class="ctx-row"><span>● CONNECTED</span><span>Model: 8742</span></div>
+      </div>
+    </div>
+    <div class="section accent-danger ctx">
+      <div class="section-head">MOTOR POSITIONS <span class="chev">▼</span></div>
+      <div class="section-body">
+        <div class="ctx-row"><span>M1</span><span>+1240</span></div>
+        <div class="ctx-row"><span>M2</span><span>—</span></div>
+        <div class="ctx-row"><span>M3</span><span>—</span></div>
+        <div class="ctx-row"><span>M4</span><span>—</span></div>
+      </div>
+    </div>
+    <div class="section ctx">
+      <div class="section-head">AXIS CONTROLS <span class="chev">▼</span></div>
+      <div class="section-body">
+        <div class="ctx-row"><span>M1 / M2 / M3 / M4 cards</span><span>collapsed</span></div>
+      </div>
+    </div>
+
+    <!-- NEW SCAN SECTION -->
+    <div class="section">
+      <div class="section-head">SCAN (M1 SWEEP) <span class="new-tag">NEW</span><span class="chev">▼</span></div>
+      <div class="section-body">
+        <div class="grid">
+          <label>Motor</label>
+          <div class="spin">1<span class="spin-btns"><span>▲</span><span>▼</span></span></div>
+          <label>N points</label>
+          <div class="spin">5<span class="spin-btns"><span>▲</span><span>▼</span></span></div>
+
+          <label>Δ steps</label>
+          <div class="spin">100<span class="spin-btns"><span>▲</span><span>▼</span></span></div>
+          <label>Settle ms</label>
+          <div class="spin">200<span class="spin-btns"><span>▲</span><span>▼</span></span></div>
+
+          <label>Avg frames</label>
+          <div class="spin">1<span class="spin-btns"><span>▲</span><span>▼</span></span></div>
+          <span></span><span></span>
+        </div>
+        <div class="btn-row">
+          <div class="btn accent">SCAN START</div>
+          <div class="btn danger disabled">SCAN STOP</div>
+        </div>
+        <div class="status">idle</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ──────────────── 2. AUTOFOCUS PANEL ──────────────── -->
+  <div class="panel">
+    <div class="panel-title"><span class="dot af"></span>AutoFocus Panel (KIMM Z)</div>
+
+    <div class="ctx" style="margin-bottom: 6px;">
+      <div class="ctx-row" style="padding: 6px 4px;">
+        <span style="color: var(--accent); font-weight: 700;">KIMM Z CARD</span>
+        <span>Z = +12.34 µm</span>
+      </div>
+      <div style="border-bottom: 1px dashed var(--bd); margin: 4px 0 8px;"></div>
+      <div style="color: #2a4a6a; font-family: var(--mono); font-size: 10px; letter-spacing: 2px; font-weight: 700; margin: 6px 0 4px;">Z SCAN RANGE</div>
+      <div class="ctx-row"><span>Center / ± Range / Step</span><span>0 / 5 / 0.5</span></div>
+      <div style="color: #2a4a6a; font-family: var(--mono); font-size: 10px; letter-spacing: 2px; font-weight: 700; margin: 8px 0 4px;">SHARPNESS METRIC</div>
+      <div class="ctx-row"><span>Laplacian</span><span>RUN / STOP</span></div>
+      <div style="color: #2a4a6a; font-family: var(--mono); font-size: 10px; letter-spacing: 2px; font-weight: 700; margin: 8px 0 4px;">RESULT</div>
+      <div class="ctx-row"><span>Best Z</span><span style="color: var(--danger); font-weight: 700;">+1.23 µm  [GO]</span></div>
+      <div style="color: #2a4a6a; font-family: var(--mono); font-size: 10px; letter-spacing: 2px; font-weight: 700; margin: 8px 0 4px;">SHARPNESS CURVE</div>
+      <div style="height: 60px; background: var(--bg-input); border: 1px solid var(--bd); border-radius: 3px; display: flex; align-items: center; justify-content: center; color: var(--text-dead); font-size: 10px;">[ plot ]</div>
+    </div>
+
+    <div style="border-bottom: 1px dashed var(--bd); margin: 10px 0;"></div>
+
+    <!-- NEW GENERIC Z SCAN SECTION -->
+    <div style="background: var(--bg-med); border: 1px solid var(--bd); border-left: 3px solid var(--accent); border-radius: 4px; padding: 8px;">
+      <div style="color: var(--accent); font-family: var(--mono); font-size: 10px; letter-spacing: 2px; font-weight: 700; margin-bottom: 8px;">
+        GENERIC Z SCAN <span class="new-tag">NEW</span>
+      </div>
+      <div class="grid">
+        <label>Z start (µm)</label>
+        <div class="spin">0.00<span class="spin-btns"><span>▲</span><span>▼</span></span></div>
+        <label>Z end (µm)</label>
+        <div class="spin">10.00<span class="spin-btns"><span>▲</span><span>▼</span></span></div>
+
+        <label>N points</label>
+        <div class="spin">5<span class="spin-btns"><span>▲</span><span>▼</span></span></div>
+        <label>Settle ms</label>
+        <div class="spin">200<span class="spin-btns"><span>▲</span><span>▼</span></span></div>
+
+        <label>Avg frames</label>
+        <div class="spin">1<span class="spin-btns"><span>▲</span><span>▼</span></span></div>
+        <span></span><span></span>
+      </div>
+      <div class="btn-row">
+        <div class="btn accent">SCAN START</div>
+        <div class="btn danger disabled">SCAN STOP</div>
+      </div>
+      <div class="status">idle</div>
+    </div>
+  </div>
+
+  <!-- ──────────────── 3. ACS PANEL ──────────────── -->
+  <div class="panel">
+    <div class="panel-title"><span class="dot acs"></span>ACS Stage Panel (6축)</div>
+
+    <div class="section ctx">
+      <div class="section-head">CONNECTION <span class="chev">▼</span></div>
+      <div class="section-body">
+        <div class="ctx-row"><span>● CONNECTED</span><span>10.0.0.100:701</span></div>
+      </div>
+    </div>
+    <div class="section accent-danger ctx">
+      <div class="section-head">6-AXIS POSITIONS <span class="chev">▼</span></div>
+      <div class="section-body">
+        <div class="ctx-row"><span>Y1 Z1 X1 Z2 Y2 Z3</span><span>servo on</span></div>
+      </div>
+    </div>
+    <div class="section ctx">
+      <div class="section-head">GLOBAL CONTROL <span class="chev">▼</span></div>
+      <div class="section-body">
+        <div class="ctx-row"><span>ENABLE / DISABLE / STOP</span><span></span></div>
+      </div>
+    </div>
+    <div class="section accent-purple ctx">
+      <div class="section-head">6DOF KINEMATIC MOVE <span class="chev">▼</span></div>
+      <div class="section-body">
+        <div class="ctx-row"><span>Tx Ty Tz Rx Ry Rz</span><span>CALC / EXECUTE</span></div>
+      </div>
+    </div>
+
+    <!-- NEW 6DOF SCAN SECTION -->
+    <div class="section">
+      <div class="section-head">6DOF SCAN <span class="new-tag">NEW</span><span class="chev">▼</span></div>
+      <div class="section-body">
+        <div class="grid">
+          <label>Axis</label>
+          <div class="combo">0: Y1 <span class="caret">▾</span></div>
+          <label>N points</label>
+          <div class="spin">5<span class="spin-btns"><span>▲</span><span>▼</span></span></div>
+
+          <label>Δ (mm/rad)</label>
+          <div class="spin">0.1000<span class="spin-btns"><span>▲</span><span>▼</span></span></div>
+          <label>Settle ms</label>
+          <div class="spin">500<span class="spin-btns"><span>▲</span><span>▼</span></span></div>
+
+          <label>Avg frames</label>
+          <div class="spin">1<span class="spin-btns"><span>▲</span><span>▼</span></span></div>
+          <span></span><span></span>
+        </div>
+        <div class="btn-row">
+          <div class="btn accent">SCAN START</div>
+          <div class="btn danger disabled">SCAN STOP</div>
+        </div>
+        <div class="status">idle</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ───────── Notes / Architecture ───────── -->
+<div class="notes">
+  <h3 style="color: var(--accent);">⚙️ 데이터 흐름</h3>
+<div class="arch"><b>Panel.scan_requested</b>(points, settle_ms, avg_frames)
+        │
+        ▼
+<b>DeepAlignMainTab._on_*_scan_requested()</b>
+        │  • snap_fn = lambda: hub.snap(OWNER_DEEPALIGN)   <u>← 공용</u>
+        │  • mover = MirrorMover / KimmMover / AcsMover
+        ▼
+<b>_*ScanWorker</b>(mover, snap_fn, points, process_fn=None, settle_ms, avg_frames)
+        │
+        ▼ run() in QThread
+        for point in points:
+            mover.move(point)        <u>← 하드웨어별 분기</u>
+            sleep(settle_ms)
+            frame = avg_snap(N)      <u>← 공용 카메라</u>
+            process_fn(frame, point, idx) → None  <u>← 비워둠</u>
+            emit point_done / progress
+</div>
+
+  <h3 style="margin-top:14px;">🎛️ 상태 라벨 색상 매핑</h3>
+  <p>
+    <span class="status" style="display:inline-block; padding: 2px 10px;">idle</span>
+    <span class="status running" style="display:inline-block; padding: 2px 10px;">3/5</span>
+    <span class="status ok" style="display:inline-block; padding: 2px 10px;">done</span>
+    <span class="status warn" style="display:inline-block; padding: 2px 10px;">stopped</span>
+    <span class="status err" style="display:inline-block; padding: 2px 10px;">camera not connected</span>
+  </p>
+
+  <h3 style="margin-top:14px;">🔒 동작 규칙</h3>
+  <ul style="margin: 0; padding-left: 18px;">
+    <li>3 워커 <b>상호 배타</b> — 동시에 1개만 실행</li>
+    <li>ACS는 <code>enable_all → 스캔 → disable_all</code> 자동 처리</li>
+    <li><b>SCAN STOP</b> → 다음 루프에서 break → "stopped" 상태 표시</li>
+    <li><code>process_fn=None</code> 이라 결과는 항상 None 누적 — 채울 자리</li>
+  </ul>
+</div>
+
+</body>
+</html>

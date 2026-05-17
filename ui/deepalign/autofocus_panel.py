@@ -100,6 +100,9 @@ class AutoFocusPanel(QWidget):
 
     run_requested  = pyqtSignal(float, float, float, str)  # center, half_range, step, metric
     stop_requested = pyqtSignal()
+    # SCAN — list[float] z_positions(µm), settle_ms, avg_frames
+    scan_requested      = pyqtSignal(list, int, int)
+    scan_stop_requested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -274,7 +277,100 @@ class AutoFocusPanel(QWidget):
         root.addWidget(self._section_label("SHARPNESS CURVE"))
         root.addWidget(self._build_plot())
 
+        root.addWidget(_sep_h())
+
+        # ── 7. GENERIC SCAN (motion + snap + process — empty process for now)
+        self._build_scan_section(root)
+
         root.addStretch(1)
+
+    # ── SCAN UI ──────────────────────────────────────────────────────────
+
+    def _build_scan_section(self, root: QVBoxLayout) -> None:
+        root.addWidget(self._section_label("GENERIC Z SCAN"))
+
+        grid = QGridLayout()
+        grid.setSpacing(4)
+
+        def _lbl(t: str) -> QLabel:
+            l = QLabel(t); l.setStyleSheet(_LBL_QSS); return l
+
+        self.scan_spin_z_start = QDoubleSpinBox()
+        self.scan_spin_z_start.setRange(-100000.0, 100000.0)
+        self.scan_spin_z_start.setDecimals(2); self.scan_spin_z_start.setSingleStep(1.0)
+        self.scan_spin_z_start.setValue(0.0)
+        self.scan_spin_z_start.setStyleSheet(_SPIN_QSS)
+
+        self.scan_spin_z_end = QDoubleSpinBox()
+        self.scan_spin_z_end.setRange(-100000.0, 100000.0)
+        self.scan_spin_z_end.setDecimals(2); self.scan_spin_z_end.setSingleStep(1.0)
+        self.scan_spin_z_end.setValue(10.0)
+        self.scan_spin_z_end.setStyleSheet(_SPIN_QSS)
+
+        self.scan_spin_n = QSpinBox()
+        self.scan_spin_n.setRange(2, 9999); self.scan_spin_n.setValue(5)
+        self.scan_spin_n.setStyleSheet(_SPIN_QSS)
+
+        self.scan_spin_settle = QSpinBox()
+        self.scan_spin_settle.setRange(0, 10000); self.scan_spin_settle.setValue(200)
+        self.scan_spin_settle.setStyleSheet(_SPIN_QSS)
+
+        self.scan_spin_avg = QSpinBox()
+        self.scan_spin_avg.setRange(1, 32); self.scan_spin_avg.setValue(1)
+        self.scan_spin_avg.setStyleSheet(_SPIN_QSS)
+
+        grid.addWidget(_lbl("Z start (µm)"), 0, 0); grid.addWidget(self.scan_spin_z_start, 0, 1)
+        grid.addWidget(_lbl("Z end (µm)"),   0, 2); grid.addWidget(self.scan_spin_z_end,   0, 3)
+        grid.addWidget(_lbl("N points"),     1, 0); grid.addWidget(self.scan_spin_n,       1, 1)
+        grid.addWidget(_lbl("Settle ms"),    1, 2); grid.addWidget(self.scan_spin_settle,  1, 3)
+        grid.addWidget(_lbl("Avg frames"),   2, 0); grid.addWidget(self.scan_spin_avg,     2, 1)
+        root.addLayout(grid)
+
+        btn_row = QHBoxLayout()
+        self.btn_scan_start = QPushButton("SCAN START")
+        self.btn_scan_stop  = QPushButton("SCAN STOP")
+        self.btn_scan_start.setStyleSheet(_btn_qss(C_ACCENT))
+        self.btn_scan_stop.setStyleSheet(_btn_qss("#e94560"))
+        self.btn_scan_stop.setEnabled(False)
+        self.btn_scan_start.clicked.connect(self._on_scan_start)
+        self.btn_scan_stop.clicked.connect(self._on_scan_stop)
+        btn_row.addWidget(self.btn_scan_start, 1)
+        btn_row.addWidget(self.btn_scan_stop, 1)
+        root.addLayout(btn_row)
+
+        self.lbl_scan_status = QLabel("idle")
+        self.lbl_scan_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_scan_status.setStyleSheet(_LBL_QSS)
+        root.addWidget(self.lbl_scan_status)
+
+    def _on_scan_start(self) -> None:
+        z0 = float(self.scan_spin_z_start.value())
+        z1 = float(self.scan_spin_z_end.value())
+        n  = int(self.scan_spin_n.value())
+        z_positions = list(np.linspace(z0, z1, n))
+        self.scan_requested.emit(
+            z_positions,
+            int(self.scan_spin_settle.value()),
+            int(self.scan_spin_avg.value()),
+        )
+
+    def _on_scan_stop(self) -> None:
+        self.scan_stop_requested.emit()
+
+    def set_scan_status(self, msg: str, kind: str = "info") -> None:
+        color_map = {
+            "info": C_TEXT_DIM, "ok": "#4ecdc4",
+            "warn": "#facc15",  "err": "#e94560",
+        }
+        color = color_map.get(kind, C_TEXT_DIM)
+        self.lbl_scan_status.setText(msg)
+        self.lbl_scan_status.setStyleSheet(
+            f"color: {color}; font-family: '{_FC}'; font-size: {_FSS};"
+        )
+
+    def set_scan_running(self, running: bool) -> None:
+        self.btn_scan_start.setEnabled(not running)
+        self.btn_scan_stop.setEnabled(running)
 
     def _section_label(self, text: str) -> QLabel:
         lbl = QLabel(text)

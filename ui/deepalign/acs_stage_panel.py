@@ -18,7 +18,7 @@ import numpy as np
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QLineEdit, QGroupBox, QGridLayout,
-    QDoubleSpinBox, QSpinBox, QCheckBox, QTextEdit,
+    QDoubleSpinBox, QSpinBox, QCheckBox, QTextEdit, QComboBox,
 )
 from PyQt6.QtCore import Qt, QSettings, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QKeyEvent
@@ -297,6 +297,9 @@ class AcsStagePanel(QWidget):
     log_message     = pyqtSignal(str)
     acs_connected   = pyqtSignal(object)   # AcsStageController
     acs_disconnected = pyqtSignal()
+    # SCAN — list[np.ndarray(6,)] absolute targets, settle_ms, avg_frames
+    scan_requested      = pyqtSignal(list, int, int)
+    scan_stop_requested = pyqtSignal()
 
     def __init__(self, parent=None, ctrl: AcsStageController = None):
         super().__init__(parent)
@@ -356,6 +359,11 @@ class AcsStagePanel(QWidget):
         self._build_kinematic_group(self.sec_kin.content_layout())
         root.addWidget(self.sec_kin)
 
+        # 5. SCAN (motion + snap + process — process empty for now)
+        self.sec_scan = CollapsibleSection("6DOF SCAN", accent=C_ACCENT)
+        self._build_scan_group(self.sec_scan.content_layout())
+        root.addWidget(self.sec_scan)
+
         # 섹션 변경 시 자동 저장 연결
         self.sec_conn.toggled.connect(self._save_settings)
         self.sec_axis.toggled.connect(self._save_settings)
@@ -363,6 +371,103 @@ class AcsStagePanel(QWidget):
         self.sec_kin.toggled.connect(self._save_settings)
 
         root.addStretch()
+
+    def _build_scan_group(self, lay: QVBoxLayout) -> None:
+        lay.setContentsMargins(4, 4, 4, 4)
+        lay.setSpacing(4)
+
+        # 축 선택 + N points + delta + settle + avg
+        grid = QGridLayout()
+        grid.setSpacing(4)
+
+        def _l(t: str) -> QLabel:
+            x = QLabel(t)
+            x.setStyleSheet(lbl(C_TEXT_DIM, size="11px", mono=True))
+            return x
+
+        self.scan_cb_axis = QComboBox()
+        # ACS 축 명: Y1/Z1/X1/Z2/Y2/Z3 (인덱스 0..5)
+        for i, name in enumerate(["Y1", "Z1", "X1", "Z2", "Y2", "Z3"]):
+            self.scan_cb_axis.addItem(f"{i}: {name}", i)
+        self.scan_cb_axis.setStyleSheet(EDIT_STYLE)
+
+        self.scan_spin_n = QSpinBox()
+        self.scan_spin_n.setRange(2, 999); self.scan_spin_n.setValue(5)
+        self.scan_spin_n.setStyleSheet(_spin_style())
+
+        self.scan_spin_delta = QDoubleSpinBox()
+        self.scan_spin_delta.setRange(-50.0, 50.0); self.scan_spin_delta.setDecimals(4)
+        self.scan_spin_delta.setSingleStep(0.1); self.scan_spin_delta.setValue(0.1)
+        self.scan_spin_delta.setStyleSheet(_spin_style())
+
+        self.scan_spin_settle = QSpinBox()
+        self.scan_spin_settle.setRange(0, 10000); self.scan_spin_settle.setValue(500)
+        self.scan_spin_settle.setStyleSheet(_spin_style())
+
+        self.scan_spin_avg = QSpinBox()
+        self.scan_spin_avg.setRange(1, 32); self.scan_spin_avg.setValue(1)
+        self.scan_spin_avg.setStyleSheet(_spin_style())
+
+        grid.addWidget(_l("Axis"),       0, 0); grid.addWidget(self.scan_cb_axis,    0, 1)
+        grid.addWidget(_l("N points"),   0, 2); grid.addWidget(self.scan_spin_n,     0, 3)
+        grid.addWidget(_l("Δ (mm/rad)"), 1, 0); grid.addWidget(self.scan_spin_delta, 1, 1)
+        grid.addWidget(_l("Settle ms"),  1, 2); grid.addWidget(self.scan_spin_settle,1, 3)
+        grid.addWidget(_l("Avg frames"), 2, 0); grid.addWidget(self.scan_spin_avg,   2, 1)
+        lay.addLayout(grid)
+
+        # Start/Stop
+        row = QHBoxLayout()
+        self.btn_scan_start = QPushButton("SCAN START")
+        self.btn_scan_stop  = QPushButton("SCAN STOP")
+        self.btn_scan_start.setStyleSheet(_btn(C_ACCENT))
+        self.btn_scan_stop.setStyleSheet(_btn(C_DANGER))
+        self.btn_scan_stop.setEnabled(False)
+        self.btn_scan_start.clicked.connect(self._on_scan_start)
+        self.btn_scan_stop.clicked.connect(self._on_scan_stop)
+        row.addWidget(self.btn_scan_start, 1)
+        row.addWidget(self.btn_scan_stop, 1)
+        lay.addLayout(row)
+
+        self.lbl_scan_status = QLabel("idle")
+        self.lbl_scan_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_scan_status.setStyleSheet(lbl(C_TEXT_DIM, mono=True))
+        lay.addWidget(self.lbl_scan_status)
+
+    def _on_scan_start(self) -> None:
+        ctrl = self._ctrl_ref[0]
+        if ctrl is None:
+            self.lbl_scan_status.setText("❌ ACS not connected")
+            self.lbl_scan_status.setStyleSheet(lbl(C_DANGER, mono=True))
+            return
+        axis = int(self.scan_cb_axis.currentData())
+        n = int(self.scan_spin_n.value())
+        delta = float(self.scan_spin_delta.value())
+
+        # 현재 6축 위치 baseline
+        base = np.array([ctrl.get_position(i) for i in range(6)], dtype=float)
+        points: list[np.ndarray] = []
+        for i in range(n):
+            pt = base.copy()
+            pt[axis] = base[axis] + delta * i
+            points.append(pt)
+
+        self.scan_requested.emit(
+            points,
+            int(self.scan_spin_settle.value()),
+            int(self.scan_spin_avg.value()),
+        )
+
+    def _on_scan_stop(self) -> None:
+        self.scan_stop_requested.emit()
+
+    def set_scan_status(self, msg: str, kind: str = "info") -> None:
+        color_map = {"info": C_TEXT_DIM, "ok": C_ACCENT, "warn": C_WARN, "err": C_DANGER}
+        self.lbl_scan_status.setText(msg)
+        self.lbl_scan_status.setStyleSheet(lbl(color_map.get(kind, C_TEXT_DIM), mono=True))
+
+    def set_scan_running(self, running: bool) -> None:
+        self.btn_scan_start.setEnabled(not running)
+        self.btn_scan_stop.setEnabled(running)
 
     def _build_conn_group(self, lay: QVBoxLayout):
         lay.setSpacing(6)
@@ -848,13 +953,29 @@ class AcsStagePanel(QWidget):
         self.btn_kin_calc.setEnabled(not locked)
 
     def _on_enable_all(self):
+        if self._session_hub and self._session_hub.is_acs_connected():
+            try:
+                self._session_hub.acs_enable_all()
+                self._auto_disable_timer.start()
+                self._log("[ACS] ENABLE ALL via hub (5분 후 자동 서보 OFF 예약)")
+            except Exception as e:
+                self._log(f"[ACS] ENABLE ALL 오류: {e}")
+            return
         ctrl = self._ctrl_ref[0]
         if ctrl:
             ctrl.enable_all()
-            self._auto_disable_timer.start()  # 수동 Enable 시 5분 타이머 시작
+            self._auto_disable_timer.start()
             self._log("[ACS] ENABLE ALL (5분 후 자동 서보 OFF 예약)")
 
     def _on_disable_all(self):
+        if self._session_hub and self._session_hub.is_acs_connected():
+            try:
+                self._session_hub.acs_disable_all()
+                self._auto_disable_timer.stop()
+                self._log("[ACS] DISABLE ALL via hub")
+            except Exception as e:
+                self._log(f"[ACS] DISABLE ALL 오류: {e}")
+            return
         ctrl = self._ctrl_ref[0]
         if ctrl:
             ctrl.disable_all()
@@ -862,6 +983,13 @@ class AcsStagePanel(QWidget):
             self._log("[ACS] DISABLE ALL")
 
     def _on_stop_all(self):
+        if self._session_hub and self._session_hub.is_acs_connected():
+            try:
+                self._session_hub.acs_stop_all()
+                self._log("[ACS] STOP ALL via hub")
+            except Exception as e:
+                self._log(f"[ACS] STOP ALL 오류: {e}")
+            return
         ctrl = self._ctrl_ref[0]
         if ctrl:
             ctrl.stop_all()
@@ -1009,6 +1137,13 @@ class AcsStagePanel(QWidget):
         self._log(f"[KINEMATICS] ❌ KINEMATIC MOVE 오류: {msg}")
 
     def _on_auto_disable(self):
+        if self._session_hub and self._session_hub.is_acs_connected():
+            try:
+                self._session_hub.acs_disable_all()
+                self._log("[ACS] ⏱ 자동 서보 OFF (5분 대기 타임아웃) via hub")
+            except Exception as e:
+                self._log(f"[ACS] 자동 서보 OFF 오류: {e}")
+            return
         ctrl = self._ctrl_ref[0]
         if ctrl and ctrl.is_connected:
             ctrl.disable_all()
