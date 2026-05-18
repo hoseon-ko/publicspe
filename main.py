@@ -114,7 +114,7 @@ def main():
     app.setFont(font)
 
     window = MainWindow(spe_class=SpeFile)
-    window.show()
+    window.start_application()
 
     # ── Ctrl+C (SIGINT) 처리 ─────────────────────────────────────────
     # signal 핸들러는 별도 스레드에서 실행될 수 있으므로, 

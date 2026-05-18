@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
     QLabel, QFrame, QVBoxLayout, QHBoxLayout, QPushButton,
     QDockWidget, QTextEdit, QTabWidget, QApplication, QCheckBox,
 )
-from PyQt6.QtCore import Qt, QSize, QTimer
+from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSignal
 from core.config import get_config
 from PyQt6.QtGui import QFont, QShortcut, QKeySequence, QPixmap, QPainter
 
@@ -47,7 +47,131 @@ _TAB_ACTIVE  = "#e0e8f0"   # 선택된 탭 텍스트
 _TAB_LINE    = C_ACCENT    # 선택 탭 하단 강조선 색
 
 
+class StartupOverlay(QWidget):
+    """장비 초기 자동 연동 중 UI 상호작용을 차단하고 진행 상태를 보여주는 독립형 스플래시 윈도우"""
+    finished = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        
+        # 화면 중앙 배치
+        self.setFixedSize(540, 500)
+        if QApplication.instance():
+            screen = QApplication.primaryScreen().geometry()
+            x = (screen.width() - self.width()) // 2
+            y = (screen.height() - self.height()) // 2
+            self.move(x, y)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        
+        # 중앙 모던 카드
+        card = QFrame()
+        card.setStyleSheet("""
+            QFrame {
+                background: #0d1326;
+                border: 2px solid #4ecdc4;
+                border-radius: 12px;
+            }
+        """)
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(40, 40, 40, 40)
+        card_layout.setSpacing(18)
+        
+        # 네온 타이틀
+        lbl_title = QLabel("SYSTEM INITIALIZATION")
+        lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_title.setStyleSheet("color: #4ecdc4; font-family: 'Consolas', monospace; font-size: 20px; font-weight: bold; letter-spacing: 3px; border: none;")
+        card_layout.addWidget(lbl_title)
+        
+        # 부제목
+        lbl_sub = QLabel("Establishing Hardware Cockpit Connections")
+        lbl_sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_sub.setStyleSheet("color: #64748b; font-family: 'Segoe UI'; font-size: 13px; border: none;")
+        card_layout.addWidget(lbl_sub)
+        
+        card_layout.addSpacing(15)
+        
+        # 디바이스별 상태 표시줄
+        self.status_labels = {}
+        devices = [
+            ("pico", "Picomotor Controller"),
+            ("kimm", "KIMM Fine Z-Stage"),
+            ("acs", "ACS Multi-Axis Stage"),
+            ("camera", "High-Speed Camera System")
+        ]
+        
+        for dev_key, dev_name in devices:
+            row = QFrame()
+            row.setStyleSheet("border: none; background: transparent;")
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(10, 4, 10, 4)
+            
+            lbl_name = QLabel(dev_name)
+            lbl_name.setStyleSheet("color: #c0d0ff; font-family: 'Consolas', monospace; font-size: 14px; border: none;")
+            
+            lbl_status = QLabel("● STANDBY")
+            lbl_status.setStyleSheet("color: #475569; font-family: 'Consolas', monospace; font-size: 12px; font-weight: bold; border: none;")
+            lbl_status.setFixedWidth(140)
+            lbl_status.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            
+            row_layout.addWidget(lbl_name)
+            row_layout.addWidget(lbl_status)
+            card_layout.addWidget(row)
+            
+            self.status_labels[dev_key] = lbl_status
+            
+        card_layout.addSpacing(20)
+        
+        # 스킵 버튼
+        self.btn_skip = QPushButton("SKIP & START COCKPIT")
+        self.btn_skip.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_skip.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                color: #e2e8f0;
+                border: 1px solid #475569;
+                border-radius: 6px;
+                font-family: 'Consolas', monospace;
+                font-size: 13px;
+                padding: 10px;
+            }
+            QPushButton:hover {
+                background: #1e293b;
+                border-color: #94a3b8;
+                color: #ffffff;
+            }
+        """)
+        self.btn_skip.clicked.connect(self.hide_overlay)
+        card_layout.addWidget(self.btn_skip)
+        
+        layout.addWidget(card)
+        
+    def set_status(self, dev_key: str, status: str):
+        lbl = self.status_labels.get(dev_key)
+        if not lbl:
+            return
+            
+        if status == "connecting":
+            lbl.setText("● CONNECTING...")
+            lbl.setStyleSheet("color: #eab308; font-family: 'Consolas', monospace; font-size: 12px; font-weight: bold; border: none;")
+        elif status == "success":
+            lbl.setText("● CONNECTED")
+            lbl.setStyleSheet("color: #10b981; font-family: 'Consolas', monospace; font-size: 12px; font-weight: bold; border: none;")
+        elif status == "skipped":
+            lbl.setText("● SKIPPED")
+            lbl.setStyleSheet("color: #f43f5e; font-family: 'Consolas', monospace; font-size: 12px; font-weight: bold; border: none;")
+            
+    def hide_overlay(self):
+        self.hide()
+        self.finished.emit()
+
+
 class MainWindow(QMainWindow):
+    auto_connect_status = pyqtSignal(str, str)
+
     def __init__(self, spe_class=None):
         super().__init__()
         self._spe_class = spe_class
@@ -62,11 +186,14 @@ class MainWindow(QMainWindow):
         self._setup_log_dock()
         register_ui_callback(self._log)
         self._build_ui()
+        
+        # 오버레이 초기화 및 시그널 연결 (독립형 윈도우로 생성)
+        self.startup_overlay = StartupOverlay(None)
+        self.startup_overlay.finished.connect(self.show_main_window)
+        self.auto_connect_status.connect(self.startup_overlay.set_status)
+        
         self._restore_settings()
         self._setup_shortcuts()
-
-        # 시작 0.5초 후 백그라운드 장비 자동 연동 수행 (예외 안전)
-        QTimer.singleShot(500, self._auto_connect_startup)
 
     def _setup_shortcuts(self):
         # UI 디버깅용 스크린샷 덤프 (Ctrl+Alt+S)
@@ -615,12 +742,35 @@ class MainWindow(QMainWindow):
         self.save_all_settings()
         super().closeEvent(event)
 
+    def show_main_window(self):
+        """스플래시 화면을 닫고 메인 윈도우를 표시합니다."""
+        if hasattr(self, "startup_overlay"):
+            self.startup_overlay.hide()
+        self.show()
+
+    def start_application(self):
+        """어플리케이션 시작 시 자동 연결 설정에 따라 스플래시 또는 메인 화면을 노출합니다."""
+        auto_connect_enabled = bool(get_config().get("window.main.auto_connect", True))
+        if auto_connect_enabled:
+            # 1. 스플래시 화면(독립 프레임리스 창) 노출
+            if hasattr(self, "startup_overlay"):
+                self.startup_overlay.show()
+                self.startup_overlay.raise_()
+            # 2. 백그라운드 자동 연결 개시
+            self._auto_connect_startup()
+        else:
+            # 자동 연결이 비활성화인 경우 즉시 메인 화면 표시
+            self.show()
+
     def _auto_connect_startup(self):
-        """프로그램 실행 0.5초 후 백그라운드에서 모든 하드웨어 연결 자동 시도 (예외 안전)"""
+        """백그라운드에서 모든 하드웨어 연결 자동 시도 (예외 안전)"""
         auto_connect_enabled = bool(get_config().get("window.main.auto_connect", True))
         
         if not auto_connect_enabled:
             app_logger.info("[Auto-Connect] 자동 장비 연결 기능이 비활성화 상태입니다. (자동 연결 스킵)")
+            if hasattr(self, "startup_overlay"):
+                self.startup_overlay.hide()
+            self.show()
             return
 
         import threading
@@ -630,15 +780,19 @@ class MainWindow(QMainWindow):
             
             # 1. Picomotor 자동 연결
             try:
+                self.auto_connect_status.emit("pico", "connecting")
                 app_logger.info("[Auto-Connect] Picomotor 연결 시도...")
                 self.session_hub.connect_pico()
                 self.session_hub.start_pico_polling()
                 app_logger.info("[Auto-Connect] Picomotor 연결 성공.")
+                self.auto_connect_status.emit("pico", "success")
             except Exception as e:
                 app_logger.warning(f"[Auto-Connect] Picomotor 연결 스킵 (점유 또는 장치 없음): {e}")
+                self.auto_connect_status.emit("pico", "skipped")
 
             # 2. KIMM Z-Stage 자동 연결
             try:
+                self.auto_connect_status.emit("kimm", "connecting")
                 cfg = get_config()
                 ip = cfg.get("devices.kimm.ip", "192.168.1.100")
                 port_val = cfg.get("devices.kimm.port", "5000")
@@ -646,26 +800,25 @@ class MainWindow(QMainWindow):
                 app_logger.info(f"[Auto-Connect] KIMM Z-Stage 연결 시도 ({ip}:{port})...")
                 self.session_hub.kimm_connect(ip, port)
                 app_logger.info("[Auto-Connect] KIMM Z-Stage 연결 성공.")
+                self.auto_connect_status.emit("kimm", "success")
             except Exception as e:
                 app_logger.warning(f"[Auto-Connect] KIMM Z-Stage 연결 스킵 (타임아웃 또는 점유): {e}")
+                self.auto_connect_status.emit("kimm", "skipped")
 
             # 3. ACS Stage 자동 연결 → GUI 스레드에서 실행
             # 이유: AcsStageController.start_polling 이 QApplication.processEvents() 로
             # 첫 폴링 완료를 동기 대기한다. 백그라운드 스레드에서는 이벤트 큐가 없어
             # 항상 3초 timeout → RuntimeError 가 발생한다.
             # 카메라 자동연결도 ACS 완료 후 순차 실행되도록 chain.
-            QTimer.singleShot(0, self._auto_connect_acs_then_camera_on_gui)
+            QTimer.singleShot(100, self._auto_connect_acs_then_camera_on_gui)
 
         t = threading.Thread(target=worker, daemon=True, name="StartupAutoConnect")
         t.start()
 
     def _auto_connect_acs_then_camera_on_gui(self):
-        """GUI 스레드에서 ACS 자동 연결 → 완료 후 카메라 자동 연결.
-
-        ACS 의 start_polling 이 QApplication.processEvents() 로 동기 대기하므로
-        GUI 스레드 (이벤트 루프) 안에서 호출되어야 한다.
-        """
+        """GUI 스레드에서 ACS 자동 연결 → 완료 후 카메라 자동 연결."""
         try:
+            self.auto_connect_status.emit("acs", "connecting")
             cfg = get_config()
             ip = cfg.get("devices.acs.ip", "10.0.0.100")
             port_val = cfg.get("devices.acs.port", "700")
@@ -674,15 +827,18 @@ class MainWindow(QMainWindow):
             app_logger.info(f"[Auto-Connect] ACS Stage 연결 시도 ({ip}:{port}, sim={sim})...")
             self.session_hub.acs_connect(ip, port, sim)
             app_logger.info("[Auto-Connect] ACS Stage 연결 성공.")
+            self.auto_connect_status.emit("acs", "success")
         except Exception as e:
             app_logger.warning(f"[Auto-Connect] ACS Stage 연결 스킵 (타임아웃 또는 점유): {e}")
+            self.auto_connect_status.emit("acs", "skipped")
         finally:
             # ACS 성공/실패 여부와 무관하게 카메라 자동연결로 진행
-            QTimer.singleShot(0, self._auto_connect_camera_on_gui)
+            QTimer.singleShot(100, self._auto_connect_camera_on_gui)
 
     def _auto_connect_camera_on_gui(self):
         """메인 GUI 스레드에서 안전하게 카메라 자동 연결 수행 (DeepAlign 탭 기준)"""
         try:
+            self.auto_connect_status.emit("camera", "connecting")
             # 저장된 카메라 vendor 로드 (camera.last_used.vendor)
             vendor = str(get_config().get("camera.last_used.vendor", "Simulation")).strip()
             
@@ -767,10 +923,16 @@ class MainWindow(QMainWindow):
                 self.deep_align_tab._set_camera_action_state(True)
                 if caps and getattr(caps, "has_temperature", False):
                     self.deep_align_tab._start_temp_polling()
+                self.auto_connect_status.emit("camera", "success")
             else:
                 app_logger.info(f"[Auto-Connect] 감지된 {vendor} 카메라 장비가 없어 연결을 건너뜁니다.")
+                self.auto_connect_status.emit("camera", "skipped")
         except Exception as e:
             app_logger.warning(f"[Auto-Connect] 카메라 자동 연결 실패: {e}")
+            self.auto_connect_status.emit("camera", "skipped")
+        finally:
+            # 1.2초 대기하여 사용자가 최종 상태를 눈으로 확인하게 한 뒤 오버레이 숨기기
+            QTimer.singleShot(1200, self.startup_overlay.hide)
 
     def _on_auto_connect_toggled(self):
         """사용자가 헤더 바에서 AUTO CONNECT 체크박스를 토글할 때 설정 파일에 상태 저장"""
