@@ -755,6 +755,16 @@ class DeviceSessionHub(QObject):
             self.publish_error("acs", f"move_to failed: {exc}", source="hub")
             raise
 
+    def acs_wait_in_position_all(self, timeout_ms: int = 30000) -> None:
+        """6축 in-position 완료 대기. timeout 만료 시 TimeoutError 전파."""
+        hal = self._require_acs_hal()
+        hal.wait_in_position_all(int(timeout_ms))
+
+    def acs_wait_for_enabled_all(self, timeout_ms: int = 2000) -> bool:
+        """6축 Servo ON 확인 대기. True/False 반환."""
+        hal = self._require_acs_hal()
+        return bool(hal.wait_for_enabled_all(int(timeout_ms)))
+
     def acs_get_positions(self) -> list[float]:
         hal = self._require_acs_hal()
         try:

@@ -172,6 +172,15 @@ class AcsMotionAdapter(QObject):
             dev_logger.exception("[AcsMotionAdapter] is_enabled_all failed")
             raise HalCommandError(f"ACS is_enabled_all failed: {exc}", cause=exc) from exc
 
+    def wait_for_enabled_all(self, timeout_ms: int = 2000) -> bool:
+        dev_logger.debug(f"[AcsMotionAdapter] wait_for_enabled_all requested timeout_ms={timeout_ms}")
+        ctrl = self._require_connected()
+        try:
+            return bool(ctrl.wait_for_enabled_all(timeout_ms=int(timeout_ms)))
+        except Exception as exc:
+            dev_logger.exception("[AcsMotionAdapter] wait_for_enabled_all failed")
+            raise HalCommandError(f"ACS wait_for_enabled_all failed: {exc}", cause=exc) from exc
+
     def _require_connected(self) -> AcsStageController:
         if self._controller is None or not self._controller.is_connected:
             raise HalNotConnectedError("ACS controller is not connected")

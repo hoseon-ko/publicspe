@@ -1205,13 +1205,13 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
             self.acs_scan.set_scan_status("다른 스캔 실행중", "warn"); return
         if self._session_hub is None or not self._session_hub.is_acs_connected():
             self.acs_scan.set_scan_status("ACS 미연결", "err"); return
-        acs_ctrl = self._session_hub.acs_controller
-        if acs_ctrl is None:
-            self.acs_scan.set_scan_status("ACS controller 조회 실패", "err"); return
         if not self._is_hub_camera_connected():
             self.acs_scan.set_scan_status("카메라 미연결", "err"); return
 
-        mover = AcsMover(acs_ctrl, move_timeout_ms=self.acs_scan.get_move_timeout_ms())
+        mover = AcsMover(
+            self._session_hub,
+            move_timeout_ms=self.acs_scan.get_move_timeout_ms(),
+        )
         try:
             mover.enable(timeout_ms=2000)
         except Exception as e:
