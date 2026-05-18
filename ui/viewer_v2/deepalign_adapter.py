@@ -67,6 +67,10 @@ class DeepAlignViewerV2Adapter(QWidget):
     def set_source_image(self, img: np.ndarray) -> None:
         self._source_image = None if img is None else np.asarray(img)
 
+    def get_source_image(self):
+        """현재 viewer 에 표시된 raw frame (없으면 None)."""
+        return self._source_image
+
     def set_image_first(self, image: np.ndarray) -> None:
         self.set_source_image(image)
         self.set_live_frame(image, fit=True)

@@ -195,6 +195,9 @@ class AcsCard(QFrame):
         row_ip = QHBoxLayout()
         self.edit_ip = QLineEdit(); self.edit_ip.setPlaceholderText("10.0.0.100"); self.edit_ip.setStyleSheet(EDIT_STYLE)
         self.edit_port = QLineEdit("700"); self.edit_port.setFixedWidth(60); self.edit_port.setStyleSheet(EDIT_STYLE)
+        # IP/Port 변경 즉시 저장
+        self.edit_ip.editingFinished.connect(self._save_settings)
+        self.edit_port.editingFinished.connect(self._save_settings)
         self.check_sim = QCheckBox("SIM"); self.check_sim.setStyleSheet(CHECKBOX_STYLE)
         row_ip.addWidget(QLabel("IP")); row_ip.addWidget(self.edit_ip); row_ip.addWidget(QLabel("PORT")); row_ip.addWidget(self.edit_port); row_ip.addWidget(self.check_sim)
         conn_l.addLayout(row_ip)

@@ -40,7 +40,8 @@ class FramePipelineMixin:
         self.cam_viewer.set_live_frame(rgb, fit=self._viewer_first_frame)
         self._viewer_first_frame = False
 
-    def _push_frame(self, raw, gallery_label: str = "", drop_if_busy: bool = False) -> None:
+    def _push_frame(self, raw, gallery_label: str = "", drop_if_busy: bool = False,
+                    source: str = "live") -> None:
         """raw 프레임을 변환 워커에 제출.
 
         cmap/vmin/vmax를 메인 스레드에서 읽어 task에 담고 워커에 전달한다.
@@ -48,6 +49,8 @@ class FramePipelineMixin:
 
         drop_if_busy=True 이면 워커가 이전 프레임을 처리 중일 때 새 프레임을 버린다
         (live 스트림의 backpressure용).
+
+        source ∈ {"snap","live","acquire"} — ProcStatsPlot 트리거 필터링용.
         """
         if not hasattr(self, "_frame_convert_worker"):
             return
@@ -64,7 +67,16 @@ class FramePipelineMixin:
             vmax = self.cam_viewer.display_vmax
 
         raw = self._apply_background_subtraction(raw)
+        self._last_proc_stats = None
         raw = self._apply_proc_image(raw)
+        # Mode 1/2 통계가 생성되었으면 시계열 플롯에 1점 추가
+        stats = getattr(self, "_last_proc_stats", None)
+        if stats is not None and hasattr(self, "proc_stats_panel"):
+            mode, mean_v, mn, mx = stats
+            try:
+                self.proc_stats_panel.add_point(source, mode, mean_v, mn, mx)
+            except Exception:
+                pass
 
         worker.submit({
             "raw": raw,
@@ -74,48 +86,105 @@ class FramePipelineMixin:
             "gallery_label": gallery_label,
         })
 
+    def _get_first_box_roi_rect(self) -> tuple[float, float, float, float] | None:
+        """현재 viewer 의 첫 번째 Box ROI 좌표 (x0,y0,x1,y1) 반환. 없으면 None."""
+        from ui.roi_items import BoxROI
+        viewer = getattr(self, "cam_viewer", None)
+        if viewer is None:
+            return None
+        try:
+            rois = viewer.viewer.view.interactions._rois
+        except AttributeError:
+            return None
+        for roi_id in sorted(rois.keys()):
+            roi = rois[roi_id]
+            if isinstance(roi, BoxROI):
+                return (roi._x0, roi._y0, roi._x1, roi._y1)
+        return None
+
     def _apply_proc_image(self, raw: np.ndarray) -> np.ndarray:
-        """로딩된 처리 이미지와 현재 프레임을 Mode에 따라 연산.
+        """카메라 frame 처리 + 통계 계산.
 
         Mode 1: raw - proc  (차감)
         Mode 2: raw / proc  (나누기)
+        Mode 3: raw 그대로 통과 + 통계만 계산 (proc image 불요)
+
+        Region:
+        - "full": 전체 이미지 대상
+        - "roi" : 첫 번째 Box ROI 영역만 대상 (mask 적용)
         """
         from core.logger import calc_logger
 
-        if not getattr(self, '_proc_enabled', False):
-            return raw
-        img = getattr(self, '_proc_image', None)
-        if img is None or raw is None or img.shape != raw.shape:
+        if not getattr(self, '_proc_enabled', False) or raw is None:
             return raw
 
         mode = getattr(self, '_proc_mode', 1)
+        region = getattr(self, '_proc_region', 'full')
+
+        # Mode 1/2 는 proc image 필수
+        img = getattr(self, '_proc_image', None)
+        if mode in (1, 2) and (img is None or img.shape != raw.shape):
+            return raw
+
+        # ROI mask 계산 (region == 'roi' 일 때만)
+        roi_slice = None
+        if region == "roi":
+            rect = self._get_first_box_roi_rect()  # (x0,y0,x1,y1) or None
+            if rect is not None:
+                h, w = raw.shape[:2]
+                x0, y0, x1, y1 = rect
+                x0 = max(0, min(w, int(round(min(x0, x1)))))
+                x1 = max(0, min(w, int(round(max(x0, x1)))))
+                y0 = max(0, min(h, int(round(min(y0, y1)))))
+                y1 = max(0, min(h, int(round(max(y0, y1)))))
+                if x1 > x0 and y1 > y0:
+                    roi_slice = (slice(y0, y1), slice(x0, x1))
+
         orig_dtype = raw.dtype
 
         if mode == 1:
-            result = raw.astype(np.float32) - img.astype(np.float32)
+            full = raw.astype(np.float32) - img.astype(np.float32)
             if np.issubdtype(orig_dtype, np.unsignedinteger):
-                result = np.clip(result, 0, np.iinfo(orig_dtype).max)
-            out = result.astype(orig_dtype)
+                full = np.clip(full, 0, np.iinfo(orig_dtype).max)
+            out = full.astype(orig_dtype)
+            sample = full if roi_slice is None else full[roi_slice]
+            mean_v = float(np.mean(sample))
+            min_v  = float(np.min(sample))
+            max_v  = float(np.max(sample))
             calc_logger.info(
-                f"Mode 1 (sub) | mean={float(np.mean(result)):.4f}"
-                f"  min={float(np.min(result)):.4f}"
-                f"  max={float(np.max(result)):.4f}"
+                f"Mode 1 (sub) [{region}] | mean={mean_v:.4f}  min={min_v:.4f}  max={max_v:.4f}"
             )
 
         elif mode == 2:
             denom = img.astype(np.float32)
             denom[denom == 0] = np.nan          # 0 나누기 방지
-            result = raw.astype(np.float32) / denom
-            out = result.astype(np.float32)     # 나눗셈 결과는 float 유지
+            full = raw.astype(np.float32) / denom
+            out = full.astype(np.float32)
+            sample = full if roi_slice is None else full[roi_slice]
+            mean_v = float(np.nanmean(sample))
+            min_v  = float(np.nanmin(sample))
+            max_v  = float(np.nanmax(sample))
             calc_logger.info(
-                f"Mode 2 (div) | mean={float(np.nanmean(result)):.4f}"
-                f"  min={float(np.nanmin(result)):.4f}"
-                f"  max={float(np.nanmax(result)):.4f}"
+                f"Mode 2 (div) [{region}] | mean={mean_v:.4f}  min={min_v:.4f}  max={max_v:.4f}"
+            )
+
+        elif mode == 3:
+            # raw 자체 분석 — 이미지 변형 없이 통계만
+            out = raw
+            sample = raw if roi_slice is None else raw[roi_slice]
+            sample_f = sample.astype(np.float32)
+            mean_v = float(np.mean(sample_f))
+            min_v  = float(np.min(sample_f))
+            max_v  = float(np.max(sample_f))
+            calc_logger.info(
+                f"Mode 3 (analyze) [{region}] | mean={mean_v:.4f}  min={min_v:.4f}  max={max_v:.4f}"
             )
 
         else:
             return raw
 
+        # 통계 저장 — snap/live/acquire 핸들러가 ProcStatsPlot.add_point() 에 전달
+        self._last_proc_stats = (int(mode), mean_v, min_v, max_v)
         return out
 
     def _apply_background_subtraction(self, raw: np.ndarray) -> np.ndarray:

@@ -127,6 +127,10 @@ class KIMMZPanel(QWidget):
         row_port.addStretch()
         lay.addLayout(row_port)
 
+        # IP/Port 변경 즉시 저장 (Connect 안 눌러도 영속화)
+        self.edit_ip.editingFinished.connect(self._save_settings)
+        self.edit_port.editingFinished.connect(self._save_settings)
+
         # 버튼
         row_btn = QHBoxLayout()
         self.btn_connect = QPushButton("CONNECT")

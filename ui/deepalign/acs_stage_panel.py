@@ -326,6 +326,11 @@ class AcsStagePanel(QWidget):
         row_port.addWidget(self.check_sim)
         lay.addLayout(row_port)
 
+        # IP/Port/Sim 변경 즉시 저장 (Connect 안 눌러도 영속화)
+        self.edit_ip.editingFinished.connect(self._save_settings)
+        self.edit_port.editingFinished.connect(self._save_settings)
+        self.check_sim.toggled.connect(lambda _: self._save_settings())
+
         # 버튼
         row_btn = QHBoxLayout()
         self.btn_connect = QPushButton("CONNECT")

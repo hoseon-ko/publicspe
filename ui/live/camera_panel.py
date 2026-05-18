@@ -691,7 +691,7 @@ class CameraControlPanel(QWidget):
             # setpoint 읽기: SDK가 25°C로 리셋했으면 저장된 마지막값 복원
             try:
                 reading, setpoint, status = camera.get_temperature()
-                saved_sp = get_config().get("camera.temp_c", None)
+                saved_sp = get_config().get_camera_setting("temp_c", None)
                 saved_sp = float(saved_sp) if saved_sp is not None else None
                 if saved_sp is not None and (setpoint is None or abs(float(setpoint) - 25.0) < 0.5):
                     # SDK가 25°C로 초기화했으면 이전 설정값 복원
@@ -942,7 +942,7 @@ class CameraControlPanel(QWidget):
             confirmed = float(setpoint)
             # 성공한 setpoint를 설정 파일에 저장 (다음 연결 시 자동 복원)
             _c = get_config()
-            _c.set("camera.temp_c", confirmed)
+            _c.set_camera_setting("temp_c", confirmed)
             _c.save()
             if abs(confirmed - requested) > 0.1:
                 self.log_message.emit(
@@ -1012,7 +1012,7 @@ class CameraControlPanel(QWidget):
         for sec in self._sections:
             name = sec._title_lbl.text().replace(' ', '_').lower()
             c.set(f"ui.sections_collapsed.{name}", sec.is_collapsed())
-        c.set("camera.type", self.combo_cam_type.currentText())
+        c.set_camera_setting("type", self.combo_cam_type.currentText())
         c.save()
 
     def _load_settings(self):
@@ -1023,7 +1023,7 @@ class CameraControlPanel(QWidget):
             if val is not None:
                 sec.set_collapsed(bool(val))
 
-        saved_type = c.get("camera.type", "SIMULATED")
+        saved_type = c.get_camera_setting("type", "SIMULATED")
         idx = self.combo_cam_type.findText(str(saved_type))
         if idx < 0:
             idx = self.combo_cam_type.findText("SIMULATED")

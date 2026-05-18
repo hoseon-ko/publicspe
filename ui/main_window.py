@@ -671,8 +671,8 @@ class MainWindow(QMainWindow):
     def _auto_connect_camera_on_gui(self):
         """메인 GUI 스레드에서 안전하게 카메라 자동 연결 수행 (DeepAlign 탭 기준)"""
         try:
-            # 저장된 카메라 vendor 로드 (단일 출처 camera.vendor)
-            vendor = str(get_config().get("camera.vendor", "Simulation")).strip()
+            # 저장된 카메라 vendor 로드 (camera.last_used.vendor)
+            vendor = str(get_config().get("camera.last_used.vendor", "Simulation")).strip()
             
             app_logger.info(f"[Auto-Connect] 저장된 카메라 벤더 로드: {vendor}")
             

@@ -28,7 +28,8 @@ class SpeImageViewerV2(QWidget):
     histogram_updated = pyqtSignal(object, object)  # (counts, bin_edges)
     
     # UI Toggle Requests
-    toggle_analysis_requested = pyqtSignal(str)     # 'profile' or 'histogram'
+    toggle_analysis_requested = pyqtSignal(str)     # 'profile' or 'histogram' or 'proc'
+    save_spe_requested = pyqtSignal()               # 현재 표시 raw → SPE 저장 요청
 
     def __init__(self, state: ViewerState | None = None, parent=None):
         super().__init__(parent)
@@ -104,6 +105,14 @@ class SpeImageViewerV2(QWidget):
 
         self.btn_toggle_profile = make_btn("📈 Plot", "Show/Hide Profile Panel")
         self.btn_toggle_histogram = make_btn("📊 Hist", "Show/Hide Histogram Panel")
+        self.btn_toggle_proc = make_btn("📉 Proc", "Show/Hide Proc Stats Plot")
+        # dock visibility 와 동기화되도록 checkable
+        for b in (self.btn_toggle_profile, self.btn_toggle_histogram, self.btn_toggle_proc):
+            b.setCheckable(True)
+
+        # 현재 viewer 표시 raw 를 SPE 로 저장
+        self.btn_save_spe = make_btn("💾 Save SPE", "현재 표시된 raw 를 SPE 로 저장")
+        self.btn_save_spe.clicked.connect(self.save_spe_requested.emit)
 
         # 컬러맵 선택 드롭다운
         self.combo_cmap = QComboBox()
@@ -129,9 +138,13 @@ class SpeImageViewerV2(QWidget):
         tool_layout.addSpacing(10)
         tool_layout.addWidget(self.btn_toggle_profile)
         tool_layout.addWidget(self.btn_toggle_histogram)
-        
+        tool_layout.addWidget(self.btn_toggle_proc)
+        tool_layout.addSpacing(10)
+        tool_layout.addWidget(self.btn_save_spe)
+
         self.btn_toggle_profile.clicked.connect(lambda: self.toggle_analysis_requested.emit("profile"))
         self.btn_toggle_histogram.clicked.connect(lambda: self.toggle_analysis_requested.emit("histogram"))
+        self.btn_toggle_proc.clicked.connect(lambda: self.toggle_analysis_requested.emit("proc"))
         tool_layout.addStretch()
         tool_layout.addWidget(QLabel("🎨 Colormap:"))
         tool_layout.addWidget(self.combo_cmap)

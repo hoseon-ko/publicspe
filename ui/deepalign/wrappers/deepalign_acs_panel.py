@@ -71,6 +71,12 @@ class DeepAlignAcsPanel(QWidget):
         """AcsScanWidget의 baseline 동기화용 — KINEMATIC MOVE 입력 6 DOF."""
         return [float(s.value()) for s in self._card._dof_spins]
 
+    def _save_settings(self) -> None:
+        """종료 시 강제 저장 위임 — 사용자가 connect 안 한 경우 대비."""
+        fn = getattr(self._card, "_save_settings", None)
+        if callable(fn):
+            fn()
+
     # ── Auto-disable timer 내부 ──────────────────────────────────────────
 
     def _reset_auto_disable(self) -> None:

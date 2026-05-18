@@ -38,17 +38,18 @@ class DeepAlignStylesMixin:
 
     def _wrap_dock(self, obj_name: str, title: str, content: QWidget,
                    area: Qt.DockWidgetArea, host) -> QDockWidget:
-        wrap = QWidget()
-        vbox = QVBoxLayout(wrap)
-        vbox.setContentsMargins(0, 0, 0, 0)
-        vbox.setSpacing(0)
-        vbox.addWidget(self._make_dock_header(title))
-        vbox.addWidget(content, 1)
         dock = QDockWidget(host)
         dock.setObjectName(obj_name)
-        dock.setWidget(wrap)
-        dock.setTitleBarWidget(QWidget()) # Hide default title bar
+        dock.setWidget(content)
+        # 커스텀 헤더를 타이틀바로 사용 — Qt 가 이 위젯 위에서 드래그/더블클릭으로
+        # floating/이동을 처리한다. (빈 QWidget 으로 교체하면 핸들이 사라짐)
+        dock.setTitleBarWidget(self._make_dock_header(title))
         dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
+        dock.setFeatures(
+            QDockWidget.DockWidgetFeature.DockWidgetMovable
+            | QDockWidget.DockWidgetFeature.DockWidgetFloatable
+            | QDockWidget.DockWidgetFeature.DockWidgetClosable
+        )
         host.addDockWidget(area, dock)
         return dock
     def _set_master_progress(self, value: int):

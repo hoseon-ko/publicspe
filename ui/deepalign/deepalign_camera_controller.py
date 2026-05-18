@@ -143,7 +143,7 @@ class CameraControllerMixin(CameraHubMixin):
         self._set_master_progress(100)
         self._set_camera_action_state(self._is_hub_camera_connected(), busy=False)
         ts = datetime.now().strftime("%H:%M:%S")
-        self._push_frame(raw, gallery_label=f"Snap_{ts}")
+        self._push_frame(raw, gallery_label=f"Snap_{ts}", source="snap")
 
         dev_logger.debug(f"[DeepAlign] snap completed actual_s={actual_s:.3f}")
         
@@ -273,7 +273,7 @@ class CameraControllerMixin(CameraHubMixin):
         self._update_acquire_times(skip_progress_calc=True)
         ts = datetime.now().strftime("%H:%M:%S")
         gallery_label = f"Acq_Last_{ts}" if cur == total else ""
-        self._push_frame(raw, gallery_label=gallery_label)
+        self._push_frame(raw, gallery_label=gallery_label, source="acquire")
 
     def _on_acquire_finished(self, frames: list):
         self._acq.running = False
@@ -330,31 +330,32 @@ class CameraControllerMixin(CameraHubMixin):
         connected = self._is_hub_camera_connected()
         self._set_camera_action_state(connected, busy=False)
 
-    def _build_acquire_save_path(self) -> Path:
+    def _build_acquire_save_path(self, name_base: str | None = None) -> Path:
+        """`name_base` 지정 시 file_base 자리에 그 값을 강제 사용 (예: "SNAP")."""
         folder = Path(self.edit_folder.text().strip() or "Live_Captures")
         folder.mkdir(parents=True, exist_ok=True)
 
-        stem = self._build_filename_stem()
+        stem = self._build_filename_stem(base_override=name_base)
         path = folder / f"{stem}.spe"
 
         if self.check_inc_name.isChecked():
             counter = 2
             while path.exists():
-                stem = self._build_filename_stem(counter=f"{counter:04d}")
+                stem = self._build_filename_stem(counter=f"{counter:04d}", base_override=name_base)
                 path = folder / f"{stem}.spe"
                 counter += 1
         elif path.exists():
-            base = self.edit_file_base.text().strip() or "Capture"
+            base = name_base or (self.edit_file_base.text().strip() or "Capture")
             now = datetime.now()
             path = folder / f"{base}_{now.strftime('%Y%m%d_%H%M%S')}.spe"
 
         return path
 
-    def _save_acquire_spe(self, frames: list) -> Path:
+    def _save_acquire_spe(self, frames: list, name_base: str | None = None) -> Path:
         if not frames:
             raise ValueError("No frames to save")
 
-        path = self._build_acquire_save_path()
+        path = self._build_acquire_save_path(name_base=name_base)
         vendor = self.cb_vendor.currentText().strip() or "DeepAlign"
         camera_name = vendor
         camera_model = vendor
@@ -385,6 +386,25 @@ class CameraControllerMixin(CameraHubMixin):
                 }
             },
         )
+
+    def _on_save_current_spe(self) -> None:
+        """viewer toolbar 의 💾 Save SPE → 현재 표시 raw 1프레임을 SPE 저장.
+
+        Acquire 와 동일한 폴더/파일명 규칙 (SAVE FILE 섹션) 사용.
+        """
+        try:
+            raw = self.cam_viewer.get_source_image()
+        except Exception:
+            raw = None
+        if raw is None:
+            dev_logger.warning("[DeepAlign] Save SPE: 저장할 frame 없음 (Snap/Live 먼저)")
+            return
+        try:
+            path = self._save_acquire_spe([raw], name_base="SNAP")
+            self.spe_saved.emit(str(path))
+            dev_logger.info(f"[DeepAlign] Saved current frame → {path}")
+        except Exception as e:
+            dev_logger.exception(f"[DeepAlign] Save SPE 실패: {e}")
 
     def _start_hub_live(self) -> None:
         if self._session_hub is None:

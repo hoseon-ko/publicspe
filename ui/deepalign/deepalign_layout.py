@@ -54,6 +54,7 @@ from theme.styles import (
     C_BG_DEEP, C_BG_DARK, C_BG_MED, C_BORDER, C_TEXT, C_TEXT_DIM, C_TEXT_DEAD,
 )
 from ui.plot_panel import PlotPanel, HistogramPanel
+from ui.deepalign.proc_stats_plot import ProcStatsPlot
 from ui.file_list_panel import FileListPanel
 from ui.frame_grid_panel import FrameGridPanel
 from ui.roi_panel import RoiPanel
@@ -282,20 +283,29 @@ class LayoutBuilderMixin:
         self.cam_viewer.set_external_render_control(True)
         host.setCentralWidget(self.cam_viewer)
 
-        # Analysis Docks
+        # Analysis Docks (기본 표시)
         self.plot_panel = PlotPanel("Profile")
         self.dock_plot = self._wrap_dock(
             "dock_plot", "📈  PROFILE PLOT",
             self.plot_panel, Qt.DockWidgetArea.BottomDockWidgetArea, host
         )
-        self.dock_plot.setVisible(False)
+        self.dock_plot.setVisible(True)
 
         self.hist_panel = HistogramPanel()
         self.dock_hist = self._wrap_dock(
             "dock_histogram", "📊  HISTOGRAM",
             self.hist_panel, Qt.DockWidgetArea.BottomDockWidgetArea, host
         )
-        self.dock_hist.setVisible(False)
+        self.dock_hist.setVisible(True)
+
+        # Proc Stats — Mode 1/2 결과 시계열 (우측 dock, 기본 숨김 / master_bar 토글로 ON)
+        self.proc_stats_panel = ProcStatsPlot()
+        self.dock_proc_stats = self._wrap_dock(
+            "dock_proc_stats", "📉  PROC STATS",
+            self.proc_stats_panel, Qt.DockWidgetArea.RightDockWidgetArea, host
+        )
+        self.dock_proc_stats.setMinimumWidth(280)
+        self.dock_proc_stats.setVisible(False)
 
         self.file_list_panel = FileListPanel()
         self.dock_files = self._wrap_dock(
@@ -360,6 +370,7 @@ class LayoutBuilderMixin:
             ("🎞  Frames",    self.dock_frames),
             ("📈  Plot",      self.dock_plot),
             ("📊  Histogram", self.dock_hist),
+            ("📉  Proc",      self.dock_proc_stats),
             ("🔲  ROI",       self.dock_roi),
             ("📷  Scan",      self.dock_scan_result),
             ("🔍  AF",        self.dock_af_result),
@@ -379,7 +390,7 @@ class LayoutBuilderMixin:
         self.act_an_fit = QAction("⟳  Reset View", self)
         self.analysis_toolbar.addAction(self.act_an_fit)
 
-        # 기본적으로 좌우 분할
+        # 기본적으로 좌우 분할 (Proc 는 우측에 별도 dock, 토글로 표시)
         host.splitDockWidget(self.dock_plot, self.dock_hist, Qt.Orientation.Horizontal)
         return host
 
@@ -878,9 +889,9 @@ class LayoutBuilderMixin:
             }
         """
 
-        # Use checkbox
+        # Use checkbox — 항상 활성 (Mode 3 가 proc image 없이도 동작)
         self.check_use_proc = QCheckBox("Use Image Processing")
-        self.check_use_proc.setEnabled(False)
+        self.check_use_proc.setEnabled(True)
         self.check_use_proc.setStyleSheet(f"""
             QCheckBox {{ color: {C_TEXT}; font-size: 13px; font-weight: 700; spacing: 8px; }}
             QCheckBox::indicator {{
@@ -893,25 +904,49 @@ class LayoutBuilderMixin:
         """)
         il.addWidget(self.check_use_proc)
 
-        # Mode selector
+        # Mode selector — 1/2 는 proc image 필요, 3 은 raw 자체 통계만
         mode_row = QHBoxLayout()
         lbl_mode = QLabel("Mode:")
         lbl_mode.setStyleSheet(_lbl_s2)
-        self.radio_proc_mode1 = QRadioButton("Mode 1")
-        self.radio_proc_mode2 = QRadioButton("Mode 2")
+        self.radio_proc_mode1 = QRadioButton("1 sub")
+        self.radio_proc_mode2 = QRadioButton("2 div")
+        self.radio_proc_mode3 = QRadioButton("3 analyze")
         self.radio_proc_mode1.setChecked(True)
         self.radio_proc_mode1.setEnabled(False)
         self.radio_proc_mode2.setEnabled(False)
-        for rb in (self.radio_proc_mode1, self.radio_proc_mode2):
+        self.radio_proc_mode3.setEnabled(False)
+        for rb in (self.radio_proc_mode1, self.radio_proc_mode2, self.radio_proc_mode3):
             rb.setStyleSheet(_radio_style)
         self._proc_mode_group = QButtonGroup()
         self._proc_mode_group.addButton(self.radio_proc_mode1, 1)
         self._proc_mode_group.addButton(self.radio_proc_mode2, 2)
+        self._proc_mode_group.addButton(self.radio_proc_mode3, 3)
         mode_row.addWidget(lbl_mode)
         mode_row.addWidget(self.radio_proc_mode1)
         mode_row.addWidget(self.radio_proc_mode2)
+        mode_row.addWidget(self.radio_proc_mode3)
         mode_row.addStretch()
         il.addLayout(mode_row)
+
+        # Region selector — Full image vs 첫 번째 Box ROI 영역만
+        region_row = QHBoxLayout()
+        lbl_region = QLabel("Region:")
+        lbl_region.setStyleSheet(_lbl_s2)
+        self.radio_region_full = QRadioButton("Full")
+        self.radio_region_roi  = QRadioButton("Box ROI")
+        self.radio_region_full.setChecked(True)
+        self.radio_region_full.setEnabled(False)
+        self.radio_region_roi.setEnabled(False)
+        for rb in (self.radio_region_full, self.radio_region_roi):
+            rb.setStyleSheet(_radio_style)
+        self._proc_region_group = QButtonGroup()
+        self._proc_region_group.addButton(self.radio_region_full, 0)
+        self._proc_region_group.addButton(self.radio_region_roi,  1)
+        region_row.addWidget(lbl_region)
+        region_row.addWidget(self.radio_region_full)
+        region_row.addWidget(self.radio_region_roi)
+        region_row.addStretch()
+        il.addLayout(region_row)
 
         self.btn_proc_load = self._style_btn("LOAD IMAGE", "#0ea5e9")
         il.addWidget(self.btn_proc_load)
@@ -1118,14 +1153,15 @@ class LayoutBuilderMixin:
         self.cb_time_fmt.setEnabled(has_time)
         self.cb_place.setEnabled(has_date or has_time)
 
-    def _build_filename_stem(self, counter: str = "0001") -> str:
+    def _build_filename_stem(self, counter: str = "0001", base_override: str | None = None) -> str:
         """날짜/시간/카운터 토큰을 조합하여 파일명 stem을 반환합니다.
 
         Args:
             counter: 증분 카운터 문자열 (기본 "0001"). 루프에서 충돌 방지 시 증가시켜 넘깁니다.
+            base_override: file_base 강제 지정 (예: "SNAP"). None 이면 SAVE FILE 의 file_base 사용.
 
         Returns:
-            확장자 없는 파일명 stem (예: "Capture_2026-05-14_12_00_00_0001").
+            확장자 없는 파일명 stem (예: "Capture_2026-05-14_12_00_00_0001", "SNAP_2026-05-14_12_00_00").
         """
         now = datetime.now()
         tokens: list[str] = []
@@ -1141,7 +1177,7 @@ class LayoutBuilderMixin:
         if self.check_inc_name.isChecked():
             tokens.append(counter)
 
-        base = self.edit_file_base.text().strip() or "Capture"
+        base = base_override if base_override else (self.edit_file_base.text().strip() or "Capture")
         if not tokens:
             return base
         joined = "_".join(tokens)
@@ -1319,18 +1355,21 @@ class LayoutBuilderMixin:
         self.btn_an_fit = self._dash_btn("FIT VIEW", "RESET", "#64748b")
         self.btn_reset_dock = self._dash_btn("RESET", "LAYOUT", "#94a3b8")
         
-        # 도킹 토글 버튼들을 위한 작은 수직 레이아웃
-        dock_v = QVBoxLayout(); dock_v.setSpacing(2); dock_v.setContentsMargins(5, 0, 0, 0)
+        # 도킹 토글 버튼 — 2x2 그리드 (높이 45 안에 4개 모두 보이도록)
+        from PyQt6.QtWidgets import QGridLayout
+        dock_g = QGridLayout(); dock_g.setSpacing(2); dock_g.setContentsMargins(5, 0, 0, 0)
         self.btn_toggle_plot_sm = self._small_toggle_btn("📈 Plot")
         self.btn_toggle_hist_sm = self._small_toggle_btn("📊 Hist")
+        self.btn_toggle_proc_sm = self._small_toggle_btn("📉 Proc")
         self.btn_toggle_roi_sm  = self._small_toggle_btn("🎯 ROI")
-        dock_v.addWidget(self.btn_toggle_plot_sm)
-        dock_v.addWidget(self.btn_toggle_hist_sm)
-        dock_v.addWidget(self.btn_toggle_roi_sm)
-        
+        dock_g.addWidget(self.btn_toggle_plot_sm, 0, 0)
+        dock_g.addWidget(self.btn_toggle_hist_sm, 0, 1)
+        dock_g.addWidget(self.btn_toggle_proc_sm, 1, 0)
+        dock_g.addWidget(self.btn_toggle_roi_sm,  1, 1)
+
         for button in (self.btn_an_open, self.btn_an_roi_range, self.btn_an_fit, self.btn_reset_dock):
             anbl.addWidget(button)
-        anbl.addLayout(dock_v)
+        anbl.addLayout(dock_g)
         self.master_btn_stack.addWidget(an_w)
 
         lay.addWidget(self.master_btn_stack)

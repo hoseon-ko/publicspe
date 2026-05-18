@@ -294,6 +294,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self._proc_image: np.ndarray | None = None
         self._proc_mode: int = 1
         self._proc_enabled: bool = False
+        self._proc_region: str = "full"   # "full" | "roi"
 
         # Background subtraction
         self._bg_frame: np.ndarray | None = None
@@ -436,6 +437,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
 
         # Viewer UI Toggle Requests
         self.cam_viewer.viewer.toggle_analysis_requested.connect(self._on_toggle_analysis_requested)
+        self.cam_viewer.viewer.save_spe_requested.connect(self._on_save_current_spe)
 
         # ── Master bar — Mirror 탭 ────────────────────────────────────
         self.btn_mirror_zero_all.clicked.connect(self.mirror_panel.zero_all)
@@ -483,12 +485,16 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self.btn_an_fit.clicked.connect(self._on_an_fit_clicked)
         self.btn_toggle_plot_sm.toggled.connect(self.dock_plot.setVisible)
         self.btn_toggle_hist_sm.toggled.connect(self.dock_hist.setVisible)
+        self.btn_toggle_proc_sm.toggled.connect(self.dock_proc_stats.setVisible)
         self.btn_toggle_roi_sm.toggled.connect(self.dock_roi.setVisible)
         self.dock_plot.visibilityChanged.connect(
             lambda visible: self._sync_analysis_dock_toggle(self.dock_plot, self.btn_toggle_plot_sm, visible)
         )
         self.dock_hist.visibilityChanged.connect(
             lambda visible: self._sync_analysis_dock_toggle(self.dock_hist, self.btn_toggle_hist_sm, visible)
+        )
+        self.dock_proc_stats.visibilityChanged.connect(
+            lambda visible: self._sync_analysis_dock_toggle(self.dock_proc_stats, self.btn_toggle_proc_sm, visible)
         )
         self.dock_roi.visibilityChanged.connect(
             lambda visible: self._sync_analysis_dock_toggle(self.dock_roi, self.btn_toggle_roi_sm, visible)
@@ -510,6 +516,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
 
         self._sync_analysis_dock_toggle(self.dock_plot, self.btn_toggle_plot_sm, self.dock_plot.isVisible())
         self._sync_analysis_dock_toggle(self.dock_hist, self.btn_toggle_hist_sm, self.dock_hist.isVisible())
+        self._sync_analysis_dock_toggle(self.dock_proc_stats, self.btn_toggle_proc_sm, self.dock_proc_stats.isVisible())
         self._sync_analysis_dock_toggle(self.dock_roi, self.btn_toggle_roi_sm, self.dock_roi.isVisible())
 
         # ROI Panel
@@ -540,6 +547,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         # ── Image processing ─────────────────────────────────────────
         self.check_use_proc.toggled.connect(self._on_proc_enable_toggled)
         self._proc_mode_group.idClicked.connect(self._on_proc_mode_changed)
+        self._proc_region_group.idClicked.connect(self._on_proc_region_changed)
         self.btn_proc_load.clicked.connect(self._on_proc_load_clicked)
 
         # ── Background subtraction ────────────────────────────────────
@@ -582,11 +590,24 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
 
     def _on_proc_enable_toggled(self, checked: bool) -> None:
         self._proc_enabled = checked
-        self.radio_proc_mode1.setEnabled(checked)
-        self.radio_proc_mode2.setEnabled(checked)
+        has_img = self._proc_image is not None
+        # Mode 1/2 는 proc image 필요. Mode 3 는 raw 자체 분석이라 무조건 enable.
+        self.radio_proc_mode1.setEnabled(checked and has_img)
+        self.radio_proc_mode2.setEnabled(checked and has_img)
+        self.radio_proc_mode3.setEnabled(checked)
+        # Mode 1/2 가 disabled 인데 현재 선택되어 있으면 Mode 3 으로 자동 전환
+        if checked and not has_img and self._proc_mode in (1, 2):
+            self.radio_proc_mode3.setChecked(True)
+            self._proc_mode = 3
+        # Region radio 도 enable 따라감
+        self.radio_region_full.setEnabled(checked)
+        self.radio_region_roi.setEnabled(checked)
 
     def _on_proc_mode_changed(self, mode_id: int) -> None:
         self._proc_mode = mode_id
+
+    def _on_proc_region_changed(self, region_id: int) -> None:
+        self._proc_region = "roi" if region_id == 1 else "full"
 
     def _on_proc_load_clicked(self) -> None:
         start = self.edit_folder.text().strip() or "."
@@ -629,14 +650,20 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
 
     def _proc_update_ui(self, filename: str = "") -> None:
         has_img = self._proc_image is not None
-        self.check_use_proc.setEnabled(has_img)
+        # check_use_proc 는 항상 활성 (Mode 3 가 proc image 불요)
+        self.check_use_proc.setEnabled(True)
+        # Mode 1/2 는 proc image 있고 enable 상태일 때만
+        en = self._proc_enabled
+        self.radio_proc_mode1.setEnabled(en and has_img)
+        self.radio_proc_mode2.setEnabled(en and has_img)
+        self.radio_proc_mode3.setEnabled(en)
+        # 이미지가 없는데 현재 모드가 1/2 면 3 으로 자동 전환
+        if not has_img and self._proc_mode in (1, 2):
+            self.radio_proc_mode3.setChecked(True)
+            self._proc_mode = 3
         if not has_img:
-            self._proc_enabled = False
-            self.check_use_proc.setChecked(False)
-            self.radio_proc_mode1.setEnabled(False)
-            self.radio_proc_mode2.setEnabled(False)
-            self.lbl_proc_status.setText("No image loaded")
-            self.lbl_proc_status.setStyleSheet(f"color: {C_TEXT_DEAD}; font-size: 11px; font-weight: bold;")
+            self.lbl_proc_status.setText("No image (Mode 3 만 가능)")
+            self.lbl_proc_status.setStyleSheet(f"color: {C_TEXT_DIM}; font-size: 11px; font-weight: bold;")
             return
         shape = self._proc_image.shape
         dims  = f"{shape[1]}×{shape[0]}" if self._proc_image.ndim >= 2 else f"{shape[0]}"
@@ -765,16 +792,17 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
 
     def _save_settings(self):
         c = self._cfg
-        # Camera (단일 출처 camera.*)
-        c.set("camera.vendor",      self.cb_vendor.currentText())
-        c.set("camera.exposure_ms", float(self.spin_exposure.value()))
-        c.set("camera.fps",         float(self.spin_fps.value()))
-        c.set("camera.fps_lock",    bool(self.check_fps_lock.isChecked()))
-        c.set("camera.temp_c",      float(self.spin_temp.value()))
-        c.set("camera.adc.quality", self.cb_adc_quality.currentText())
-        c.set("camera.adc.speed",   self.cb_adc_speed.currentText())
-        c.set("camera.adc.gain",    self.cb_adc_gain.currentText())
-        c.set("camera.adc.bit",     self.cb_adc_bit.currentText())
+        # Camera — vendor 별 분리 저장. last_used 도 갱신.
+        vendor = self.cb_vendor.currentText()
+        c.set_last_camera(vendor, device_id=getattr(self, "_active_device_id", ""))
+        c.set_camera_setting("exposure_ms", float(self.spin_exposure.value()), vendor=vendor)
+        c.set_camera_setting("fps",         float(self.spin_fps.value()),      vendor=vendor)
+        c.set_camera_setting("fps_lock",    bool(self.check_fps_lock.isChecked()), vendor=vendor)
+        c.set_camera_setting("temp_c",      float(self.spin_temp.value()),     vendor=vendor)
+        c.set_camera_setting("adc.quality", self.cb_adc_quality.currentText(), vendor=vendor)
+        c.set_camera_setting("adc.speed",   self.cb_adc_speed.currentText(),   vendor=vendor)
+        c.set_camera_setting("adc.gain",    self.cb_adc_gain.currentText(),    vendor=vendor)
+        c.set_camera_setting("adc.bit",     self.cb_adc_bit.currentText(),     vendor=vendor)
         # Save (DeepAlign 전용: tabs.deepalign.save.*)
         c.set("tabs.deepalign.save.frame_to_save", int(self.spin_frame_to_save.value()))
         c.set("tabs.deepalign.save.folder",        self.edit_folder.text())
@@ -785,20 +813,44 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         c.set("tabs.deepalign.save.date_fmt",      self.cb_date_fmt.currentText())
         c.set("tabs.deepalign.save.time_fmt",      self.cb_time_fmt.currentText())
         c.set("tabs.deepalign.save.place",         self.cb_place.currentText())
+        # Image Processing 상태
+        c.set("tabs.deepalign.proc.enabled", bool(self.check_use_proc.isChecked()))
+        c.set("tabs.deepalign.proc.mode",    int(self._proc_mode))
+        c.set("tabs.deepalign.proc.region",  str(self._proc_region))
+        # DeepAlign 내부 dock 레이아웃 (Plot/Hist/Proc/ROI 위치+가시성)
+        try:
+            c.set("window.deepalign.dockState", self.dock_host.saveState())
+        except Exception:
+            pass
+        # ProcStats 패널 상태
+        ps = self.proc_stats_panel
+        c.set("tabs.deepalign.proc_stats.enabled",   bool(ps.chk_enable.isChecked()))
+        src_id = ps._grp.checkedId()
+        c.set("tabs.deepalign.proc_stats.source",
+              "snap" if src_id == 0 else "live" if src_id == 1 else "all")
+        c.set("tabs.deepalign.proc_stats.show_mean", bool(ps.chk_mean.isChecked()))
+        c.set("tabs.deepalign.proc_stats.show_min",  bool(ps.chk_min.isChecked()))
+        c.set("tabs.deepalign.proc_stats.show_max",  bool(ps.chk_max.isChecked()))
         c.save()
+        # 디바이스 패널 강제 저장 (사용자가 IP/Port 만 바꾸고 connect 안 한 경우 대비)
+        for p in (self.align_panel, self.af_panel, self.mirror_panel, self.motion_panel):
+            fn = getattr(p, "_save_settings", None)
+            if callable(fn):
+                try: fn()
+                except Exception: pass
 
     def _restore_settings(self):
         c = self._cfg
-        # Camera
-        vendor    = str(c.get("camera.vendor",      "Simulation"))
-        exposure  = float(c.get("camera.exposure_ms", 20.0))
-        fps       = float(c.get("camera.fps",         30.0))
-        fps_lock  = bool(c.get("camera.fps_lock",    False))
-        temp      = float(c.get("camera.temp_c",     -70.0))
-        adc_qual  = str(c.get("camera.adc.quality", ""))
-        adc_spd   = str(c.get("camera.adc.speed",   ""))
-        adc_gain  = str(c.get("camera.adc.gain",    ""))
-        adc_bit   = str(c.get("camera.adc.bit",     ""))
+        # Camera — last_used vendor 기준으로 그 vendor 의 설정만 로드
+        vendor    = str(c.get("camera.last_used.vendor", "Simulation"))
+        exposure  = float(c.get_camera_setting("exposure_ms", 20.0,  vendor=vendor))
+        fps       = float(c.get_camera_setting("fps",         30.0,  vendor=vendor))
+        fps_lock  = bool(c.get_camera_setting("fps_lock",     False, vendor=vendor))
+        temp      = float(c.get_camera_setting("temp_c",     -70.0,  vendor=vendor))
+        adc_qual  = str(c.get_camera_setting("adc.quality", "", vendor=vendor))
+        adc_spd   = str(c.get_camera_setting("adc.speed",   "", vendor=vendor))
+        adc_gain  = str(c.get_camera_setting("adc.gain",    "", vendor=vendor))
+        adc_bit   = str(c.get_camera_setting("adc.bit",     "", vendor=vendor))
         # Save
         frame_to_save = int(c.get("tabs.deepalign.save.frame_to_save", 10))
         save_folder   = str(c.get("tabs.deepalign.save.folder",    "Live_Captures"))
@@ -845,6 +897,51 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
             idx = cb.findText(val)
             if idx >= 0:
                 cb.setCurrentIndex(idx)
+
+        # Image Processing 복원
+        proc_en     = bool(c.get("tabs.deepalign.proc.enabled", False))
+        proc_mode   = int(c.get("tabs.deepalign.proc.mode", 1))
+        proc_region = str(c.get("tabs.deepalign.proc.region", "full"))
+        self._proc_mode = proc_mode if proc_mode in (1, 2, 3) else 1
+        self._proc_region = proc_region if proc_region in ("full", "roi") else "full"
+        if self._proc_mode == 1: self.radio_proc_mode1.setChecked(True)
+        elif self._proc_mode == 2: self.radio_proc_mode2.setChecked(True)
+        else: self.radio_proc_mode3.setChecked(True)
+        if self._proc_region == "roi": self.radio_region_roi.setChecked(True)
+        else: self.radio_region_full.setChecked(True)
+        self.check_use_proc.setChecked(proc_en)
+        # _restore_settings 는 시그널 연결 이전에 호출되므로 핸들러 명시 호출
+        # (enable 규칙 / radio enable / mode·region 변수 동기화)
+        self._on_proc_enable_toggled(proc_en)
+        self._on_proc_mode_changed(self._proc_mode)
+        self._on_proc_region_changed(1 if self._proc_region == "roi" else 0)
+
+        # DeepAlign 내부 dock 레이아웃 복원 (Plot/Hist/Proc/ROI 위치+가시성)
+        dstate = c.get("window.deepalign.dockState")
+        if dstate:
+            try:
+                self.dock_host.restoreState(dstate)
+            except Exception:
+                pass
+        # 복원 후 viewer toolbar 버튼들 강제 동기화
+        for dock, btn in (
+            (self.dock_plot, self.btn_toggle_plot_sm),
+            (self.dock_hist, self.btn_toggle_hist_sm),
+            (self.dock_proc_stats, self.btn_toggle_proc_sm),
+            (self.dock_roi, self.btn_toggle_roi_sm),
+        ):
+            self._sync_analysis_dock_toggle(dock, btn, dock.isVisible())
+
+        # ProcStats 복원
+        ps = self.proc_stats_panel
+        ps.chk_enable.setChecked(bool(c.get("tabs.deepalign.proc_stats.enabled", False)))
+        src = str(c.get("tabs.deepalign.proc_stats.source", "snap"))
+        if   src == "live": ps.radio_live.setChecked(True)
+        elif src == "all":  ps.radio_all.setChecked(True)
+        else:               ps.radio_snap.setChecked(True)
+        ps.chk_mean.setChecked(bool(c.get("tabs.deepalign.proc_stats.show_mean", True)))
+        ps.chk_min.setChecked(bool(c.get("tabs.deepalign.proc_stats.show_min",  True)))
+        ps.chk_max.setChecked(bool(c.get("tabs.deepalign.proc_stats.show_max",  True)))
 
         self._update_save_control_state()
         self._update_save_preview()
@@ -1240,6 +1337,25 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
                 action.setChecked(bool(visible))
                 action.blockSignals(False)
 
+        # viewer toolbar 의 Plot/Hist/Proc 버튼도 동기화
+        viewer_btn = self._viewer_toolbar_btn_for(dock)
+        if viewer_btn is not None:
+            viewer_btn.blockSignals(True)
+            viewer_btn.setChecked(bool(visible))
+            viewer_btn.blockSignals(False)
+
+    def _viewer_toolbar_btn_for(self, dock):
+        """dock → viewer toolbar 의 대응 버튼 (없으면 None)."""
+        try:
+            v = self.cam_viewer.viewer
+        except AttributeError:
+            return None
+        name = dock.objectName()
+        if name == "dock_plot":         return getattr(v, "btn_toggle_profile",   None)
+        if name == "dock_histogram":    return getattr(v, "btn_toggle_histogram", None)
+        if name == "dock_proc_stats":   return getattr(v, "btn_toggle_proc",      None)
+        return None
+
     def _on_gallery_item_double_clicked(self, item: QListWidgetItem):
         """갤러리의 썸네일을 더블 클릭하면 해당 원본 프레임을 뷰어에 표시한다."""
         raw = item.data(Qt.ItemDataRole.UserRole)
@@ -1399,6 +1515,9 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         elif panel_type == "histogram":
             self.dock_hist.setVisible(not self.dock_hist.isVisible())
             self.btn_toggle_hist_sm.setChecked(self.dock_hist.isVisible())
+        elif panel_type == "proc":
+            self.dock_proc_stats.setVisible(not self.dock_proc_stats.isVisible())
+            self.btn_toggle_proc_sm.setChecked(self.dock_proc_stats.isVisible())
         elif panel_type == "roi":
             self.dock_roi.setVisible(not self.dock_roi.isVisible())
             self.btn_toggle_roi_sm.setChecked(self.dock_roi.isVisible())
