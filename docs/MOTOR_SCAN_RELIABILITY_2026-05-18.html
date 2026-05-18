@@ -2,13 +2,14 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>DeepAlign 스캔 워커 — Move-Done 검증 + Timeout 통합 (2026-05-18)</title>
+<title>DeepAlign 스캔 워커 신뢰성 패치 — 종합 리포트 (2026-05-18)</title>
 <style>
   :root {
     --bg: #0f1729;
     --panel: #0b1222;
     --border: #1a4060;
     --accent: #22d3ee;
+    --acs: #aa7acc;
     --warn: #facc15;
     --danger: #ef4444;
     --ok: #34d399;
@@ -23,14 +24,14 @@
     line-height: 1.55;
   }
   h1 { color: var(--accent); border-bottom: 2px solid var(--accent); padding-bottom: 8px; letter-spacing: 1px; }
-  h2 { color: var(--accent); margin-top: 32px; border-left: 4px solid var(--accent); padding-left: 10px; }
+  h2 { color: var(--accent); margin-top: 36px; border-left: 4px solid var(--accent); padding-left: 10px; }
   h3 { color: var(--warn); margin-top: 24px; }
   code, pre { font-family: var(--mono); }
   code { background: #1a2840; color: #c0d0ff; padding: 1px 5px; border-radius: 3px; }
   pre {
     background: var(--panel); border: 1px solid var(--border);
     border-radius: 4px; padding: 12px; overflow-x: auto;
-    color: #c0d0ff; font-size: 13px;
+    color: #c0d0ff; font-size: 13px; line-height: 1.4;
   }
   table {
     width: 100%; border-collapse: collapse; margin: 12px 0;
@@ -38,7 +39,7 @@
   }
   th, td {
     padding: 8px 12px; text-align: left;
-    border: 1px solid var(--border);
+    border: 1px solid var(--border); vertical-align: top;
   }
   th { background: #11345f; color: var(--accent); }
   .ok { color: var(--ok); }
@@ -53,73 +54,102 @@
   .badge.fix { background: #1a3a60; color: var(--accent); border: 1px solid var(--accent); }
   .badge.add { background: #134e2c; color: var(--ok); border: 1px solid var(--ok); }
   .badge.brk { background: #4a1a1a; color: var(--danger); border: 1px solid var(--danger); }
+  .badge.ui  { background: #2a1a4a; color: var(--acs); border: 1px solid var(--acs); }
   .meta { color: var(--dim); font-size: 13px; }
   ul li { margin: 4px 0; }
+  .pass { color: var(--ok); font-weight: bold; }
+  .fail { color: var(--danger); font-weight: bold; }
+  .commit { font-family: var(--mono); font-size: 11px; color: var(--dim); }
+  .commit a { color: var(--accent); text-decoration: none; }
+  .commit a:hover { text-decoration: underline; }
+  .toc { background: var(--panel); border: 1px solid var(--border); padding: 12px 20px; border-radius: 4px; }
+  .toc a { color: var(--text); text-decoration: none; }
+  .toc a:hover { color: var(--accent); }
 </style>
 </head>
 <body>
 
-<h1>DeepAlign 스캔 워커 — Move-Done 검증 + Timeout 통합</h1>
-<p class="meta">2026-05-18 · 작업자: Claude (Opus 4.7) · 영역: 모터 제어 신뢰성</p>
+<h1>DeepAlign 스캔 워커 신뢰성 패치 — 종합 리포트</h1>
+<p class="meta">2026-05-18 · 작업자: Claude (Opus 4.7) · 영역: 모터 제어 신뢰성 + UI 통일 + Hub 통일</p>
 
-<h2>1. 배경 — 왜 손댔나</h2>
+<div class="toc">
+  <strong>목차</strong>
+  <ol>
+    <li><a href="#bg">배경 — 왜 손댔나</a></li>
+    <li><a href="#problem">발견한 문제 3종</a></li>
+    <li><a href="#fix">수정 내용 (Phase 1~4)</a></li>
+    <li><a href="#smoke">스모크 테스트 결과</a></li>
+    <li><a href="#files">수정 파일 일람</a></li>
+    <li><a href="#future">후속 / 미해결</a></li>
+  </ol>
+</div>
+
+<!-- ─────────────────────────────────────────────────────── -->
+<h2 id="bg">1. 배경</h2>
 <p>
-DeepAlign의 3개 스캔(<b>Mirror / KIMM / ACS</b>) 워커는 모두
+DeepAlign 의 3개 스캔(<b>Mirror / KIMM / ACS</b>) 워커는 모두
 <code>mover.move(point) → settle(ms) → snap</code> 루프를 돈다.
-그런데 각 mover가 "이동 완료를 어떻게 보장하느냐"는 제각각이라
-신뢰성에 격차가 컸다.
+각 mover 가 "이동 완료를 어떻게 보장하느냐", "하드웨어 컨트롤러를
+어떻게 받느냐", "UI 가 어떻게 생겼느냐"가 제각각이라
+신뢰성·일관성에 큰 격차가 있었음.
 </p>
+<p>한 번에 셋 다 같은 수준으로 끌어올리는 게 목표.</p>
 
+<!-- ─────────────────────────────────────────────────────── -->
+<h2 id="problem">2. 발견한 문제 3종</h2>
+
+<h3>2-A. 연동 끊김 (보이지 않는 dead controller 의존)</h3>
 <table>
-  <tr><th>스테이지</th><th>변경 전 상태</th><th>위험도</th></tr>
-  <tr>
-    <td>Mirror (Picomotor 8742)</td>
-    <td><span class="bad">완료 확인 0, timeout 0</span><br>
-        <code>RelativeMove</code>가 비동기 명령 enqueue 후 즉시 반환.
-        settle 시간 내에 못 끝내면 블러 프레임, 영원히 안 멈춰도 워커는 모름.</td>
-    <td class="bad">치명</td>
-  </tr>
-  <tr>
-    <td>KIMM Z</td>
-    <td>ACK(5s)/DONE(30s) 이벤트 blocking + TimeoutError raise.
-        <span class="ok">기본 동작은 견고</span>. 단 timeout 상수 박힘.</td>
-    <td class="warn">경미</td>
-  </tr>
-  <tr>
-    <td>ACS 6축</td>
-    <td><code>wait_in_position_all(30s)</code> 존재. 그러나<br>
-        (a) <span class="bad">캐시 race</span> — 명령 직후 wait 시작 시
-        <code>moving=False</code>로 즉시 반환 가능<br>
-        (b) <span class="bad">silent timeout</span> — 만료 시 예외 없이 return</td>
-    <td class="warn">중간</td>
-  </tr>
+<tr><th>스테이지</th><th>변경 전</th></tr>
+<tr><td>Mirror</td><td><code>getattr(self, "_picos", None)</code>를 검사하지만
+<code>set_picos_ctrl</code> 호출처 0건 → 영구히 "Picomotor 미연결"</td></tr>
+<tr><td>ACS</td><td><b>Mirror와 완전히 동일한 버그</b> — <code>self._acs</code> 미설정 →
+영구히 "ACS 미연결"</td></tr>
+<tr><td>KIMM</td><td>같은 dead code 존재했으나 mover 가 우연히 hub 패턴이라 통과 중</td></tr>
 </table>
 
-<h2>2. 변경 요약</h2>
-<p>3종 모두 동일한 신뢰성으로 통일:
-move 명령 후 <b>반드시 완료 확인 후 settle/snap</b>,
-실패 시 명시적 <code>TimeoutError</code>,
-timeout 값을 사용자가 UI에서 조절 가능.</p>
+<h3>2-B. Move-done 검증 부재 + Timeout 부재</h3>
+<table>
+<tr><th>스테이지</th><th>변경 전</th></tr>
+<tr><td>Mirror (Pico)</td><td><span class="bad">완료 확인 0, timeout 0</span>.
+<code>RelativeMove</code>가 비동기 명령 enqueue 후 즉시 반환 → settle 안 끝나면 블러 프레임, 영원히 안 멈춰도 모름</td></tr>
+<tr><td>KIMM</td><td>ACK(5s)/DONE(30s) 이벤트 blocking + TimeoutError. <span class="ok">기본 동작은 견고</span>. 타임아웃 상수 박힘</td></tr>
+<tr><td>ACS</td><td><code>wait_in_position_all(30s)</code> 존재하지만 (a) 캐시 race — 명령 직후 wait 시작 시 <code>moving=False</code>라 즉시 반환 가능 (b) timeout 만료 시 <span class="bad">silent return</span> → 워커가 모름</td></tr>
+</table>
 
-<h3>2.1 Picomotor — <span class="badge add">ADD</span> <code>wait_motion_done()</code></h3>
-<p>8742 SDK에 명시적 motion-done 쿼리가 없어
-<b>위치 안정성 폴링</b>으로 대체:
-<code>poll_ms=50</code> 간격으로 <code>GetPosition</code> 호출 →
-같은 값이 연속 <code>stable_n=3</code>회 관측되면 정지 판정.
-<code>timeout_ms</code> 만료 시 <code>TimeoutError</code>.</p>
+<h3>2-C. UI 일관성</h3>
+<table>
+<tr><th>위젯</th><th>변경 전</th></tr>
+<tr><td>Mirror scan</td><td>옛 <code>section_frame</code> — 위쪽 PicoCard와 톤 불일치</td></tr>
+<tr><td>KIMM scan</td><td>옛 <code>section_frame</code></td></tr>
+<tr><td>ACS scan</td><td>옛 <code>section_frame</code></td></tr>
+</table>
 
+<!-- ─────────────────────────────────────────────────────── -->
+<h2 id="fix">3. 수정 내용</h2>
+
+<h3>Phase 1 — Mirror 연동 + UI 통일 <span class="commit">[<a href="https://github.com/hoseon-ko/publicspe/commit/d41d65c">d41d65c</a>]</span></h3>
+<ul>
+  <li><span class="badge fix">FIX</span> Mirror scan provider: legacy <code>self._picos</code> → <code>session_hub.pico_get_position</code> 기반</li>
+  <li><span class="badge fix">FIX</span> <code>MirrorMover(self._session_hub)</code> 시그니처로 변경 (KIMM/ACS 패턴과 동일)</li>
+  <li><span class="badge brk">REMOVE</span> dead code: <code>set_picos_ctrl</code> / <code>clear_picos_ctrl</code> (호출처 0)</li>
+  <li><span class="badge ui">UI</span> MirrorScanWidget을 PicoCard 디자인 언어로 재단장 (motionCard 외곽 + CollapsibleSection + BTN_SMALL)</li>
+</ul>
+
+<h3>Phase 2 — Move-done + Timeout 통합 <span class="commit">[<a href="https://github.com/hoseon-ko/publicspe/commit/d41d65c">d41d65c</a>]</span></h3>
+
+<p><b>Picomotor:</b> <code>wait_motion_done()</code> 신규 — 8742 SDK에 명시적 motion-done 쿼리 없어 <b>위치 안정성 폴링</b>으로 대체.
+<code>poll_ms=50</code> 간격으로 <code>GetPosition</code> → 같은 값이 연속 <code>stable_n=3</code>회 관측되면 정지 판정.</p>
 <pre>def wait_motion_done(self, motor: int, timeout_ms: int = 10000,
                      poll_ms: int = 50, stable_n: int = 3) -> None:
     deadline = time.perf_counter() + timeout_ms / 1000.0
-    stable = 0
-    last = None
+    stable = 0; last = None
     while True:
         ok, pos = self._cmdlib.GetPosition(self._key, self._master, motor, 0)
         if ok:
             if last is not None and pos == last:
                 stable += 1
-                if stable >= stable_n:
-                    return
+                if stable >= stable_n: return
             else:
                 stable = 1
             last = pos
@@ -127,115 +157,104 @@ timeout 값을 사용자가 UI에서 조절 가능.</p>
             raise TimeoutError(f"Picomotor M{motor} move timeout after {timeout_ms}ms")
         time.sleep(poll_ms / 1000.0)</pre>
 
-<h3>2.2 KIMM — <span class="badge fix">FIX</span> done_timeout_s 사용자 설정</h3>
-<p><code>move_to_z()</code>에 <code>done_timeout_s=None</code> 파라미터 추가.
-None이면 기존 30s 유지, 값 주면 그 값 사용. 시그니처 호환 유지.</p>
+<p><b>KIMM:</b> <code>move_to_z(..., done_timeout_s=None)</code> 파라미터 추가. 시그니처 호환 유지.</p>
 
-<h3>2.3 ACS — <span class="badge fix">FIX</span> race 해소 + timeout 예외화</h3>
-<p><code>wait_in_position_all()</code> 두 가지 수정:</p>
+<p><b>ACS:</b> <code>wait_in_position_all()</code> 두 가지 수정:</p>
 <ul>
-  <li>함수 시작 시 <code>time.sleep(0.25)</code> 강제 settle —
-      polling 워커(200ms 주기)가 <code>moving=True</code>로 갱신할 시간 확보 →
-      <b>race 해소</b>.</li>
-  <li>timeout 만료 시 silent return → <code>raise TimeoutError(...)</code> —
-      워커가 이상을 감지 가능.</li>
-</ul>
-<p class="meta">회귀 검증: <code>KinematicMoveWorker.run()</code>은 이미 try/except로 감싸져 있어 새 예외도 안전하게 catch됨.</p>
-
-<h3>2.4 Mover 3종 — <span class="badge fix">FIX</span> timeout 주입</h3>
-<p>각 mover의 <code>__init__</code>에 <code>move_timeout_ms</code> 파라미터 추가:</p>
-<ul>
-  <li><code>MirrorMover</code>: move 끝에 <code>hub.pico_wait_motion_done(motor, timeout)</code> 호출</li>
-  <li><code>KimmMover</code>: <code>hub.kimm_move_to_z(z, done_timeout_s=timeout/1000)</code> 전달</li>
-  <li><code>AcsMover</code>: <code>ctrl.wait_in_position_all(timeout_ms=timeout)</code> 전달</li>
+  <li>시작 시 <code>time.sleep(0.25)</code> 강제 settle — polling 워커(200ms)가 <code>moving=True</code>로 갱신할 시간 확보 → race 해소</li>
+  <li>timeout 만료 시 silent return → <code>raise TimeoutError(...)</code></li>
 </ul>
 
-<h3>2.5 Scan Widget 3종 — <span class="badge add">ADD</span> Move Timeout 스핀박스</h3>
-<p>UI에 <code>Move Timeout (s)</code> 추가 (기본 Mirror 10s / KIMM 30s / ACS 30s).
-<code>get_move_timeout_ms()</code> getter 노출 — <b>시그널 시그니처는 유지</b>하여
-기존 슬롯 호환.</p>
+<p><b>UI:</b> 3개 scan widget에 <code>Move Timeout (s)</code> 스핀박스 + <code>get_move_timeout_ms()</code> getter. main_tab이 mover 생성 시 주입.</p>
 
-<h3>2.6 main_tab — <span class="badge fix">FIX</span> mover 생성 시 주입</h3>
-<pre>mover = MirrorMover(self._session_hub,
-                    move_timeout_ms=self.mirror_scan.get_move_timeout_ms())
-mover = KimmMover(self._session_hub,
-                  move_timeout_ms=self.kimm_scan.get_move_timeout_ms())
-mover = AcsMover(acs_ctrl,
-                 move_timeout_ms=self.acs_scan.get_move_timeout_ms())</pre>
-
-<h2>3. 부수 정리 (이전 턴 작업)</h2>
+<h3>Phase 3 — ACS 연동 + KIMM/ACS UI 통일 <span class="commit">[<a href="https://github.com/hoseon-ko/publicspe/commit/cd6b117">cd6b117</a>]</span></h3>
 <ul>
-  <li><span class="badge fix">FIX</span> Mirror scan provider — legacy <code>self._picos</code>
-      attribute 의존 제거, <code>session_hub.pico_get_position</code> 기반으로 교체.
-      MirrorMover도 hub 직접 받도록 시그니처 변경 (KIMM/ACS와 동일 패턴).</li>
-  <li><span class="badge brk">REMOVE</span> dead code — <code>set_picos_ctrl</code>/<code>clear_picos_ctrl</code>
-      (호출처 0).</li>
-  <li><span class="badge fix">FIX</span> MirrorScanWidget UI를 PicoCard와 동일 디자인 언어로 통일
-      (motionCard 외곽, CollapsibleSection, BTN_SMALL).</li>
+  <li><span class="badge fix">FIX</span> ACS scan: dead <code>self._acs</code> 의존 제거, <code>session_hub.acs_controller</code> 경유</li>
+  <li><span class="badge brk">REMOVE</span> dead code: <code>set_acs_ctrl</code> / <code>clear_acs_ctrl</code> / <code>set_kimm_ctrl</code> / <code>clear_kimm_ctrl</code></li>
+  <li><span class="badge ui">UI</span> KimmScanWidget: motionCard + CollapsibleSection("SCAN PARAMETERS") + BTN_SMALL. 대제목 "▾ KIMM Z SCAN"</li>
+  <li><span class="badge ui">UI</span> AcsScanWidget: motionCard (보라 accent <code>#aa7acc</code>) + 2 CollapsibleSection (SWEEP PARAMETERS / BASELINE DOF) + BTN_SMALL. 대제목 "▾ ACS KINEMATIC SCAN"</li>
 </ul>
 
-<h2>4. 수정 파일 일람</h2>
+<h3>Phase 4 — AcsMover 풀 hub 마이그레이션 <span class="commit">[<a href="https://github.com/hoseon-ko/publicspe/commit/9d274b0">9d274b0</a>]</span></h3>
+<p>Phase 3는 어중간했음 — <code>acs_controller</code>만 hub에서 빼와서 raw ctrl을 mover에 주입.
+Mirror/KIMM처럼 mover가 <code>session_hub</code>를 직접 받도록 통일.</p>
+<ul>
+  <li><span class="badge add">ADD</span> Hub: <code>acs_wait_in_position_all(timeout_ms)</code> — TimeoutError 전파</li>
+  <li><span class="badge add">ADD</span> Hub: <code>acs_wait_for_enabled_all(timeout_ms) -> bool</code></li>
+  <li><span class="badge add">ADD</span> HAL: <code>AcsHal.wait_for_enabled_all</code> 시그니처 + <code>AcsMotionAdapter</code> 위임 구현</li>
+  <li><span class="badge fix">FIX</span> AcsMover: <code>__init__(session_hub, move_timeout_ms)</code>로 변경, enable/disable/move/current 전부 <code>hub.acs_*</code> 호출로 교체</li>
+  <li><span class="badge fix">FIX</span> main_tab: <code>AcsMover(self._session_hub, ...)</code>로 통일</li>
+</ul>
+
+<p>최종 3종 mover 시그니처:</p>
+<pre>MirrorMover(self._session_hub, move_timeout_ms=...)
+KimmMover  (self._session_hub, move_timeout_ms=...)
+AcsMover   (self._session_hub, move_timeout_ms=...)</pre>
+
+<!-- ─────────────────────────────────────────────────────── -->
+<h2 id="smoke">4. 스모크 테스트</h2>
+<p><span class="file">tests/test_motor_smoke.py</span> — 하드웨어/Qt App 없이 동작하는 단위 검증.
+<code>MagicMock</code>으로 session_hub 흉내, <code>_FakeCmdLib</code>으로 Newport SDK 응답 시퀀스 제어.</p>
+
 <table>
-  <tr><th>파일</th><th>변경 핵심</th></tr>
-  <tr><td class="file">core/motor/picomotor.py</td><td><code>wait_motion_done()</code> 추가</td></tr>
-  <tr><td class="file">core/motor/kimm_z.py</td><td><code>move_to_z(done_timeout_s=...)</code> 파라미터 추가</td></tr>
-  <tr><td class="file">core/motor/acs_stage.py</td><td><code>wait_in_position_all</code>: 초기 settle + TimeoutError raise</td></tr>
-  <tr><td class="file">core/hal/motion_hal.py</td><td><code>PicoHal.wait_motion_done</code> 시그니처 추가</td></tr>
-  <tr><td class="file">core/hal/adapters/pico_motion_adapter.py</td><td><code>wait_motion_done()</code> 위임</td></tr>
-  <tr><td class="file">core/hal/adapters/kimm_motion_adapter.py</td><td><code>move_to_z</code> done_timeout_s 전달</td></tr>
-  <tr><td class="file">core/session/device_session_hub.py</td><td><code>pico_wait_motion_done()</code> 추가, <code>kimm_move_to_z</code> timeout 파라미터</td></tr>
-  <tr><td class="file">ui/deepalign/scan/mirror_mover.py</td><td>hub 기반 재작성 + <code>move_timeout_ms</code></td></tr>
-  <tr><td class="file">ui/deepalign/scan/kimm_mover.py</td><td><code>move_timeout_ms</code> 전달</td></tr>
-  <tr><td class="file">ui/deepalign/scan/acs_mover.py</td><td><code>move_timeout_ms</code> 전달</td></tr>
-  <tr><td class="file">ui/deepalign/scan/scan_widgets/mirror_scan_widget.py</td><td>Move Timeout spinbox + getter, UI 통일</td></tr>
-  <tr><td class="file">ui/deepalign/scan/scan_widgets/kimm_scan_widget.py</td><td>Move Timeout spinbox + getter</td></tr>
-  <tr><td class="file">ui/deepalign/scan/scan_widgets/acs_scan_widget.py</td><td>Move Timeout spinbox + getter</td></tr>
-  <tr><td class="file">ui/deepalign/deepalign_main_tab.py</td><td>provider hub화, mover 생성 시 timeout 주입, dead code 제거</td></tr>
+<tr><th>#</th><th>케이스</th><th>결과</th></tr>
+<tr><td>1</td><td>MirrorMover: hub 시퀀스 (get→move_relative→wait_motion_done)</td><td class="pass">PASS</td></tr>
+<tr><td>2</td><td>MirrorMover: delta=0이면 move/wait 호출 없음</td><td class="pass">PASS</td></tr>
+<tr><td>3</td><td>MirrorMover: hub TimeoutError 그대로 전파</td><td class="pass">PASS</td></tr>
+<tr><td>4</td><td>KimmMover: done_timeout_s 변환 (ms→s)</td><td class="pass">PASS</td></tr>
+<tr><td>5</td><td>KimmMover: TimeoutError 전파</td><td class="pass">PASS</td></tr>
+<tr><td>6</td><td>AcsMover: enable → servo wait → move_to×6 → wait_in_position_all 시퀀스</td><td class="pass">PASS</td></tr>
+<tr><td>7</td><td>AcsMover: enable 실패 시 RuntimeError</td><td class="pass">PASS</td></tr>
+<tr><td>8</td><td>AcsMover: point 크기 검증 (6 != n)</td><td class="pass">PASS</td></tr>
+<tr><td>9</td><td>wait_motion_done: 위치 3회 연속 동일 → 즉시 반환</td><td class="pass">PASS</td></tr>
+<tr><td>10</td><td>wait_motion_done: 위치가 계속 변하면 TimeoutError</td><td class="pass">PASS</td></tr>
+<tr><td>11</td><td>wait_motion_done: GetPosition 예외 → RuntimeError</td><td class="pass">PASS</td></tr>
+<tr><td>12</td><td>import: 3종 mover</td><td class="pass">PASS</td></tr>
+<tr><td>13</td><td>import: hub + HAL (필수 메서드 hasattr 확인)</td><td class="pass">PASS</td></tr>
+<tr><td>14</td><td>Mover 시그니처: 3종 모두 <code>session_hub</code> + <code>move_timeout_ms</code></td><td class="pass">PASS</td></tr>
 </table>
 
-<h2>5. 동작 흐름 (수정 후)</h2>
-<ol>
-  <li>사용자가 Move Timeout 스핀박스 조절 → SCAN START</li>
-  <li>main_tab이 widget에서 <code>get_move_timeout_ms()</code>로 timeout 추출, mover 생성 시 주입</li>
-  <li>워커 루프: <code>mover.move(point)</code> 호출</li>
-  <li>mover 내부에서 명령 emit → <b>정지 확인</b>
-      (Pico: 위치 안정성 폴링 / KIMM: Done 이벤트 / ACS: 캐시 폴링 + 초기 settle)</li>
-  <li>timeout 만료 시 <code>TimeoutError</code> raise</li>
-  <li><code>_ScanWorkerBase.run()</code>이 catch → <code>error</code> 시그널 emit →
-      UI에 "move 실패 (idx=N): ...timeout..." 라벨, 워커 정지</li>
-</ol>
+<p style="margin-top: 12px;"><b>최종: 14 PASS / 0 FAIL</b> ✓</p>
 
-<h2>6. 검증 방법 (E2E)</h2>
-<ul>
-  <li><b>컴파일 sanity</b>: <code>python -m py_compile</code> 14개 파일 → OK</li>
-  <li><b>Mirror 스캔</b>:
-    <ul>
-      <li>작은 delta(10 steps) 5포인트 → 정상 종료</li>
-      <li>큰 delta(50000 steps) → 모터가 실제로 멈춘 후 snap, 블러 없음</li>
-      <li>비현실적 delta + Move Timeout 2s → "Picomotor M1 move timeout after 2000ms" 에러</li>
-    </ul>
-  </li>
-  <li><b>KIMM 스캔</b>: Move Timeout 1s + 큰 Z 이동 → TimeoutError 라벨</li>
-  <li><b>ACS 스캔</b>:
-    <ul>
-      <li>정상: 모든 race 가려진 케이스도 초기 settle로 해소</li>
-      <li>Move Timeout 1s + 큰 거리 → TimeoutError 라벨</li>
-    </ul>
-  </li>
-</ul>
+<p>실행 명령:</p>
+<pre>python tests/test_motor_smoke.py</pre>
 
-<h2>7. 미해결 / 후속 가능</h2>
+<!-- ─────────────────────────────────────────────────────── -->
+<h2 id="files">5. 수정 파일 일람</h2>
+<table>
+<tr><th>파일</th><th>변경 핵심</th><th>Phase</th></tr>
+<tr><td class="file">core/motor/picomotor.py</td><td><code>wait_motion_done()</code> 추가</td><td>2</td></tr>
+<tr><td class="file">core/motor/kimm_z.py</td><td><code>move_to_z(done_timeout_s=...)</code></td><td>2</td></tr>
+<tr><td class="file">core/motor/acs_stage.py</td><td><code>wait_in_position_all</code>: settle 0.25s + TimeoutError raise</td><td>2</td></tr>
+<tr><td class="file">core/hal/motion_hal.py</td><td><code>PicoHal.wait_motion_done</code>, <code>AcsHal.wait_for_enabled_all</code></td><td>2 + 4</td></tr>
+<tr><td class="file">core/hal/adapters/pico_motion_adapter.py</td><td><code>wait_motion_done()</code> 위임</td><td>2</td></tr>
+<tr><td class="file">core/hal/adapters/kimm_motion_adapter.py</td><td><code>move_to_z</code> done_timeout_s 전달</td><td>2</td></tr>
+<tr><td class="file">core/hal/adapters/acs_motion_adapter.py</td><td><code>wait_for_enabled_all()</code> 위임</td><td>4</td></tr>
+<tr><td class="file">core/session/device_session_hub.py</td><td><code>pico_wait_motion_done</code>, <code>acs_wait_in_position_all</code>, <code>acs_wait_for_enabled_all</code>, <code>kimm_move_to_z</code> timeout 파라미터</td><td>2 + 4</td></tr>
+<tr><td class="file">ui/deepalign/scan/mirror_mover.py</td><td>hub 기반 재작성 + <code>move_timeout_ms</code></td><td>1</td></tr>
+<tr><td class="file">ui/deepalign/scan/kimm_mover.py</td><td><code>move_timeout_ms</code> 전달</td><td>2</td></tr>
+<tr><td class="file">ui/deepalign/scan/acs_mover.py</td><td>hub 기반 풀 재작성, raw ctrl 의존 제거</td><td>4</td></tr>
+<tr><td class="file">ui/deepalign/scan/scan_widgets/mirror_scan_widget.py</td><td>Move Timeout spinbox + getter, UI 통일</td><td>1 + 2</td></tr>
+<tr><td class="file">ui/deepalign/scan/scan_widgets/kimm_scan_widget.py</td><td>Move Timeout spinbox + getter, UI 통일</td><td>2 + 3</td></tr>
+<tr><td class="file">ui/deepalign/scan/scan_widgets/acs_scan_widget.py</td><td>Move Timeout spinbox + getter, UI 통일 (보라 accent)</td><td>2 + 3</td></tr>
+<tr><td class="file">ui/deepalign/deepalign_main_tab.py</td><td>3종 provider hub화, mover 생성 시 timeout 주입, dead code 6개 메서드 제거</td><td>1~4</td></tr>
+<tr><td class="file">tests/test_motor_smoke.py</td><td>스모크 테스트 14건 신규 작성</td><td>5</td></tr>
+</table>
+
+<!-- ─────────────────────────────────────────────────────── -->
+<h2 id="future">6. 후속 / 미해결</h2>
 <ul>
-  <li>Pico SDK가 만약 <code>MotionDone</code> 쿼리를 진짜로 노출한다면
-      위치 안정성 폴링보다 정확. 추후 SDK 확인 후 교체 가능.</li>
-  <li>PicoCard 폴링(300ms)과 <code>wait_motion_done</code> 내부 폴링(50ms)이
-      동시 호출되어도 Newport CmdLib8742는 내부 lock으로 안전하지만,
-      문제 발생 시 <code>PicomotorController</code>에 <code>threading.Lock</code> 추가 권장.</li>
-  <li>laser 모듈은 별도 — <a href="#" class="dim">teus_client 리팩토링 제안</a> 참조 (미구현).</li>
+  <li>Pico SDK가 <code>MotionDone</code> 쿼리를 실제로 노출한다면 위치 안정성 폴링보다 정확. 추후 SDK 확인 후 교체 가능.</li>
+  <li>PicoCard 폴링(300ms)과 <code>wait_motion_done</code> 내부 폴링(50ms)이 동시 호출돼도 Newport CmdLib8742는 내부 lock으로 안전하지만, 문제 발생 시 <code>PicomotorController</code>에 <code>threading.Lock</code> 추가 권장.</li>
+  <li>현재 스모크 테스트는 mover 계층까지만 검증. 실제 HW 통합 테스트는 별도 (스캔 시작 → 워커 종료까지의 E2E).</li>
+  <li>Laser (TEUS Server API) 모듈은 별도 — Bearer Token 분기 / endpoint fallback / 잘못된 PUT body 등 결함 존재. 미수정.</li>
 </ul>
 
 <p class="meta" style="margin-top: 40px; text-align: center;">
-  End of report · DeepAlign Motor Reliability Pass · 2026-05-18
+  End of report · DeepAlign Motor Reliability Pass · 2026-05-18 ·
+  4 commits ([<a href="https://github.com/hoseon-ko/publicspe/commit/d41d65c">d41d65c</a>] →
+  [<a href="https://github.com/hoseon-ko/publicspe/commit/cd6b117">cd6b117</a>] →
+  [<a href="https://github.com/hoseon-ko/publicspe/commit/9d274b0">9d274b0</a>] + 본 커밋)
 </p>
 
 </body>
