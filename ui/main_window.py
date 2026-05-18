@@ -649,24 +649,36 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 app_logger.warning(f"[Auto-Connect] KIMM Z-Stage 연결 스킵 (타임아웃 또는 점유): {e}")
 
-            # 3. ACS Stage 자동 연결
-            try:
-                cfg = get_config()
-                ip = cfg.get("devices.acs.ip", "10.0.0.100")
-                port_val = cfg.get("devices.acs.port", "700")
-                port = int(port_val) if port_val else 700
-                sim = bool(cfg.get("devices.acs.sim", False))
-                app_logger.info(f"[Auto-Connect] ACS Stage 연결 시도 ({ip}:{port}, sim={sim})...")
-                self.session_hub.acs_connect(ip, port, sim)
-                app_logger.info("[Auto-Connect] ACS Stage 연결 성공.")
-            except Exception as e:
-                app_logger.warning(f"[Auto-Connect] ACS Stage 연결 스킵 (타임아웃 또는 점유): {e}")
-
-            # 4. 카메라 자동 연결 트리거 (GUI 스레드에서 수행하도록 QTimer 사용)
-            QTimer.singleShot(0, self._auto_connect_camera_on_gui)
+            # 3. ACS Stage 자동 연결 → GUI 스레드에서 실행
+            # 이유: AcsStageController.start_polling 이 QApplication.processEvents() 로
+            # 첫 폴링 완료를 동기 대기한다. 백그라운드 스레드에서는 이벤트 큐가 없어
+            # 항상 3초 timeout → RuntimeError 가 발생한다.
+            # 카메라 자동연결도 ACS 완료 후 순차 실행되도록 chain.
+            QTimer.singleShot(0, self._auto_connect_acs_then_camera_on_gui)
 
         t = threading.Thread(target=worker, daemon=True, name="StartupAutoConnect")
         t.start()
+
+    def _auto_connect_acs_then_camera_on_gui(self):
+        """GUI 스레드에서 ACS 자동 연결 → 완료 후 카메라 자동 연결.
+
+        ACS 의 start_polling 이 QApplication.processEvents() 로 동기 대기하므로
+        GUI 스레드 (이벤트 루프) 안에서 호출되어야 한다.
+        """
+        try:
+            cfg = get_config()
+            ip = cfg.get("devices.acs.ip", "10.0.0.100")
+            port_val = cfg.get("devices.acs.port", "700")
+            port = int(port_val) if port_val else 700
+            sim = bool(cfg.get("devices.acs.sim", False))
+            app_logger.info(f"[Auto-Connect] ACS Stage 연결 시도 ({ip}:{port}, sim={sim})...")
+            self.session_hub.acs_connect(ip, port, sim)
+            app_logger.info("[Auto-Connect] ACS Stage 연결 성공.")
+        except Exception as e:
+            app_logger.warning(f"[Auto-Connect] ACS Stage 연결 스킵 (타임아웃 또는 점유): {e}")
+        finally:
+            # ACS 성공/실패 여부와 무관하게 카메라 자동연결로 진행
+            QTimer.singleShot(0, self._auto_connect_camera_on_gui)
 
     def _auto_connect_camera_on_gui(self):
         """메인 GUI 스레드에서 안전하게 카메라 자동 연결 수행 (DeepAlign 탭 기준)"""

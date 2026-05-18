@@ -476,8 +476,10 @@ class AcsStageController(QObject):
         from PyQt6.QtWidgets import QApplication
         import time
         start_t = time.time()
+        main_thread = QApplication.instance().thread() if QApplication.instance() else None
         while not self._first_poll_done and not self._connection_failed and (time.time() - start_t) < 3.0:
-            QApplication.processEvents()
+            if main_thread and QThread.currentThread() == main_thread:
+                QApplication.processEvents()
             time.sleep(0.01)
 
         if self._connection_failed:
