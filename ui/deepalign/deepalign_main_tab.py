@@ -1066,23 +1066,6 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self._apply_camera_capabilities(None)
         self._set_camera_action_state(False)
 
-    def set_kimm_ctrl(self, ctrl):
-        self._kimm = ctrl
-
-    def clear_kimm_ctrl(self):
-        self._kimm = None
-
-    def set_acs_ctrl(self, ctrl):
-        """ACS 스테이지 컨트롤러를 align_panel에 주입한다."""
-        self._acs = ctrl
-        if hasattr(self, "align_panel"):
-            self.align_panel.set_controller(ctrl)
-
-    def clear_acs_ctrl(self):
-        self._acs = None
-        if hasattr(self, "align_panel"):
-            self.align_panel.set_controller(None)
-
     def _on_sub_panel_log(self, msg: str):
         dev_logger.debug(f"[DeepAlign] {msg}")
 
@@ -1220,10 +1203,12 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
     def _on_acs_scan_requested(self, points: list, settle_ms: int, avg_frames: int) -> None:
         if self._scan_is_running():
             self.acs_scan.set_scan_status("다른 스캔 실행중", "warn"); return
-        acs_ctrl = getattr(self, "_acs", None)
-        if acs_ctrl is None:
+        if self._session_hub is None or not self._session_hub.is_acs_connected():
             self.acs_scan.set_scan_status("ACS 미연결", "err"); return
-        if self._session_hub is None or not self._is_hub_camera_connected():
+        acs_ctrl = self._session_hub.acs_controller
+        if acs_ctrl is None:
+            self.acs_scan.set_scan_status("ACS controller 조회 실패", "err"); return
+        if not self._is_hub_camera_connected():
             self.acs_scan.set_scan_status("카메라 미연결", "err"); return
 
         mover = AcsMover(acs_ctrl, move_timeout_ms=self.acs_scan.get_move_timeout_ms())

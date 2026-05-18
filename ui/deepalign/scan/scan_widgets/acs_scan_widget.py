@@ -14,14 +14,19 @@ import numpy as np
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QComboBox, QSpinBox,
-    QDoubleSpinBox, QPushButton, QTextEdit, QLabel,
+    QDoubleSpinBox, QPushButton, QTextEdit, QLabel, QFrame,
 )
 
-from theme.styles import C_ACCENT, C_DANGER, C_TEXT_DIM, Fonts
-from core.motor.kinematic_calc import KinematicCalc
-from ui.deepalign.scan.scan_widgets._common import (
-    SPIN_QSS, EDIT_QSS, btn_qss, section_frame, label_dim, status_label, apply_status,
+from theme.styles import (
+    C_ACCENT, C_DANGER, C_TEXT_DIM, Fonts, BTN_SMALL, SPIN_STYLE, COMBO_STYLE, lbl,
 )
+from core.motor.kinematic_calc import KinematicCalc
+from ui.widgets.collapsible_section import CollapsibleSection
+from ui.deepalign.scan.scan_widgets._common import (
+    label_dim, status_label, apply_status,
+)
+
+_ACS_ACCENT = "#aa7acc"
 
 
 class AcsScanWidget(QWidget):
@@ -53,27 +58,57 @@ class AcsScanWidget(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
 
-        frame, lay = section_frame("ACS KINEMATIC SCAN (6DOF)", "#aa7acc")
-        root.addWidget(frame)
+        # PicoCard와 동일한 외곽 카드 스타일 (ACS는 보라색 accent)
+        card = QFrame()
+        card.setObjectName("motionCard")
+        card.setStyleSheet(f"""
+            QFrame#motionCard {{
+                background: #0f1729;
+                border: 1px solid {_ACS_ACCENT};
+                border-radius: 6px;
+            }}
+        """)
+        root.addWidget(card)
 
-        # ─ DOF 선택 + sweep 파라미터 ─
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(8, 8, 8, 8)
+        lay.setSpacing(7)
+
+        # Title — PicoCard 대제목과 동일 톤 (ACS는 보라색)
+        title = QLabel("▾  ACS KINEMATIC SCAN")
+        title.setStyleSheet(
+            f"color: {_ACS_ACCENT}; font-family: '{Fonts.MONO}';"
+            f" font-size: 20px; font-weight: bold; letter-spacing: 2px;"
+            f" background: transparent; border: none;"
+        )
+        lay.addWidget(title)
+
+        def _lbl(text: str) -> QLabel:
+            l = QLabel(text)
+            l.setStyleSheet(lbl(C_TEXT_DIM, mono=True) + " background: transparent; border: none;")
+            return l
+
+        # ─ Sweep 파라미터 섹션 ─
+        sec_params = CollapsibleSection("SWEEP PARAMETERS", accent=_ACS_ACCENT)
+        params_l = sec_params.content_layout()
+
         grid = QGridLayout()
         grid.setSpacing(4)
 
         self.cb_dof = QComboBox()
         for i, n in enumerate(self.DOF_LABELS):
             self.cb_dof.addItem(n, i)
-        self.cb_dof.setStyleSheet(EDIT_QSS)
+        self.cb_dof.setStyleSheet(COMBO_STYLE)
         self.cb_dof.currentIndexChanged.connect(self._on_dof_changed)
 
         def _dspin(decs=4) -> QDoubleSpinBox:
             s = QDoubleSpinBox()
             s.setRange(-500.0, 500.0); s.setDecimals(decs)
-            s.setStyleSheet(SPIN_QSS)
+            s.setStyleSheet(SPIN_STYLE)
             return s
 
         def _ispin(lo, hi, val) -> QSpinBox:
-            s = QSpinBox(); s.setRange(lo, hi); s.setValue(val); s.setStyleSheet(SPIN_QSS)
+            s = QSpinBox(); s.setRange(lo, hi); s.setValue(val); s.setStyleSheet(SPIN_STYLE)
             return s
 
         self.spin_start = _dspin()
@@ -86,24 +121,21 @@ class AcsScanWidget(QWidget):
         self.spin_timeout = QDoubleSpinBox()
         self.spin_timeout.setRange(1.0, 120.0); self.spin_timeout.setDecimals(1)
         self.spin_timeout.setSingleStep(1.0); self.spin_timeout.setValue(30.0)
-        self.spin_timeout.setSuffix(" s"); self.spin_timeout.setStyleSheet(SPIN_QSS)
+        self.spin_timeout.setSuffix(" s"); self.spin_timeout.setStyleSheet(SPIN_STYLE)
 
-        grid.addWidget(label_dim("DOF"),          0, 0); grid.addWidget(self.cb_dof,       0, 1)
-        grid.addWidget(label_dim("N points"),     0, 2); grid.addWidget(self.spin_n,       0, 3)
-        grid.addWidget(label_dim("Start"),        1, 0); grid.addWidget(self.spin_start,   1, 1)
-        grid.addWidget(label_dim("End"),          1, 2); grid.addWidget(self.spin_end,     1, 3)
-        grid.addWidget(label_dim("Settle ms"),    2, 0); grid.addWidget(self.spin_settle,  2, 1)
-        grid.addWidget(label_dim("Avg"),          2, 2); grid.addWidget(self.spin_avg,     2, 3)
-        grid.addWidget(label_dim("Move Timeout"), 3, 0); grid.addWidget(self.spin_timeout, 3, 1)
-        lay.addLayout(grid)
+        grid.addWidget(_lbl("DOF"),          0, 0); grid.addWidget(self.cb_dof,       0, 1)
+        grid.addWidget(_lbl("N points"),     0, 2); grid.addWidget(self.spin_n,       0, 3)
+        grid.addWidget(_lbl("Start"),        1, 0); grid.addWidget(self.spin_start,   1, 1)
+        grid.addWidget(_lbl("End"),          1, 2); grid.addWidget(self.spin_end,     1, 3)
+        grid.addWidget(_lbl("Settle ms"),    2, 0); grid.addWidget(self.spin_settle,  2, 1)
+        grid.addWidget(_lbl("Avg"),          2, 2); grid.addWidget(self.spin_avg,     2, 3)
+        grid.addWidget(_lbl("Move Timeout"), 3, 0); grid.addWidget(self.spin_timeout, 3, 1)
+        params_l.addLayout(grid)
+        lay.addWidget(sec_params)
 
         # ─ Baseline DOF 6 입력 (다른 5 DOF용) ─
-        bl_title = QLabel("BASELINE DOF (다른 DOF는 이 값으로 고정)")
-        bl_title.setStyleSheet(
-            f"color: {C_TEXT_DIM}; font-family: '{Fonts.MONO}';"
-            f" font-size: 10px; letter-spacing: 1px; border: none; background: transparent;"
-        )
-        lay.addWidget(bl_title)
+        sec_base = CollapsibleSection("BASELINE DOF (다른 5축 고정값)", accent=_ACS_ACCENT)
+        base_l = sec_base.content_layout()
 
         bl_grid = QGridLayout()
         bl_grid.setSpacing(4)
@@ -111,30 +143,32 @@ class AcsScanWidget(QWidget):
         for i, (n, suf, decs) in enumerate(zip(self.DOF_LABELS, self.DOF_UNITS, self.DOF_DECIMALS)):
             sp = QDoubleSpinBox()
             sp.setRange(-500.0, 500.0); sp.setDecimals(decs); sp.setValue(0.0)
-            sp.setSuffix(suf); sp.setStyleSheet(SPIN_QSS)
+            sp.setSuffix(suf); sp.setStyleSheet(SPIN_STYLE)
             self.spin_baseline.append(sp)
             r, c = divmod(i, 3)
-            bl_grid.addWidget(label_dim(n), r, c * 2)
-            bl_grid.addWidget(sp,           r, c * 2 + 1)
-        lay.addLayout(bl_grid)
+            bl_grid.addWidget(_lbl(n), r, c * 2)
+            bl_grid.addWidget(sp,      r, c * 2 + 1)
+        base_l.addLayout(bl_grid)
 
-        # SYNC 버튼 (외부 provider에서 baseline 가져오기)
+        # SYNC 버튼 — BTN_SMALL 사용 (PicoCard 톤)
         self.btn_sync_baseline = QPushButton("SYNC BASELINE FROM PANEL")
-        self.btn_sync_baseline.setStyleSheet(btn_qss(C_TEXT_DIM))
+        self.btn_sync_baseline.setStyleSheet(BTN_SMALL.replace(C_ACCENT, C_TEXT_DIM))
         self.btn_sync_baseline.clicked.connect(self._on_sync_baseline)
-        lay.addWidget(self.btn_sync_baseline)
+        base_l.addWidget(self.btn_sync_baseline)
+        lay.addWidget(sec_base)
 
-        # ─ Start/Stop ─
+        # ─ Start/Stop — BTN_SMALL ─
         btn_row = QHBoxLayout()
         self.btn_start = QPushButton("SCAN START")
         self.btn_stop  = QPushButton("SCAN STOP")
-        self.btn_start.setStyleSheet(btn_qss(C_ACCENT))
-        self.btn_stop.setStyleSheet(btn_qss(C_DANGER))
+        # ACS는 보라 accent
+        self.btn_start.setStyleSheet(BTN_SMALL.replace(C_ACCENT, _ACS_ACCENT))
+        self.btn_stop.setStyleSheet(BTN_SMALL.replace(C_ACCENT, C_DANGER))
         self.btn_stop.setEnabled(False)
         self.btn_start.clicked.connect(self._on_start)
         self.btn_stop.clicked.connect(self.scan_stop_requested)
-        btn_row.addWidget(self.btn_start, 1)
-        btn_row.addWidget(self.btn_stop, 1)
+        btn_row.addWidget(self.btn_start)
+        btn_row.addWidget(self.btn_stop)
         lay.addLayout(btn_row)
 
         self.lbl_status = status_label()
@@ -147,7 +181,7 @@ class AcsScanWidget(QWidget):
         self.txt_preview.setStyleSheet(f"""
             QTextEdit {{
                 background: #050a15; color: #c0d0ff;
-                border: 1px solid #1a4060; border-radius: 3px;
+                border: 1px solid {_ACS_ACCENT}; border-radius: 3px;
                 font-family: '{Fonts.MONO}'; font-size: 11px;
             }}
         """)
