@@ -15,9 +15,10 @@ from PyQt6.QtWidgets import (
     QPushButton, QLineEdit, QFrame, QGroupBox,
     QDoubleSpinBox, QCheckBox, QGridLayout,
 )
-from PyQt6.QtCore import Qt, QTimer, QSettings, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 
 from core.motor.kimm_z import KIMMZController
+from core.config import get_config
 from ui.widgets.collapsible_section import CollapsibleSection
 from theme.styles import (
     C_ACCENT, C_DANGER, C_WARN, C_BORDER, C_BG_DEEP, C_BG_DARK, C_TEXT, C_TEXT_DIM, C_TEXT_DEAD,
@@ -25,13 +26,13 @@ from theme.styles import (
 )
 
 
-# ── 설정 키 ─────────────────────────────────────────────────────────
+# ── 설정 키 (JSON dotted path) ──────────────────────────────────────
 
-_SETTINGS_KEY_IP     = "kimm/ip"
-_SETTINGS_KEY_PORT   = "kimm/port"
-_SETTINGS_KEY_LIMIT  = "kimm/safety_limit"
-_SETTINGS_KEY_VEL    = "kimm/velocity"
-_SETTINGS_KEY_DRY    = "kimm/dry_run"
+_CFG_IP    = "devices.kimm.ip"
+_CFG_PORT  = "devices.kimm.port"
+_CFG_LIMIT = "devices.kimm.limit_um"
+_CFG_VEL   = "devices.kimm.velocity"
+_CFG_DRY   = "devices.kimm.dry_run"
 
 
 class KIMMZPanel(QWidget):
@@ -45,7 +46,7 @@ class KIMMZPanel(QWidget):
         super().__init__(parent)
         self._ctrl: KIMMZController | None = None
         self._move_btns: list[QPushButton] = []   # 이동 버튼들 (연결 시 활성화)
-        self._settings = QSettings("SpeAnalyze", "MainWindow")
+        self._cfg = get_config()
         self._session_hub = None
 
         self._poll_timer = QTimer(self)
@@ -415,30 +416,31 @@ class KIMMZPanel(QWidget):
     # ── 설정 저장/복원 ─────────────────────────────────────────────────
 
     def _save_settings(self):
-        self._settings.setValue(_SETTINGS_KEY_IP,    self.edit_ip.text().strip())
-        self._settings.setValue(_SETTINGS_KEY_PORT,  self.edit_port.text().strip())
-        self._settings.setValue(_SETTINGS_KEY_LIMIT, self.spin_limit.value())
-        self._settings.setValue(_SETTINGS_KEY_VEL,   self.spin_vel.value())
-        self._settings.setValue(_SETTINGS_KEY_DRY,   self.check_dry.isChecked())
+        c = self._cfg
+        c.set(_CFG_IP,    self.edit_ip.text().strip())
+        c.set(_CFG_PORT,  self.edit_port.text().strip())
+        c.set(_CFG_LIMIT, float(self.spin_limit.value()))
+        c.set(_CFG_VEL,   float(self.spin_vel.value()))
+        c.set(_CFG_DRY,   self.check_dry.isChecked())
 
-        # 섹션 상태 저장
         for sec in self._sections:
-            key = f"kimm/sec_{sec._title_lbl.text().replace(' ', '_').lower()}_collapsed"
-            self._settings.setValue(key, sec.is_collapsed())
+            name = f"kimm_{sec._title_lbl.text().replace(' ', '_').lower()}"
+            c.set(f"ui.sections_collapsed.{name}", sec.is_collapsed())
+        c.save()
 
     def _load_settings(self):
-        self.edit_ip.setText(self._settings.value(_SETTINGS_KEY_IP,   "192.168.1.100"))
-        self.edit_port.setText(self._settings.value(_SETTINGS_KEY_PORT, "5000"))
-        self.spin_limit.setValue(float(self._settings.value(_SETTINGS_KEY_LIMIT, 10000.0)))
-        self.spin_vel.setValue(float(self._settings.value(_SETTINGS_KEY_VEL, 10.0)))
-        self.check_dry.setChecked(self._settings.value(_SETTINGS_KEY_DRY, False, type=bool))
+        c = self._cfg
+        self.edit_ip.setText(str(c.get(_CFG_IP,   "192.168.1.100")))
+        self.edit_port.setText(str(c.get(_CFG_PORT, "5000")))
+        self.spin_limit.setValue(float(c.get(_CFG_LIMIT, 10000.0)))
+        self.spin_vel.setValue(float(c.get(_CFG_VEL, 10.0)))
+        self.check_dry.setChecked(bool(c.get(_CFG_DRY, False)))
 
-        # 섹션 상태 복원
         for sec in self._sections:
-            key = f"kimm/sec_{sec._title_lbl.text().replace(' ', '_').lower()}_collapsed"
-            val = self._settings.value(key, None)
+            name = f"kimm_{sec._title_lbl.text().replace(' ', '_').lower()}"
+            val = c.get(f"ui.sections_collapsed.{name}", None)
             if val is not None:
-                sec.set_collapsed(str(val).lower() == 'true')
+                sec.set_collapsed(bool(val))
 
     # ── 로그 헬퍼 ─────────────────────────────────────────────────────
 

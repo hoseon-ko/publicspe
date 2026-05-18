@@ -20,10 +20,11 @@ from PyQt6.QtWidgets import (
     QPushButton, QLineEdit, QGroupBox, QGridLayout,
     QDoubleSpinBox, QSpinBox, QCheckBox, QTextEdit, QComboBox,
 )
-from PyQt6.QtCore import Qt, QSettings, QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
+from core.config import get_config
 from PyQt6.QtGui import QKeyEvent
 
-from core.motor.acs_stage import AcsStageController, AXIS_LABELS, DEFAULT_PORT
+from core.motor.acs_stage import AcsStageController, AXIS_LABELS, DEFAULT_PORT, KinematicMoveWorker
 from core.motor.kinematic_calc import KinematicCalc, is_available as kinematic_available
 from ui.widgets.collapsible_section import CollapsibleSection
 from theme.styles import (
@@ -51,15 +52,16 @@ _C_DANGER = C_DANGER
 _C_BORDER = C_BORDER
 
 
-_SETTINGS_KEY_IP          = "acs/ip"
-_SETTINGS_KEY_PORT        = "acs/port"
-_SETTINGS_KEY_DRY         = "acs/dry_run"
-_SETTINGS_KEY_KIN_JOG_T   = "acs/kin_jog_tra"   # DOF별 Jog Step (mm)
-_SETTINGS_KEY_KIN_JOG_R   = "acs/kin_jog_rot"   # DOF별 Jog Step (mrad)
-_SETTINGS_SEC_CONN_COL    = "acs/sec_conn_collapsed"
-_SETTINGS_SEC_AXIS_COL    = "acs/sec_axis_collapsed"
-_SETTINGS_SEC_GLOBAL_COL  = "acs/sec_global_collapsed"
-_SETTINGS_SEC_KIN_COL     = "acs/sec_kin_collapsed"
+# config 경로 (JSON dotted path) — Live/DeepAlign 양 패널 공유
+_CFG_IP          = "devices.acs.ip"
+_CFG_PORT        = "devices.acs.port"
+_CFG_DRY         = "devices.acs.dry_run"
+_CFG_SETTLE      = "devices.acs.settle_ms"
+_CFG_KIN_STEPS   = "devices.acs.kin_steps"
+_CFG_SEC_CONN    = "ui.sections_collapsed.acs_conn"
+_CFG_SEC_AXIS    = "ui.sections_collapsed.acs_axis"
+_CFG_SEC_GLOBAL  = "ui.sections_collapsed.acs_global"
+_CFG_SEC_KIN     = "ui.sections_collapsed.acs_kin"
 
 
 def _btn(color: str) -> str:
@@ -200,85 +202,6 @@ class _AxisRow:
         return self._ctrl_ref[0]
 
 
-class _KinematicMoveWorker(QThread):
-    """13-step servo ON → move → servo OFF 시퀀스를 GUI 스레드 밖에서 실행."""
-
-    log      = pyqtSignal(str)
-    finished = pyqtSignal()
-    error    = pyqtSignal(str)
-
-    _SERVO_ON_MS   = 1000   # 서보 ON 확인 대기
-    _SETTLE_MS     = 500    # In-Position 후 정착 대기
-    _INPOS_TIMEOUT = 30000  # WaitMotionEnd 타임아웃 (ms)
-
-    def __init__(self, ctrl: AcsStageController, targets: np.ndarray, 
-                 limits_plus: np.ndarray, limits_minus: np.ndarray,
-                 settle_ms: int = 500, dry: bool = False):
-        super().__init__()
-        self._ctrl = ctrl
-        self._targets = targets
-        self._limits_plus = limits_plus
-        self._limits_minus = limits_minus
-        self._settle_ms = settle_ms
-        self._dry = dry
-        self._stop_requested = False
-
-    def stop(self):
-        self._stop_requested = True
-
-    def run(self):
-        try:
-            if self._dry:
-                self.log.emit("[DRY RUN] 서보 ON → 이동 → 서보 OFF 시뮬레이션")
-                self.msleep(300)
-                if self._stop_requested: return
-                self.log.emit("[DRY RUN] KINEMATIC MOVE 완료")
-                self.finished.emit()
-                return
-
-            # ① Servo ON
-            if self._stop_requested: return
-            self.log.emit("[ACS] ① Servo ON")
-            self._ctrl.enable_all()
- 
-            # ② 서보 ON 확인 대기
-            if self._stop_requested: return
-            self.log.emit("[ACS] ② Servo ON 상태 확인 대기...")
-            if not self._ctrl.wait_for_enabled_all(timeout_ms=self._SERVO_ON_MS):
-                raise RuntimeError("Servo ON 확인 실패 (Timeout)")
-            self.log.emit("[ACS] ② Servo ON 확인 완료")
- 
-            # ③ 전축 이동 명령 (동시 발사 — wait=False)
-            if self._stop_requested: return
-            motor_names = ["Y1", "Z1", "X1", "Z2", "Y2", "Z3"]
-            self.log.emit("[ACS] ③ Move 명령 전송 (전축 동시)")
-            for i, (name, target, p_lim, n_lim) in enumerate(zip(motor_names, self._targets, self._limits_plus, self._limits_minus)):
-                if self._stop_requested: return
-                # 사용자가 요청한 형식: [ACS] [AXIS] POS [TARGET] [PLIMIT] [NLIMIT]
-                self.log.emit(f"   [ACS] [{name}] POS: {target:+.4f} [PLIM: {p_lim:+.4f}, NLIM: {n_lim:+.4f}]")
-                self._ctrl.move_to(i, float(target), wait=False)
- 
-            # ④ In-Position 완료 대기 (IsCheckDoneStateAll)
-            if self._stop_requested: return
-            self.log.emit("[ACS] ④ In-Position 완료 대기")
-            self._ctrl.wait_in_position_all(timeout_ms=self._INPOS_TIMEOUT)
- 
-            # ⑤ Settle Wait: 이동 완료 후 진동 억제를 위한 대기
-            self.log.emit(f"[ACS] ⑤ Settle Time 대기 ({self._settle_ms} ms)")
-            self.msleep(self._settle_ms)
- 
-            # ⑥ Servo OFF (락 걸기)
-            self.log.emit("[ACS] ⑥ Servo OFF (락 걸기)")
-            self._ctrl.disable_all()
- 
-            # ⑦ 완료
-            self.log.emit("[KINEMATICS] ⑦ KINEMATIC MOVE 완료")
-            self.finished.emit()
-
-        except Exception as e:
-            self.error.emit(str(e))
-
-
 class AcsStagePanel(QWidget):
     """ACS SPiiPlus 6축 스테이지 제어 패널."""
 
@@ -307,11 +230,11 @@ class AcsStagePanel(QWidget):
         self._axis_rows: list[_AxisRow] = []
         self._motion_widgets: list[QWidget] = []
         self._session_hub = None
-        self._settings = QSettings("SpeAnalyze", "MainWindow")
+        self._cfg = get_config()
         self._calc = KinematicCalc()
         self._lbl_cur_dof: dict[str, QLabel] = {}
 
-        self._kin_worker: _KinematicMoveWorker | None = None
+        self._kin_worker: KinematicMoveWorker | None = None
 
         self._auto_disable_timer = QTimer(self)
         self._auto_disable_timer.setSingleShot(True)
@@ -1018,8 +941,8 @@ class AcsStagePanel(QWidget):
         # UI 잠금 시작
         self._set_motion_locked(True)
 
-        self._kin_worker = _KinematicMoveWorker(
-            ctrl, self._last_cal_pos, 
+        self._kin_worker = KinematicMoveWorker(
+            ctrl, self._last_cal_pos,
             self._calc.plus_limits, self._calc.minus_limits,
             settle, is_dry
         )
@@ -1063,38 +986,37 @@ class AcsStagePanel(QWidget):
         self._save_settings()
 
     def _save_settings(self):
-        self._settings.setValue(_SETTINGS_KEY_IP,   self.edit_ip.text().strip())
-        self._settings.setValue(_SETTINGS_KEY_PORT,  self.edit_port.text().strip())
-        
-        # 섹션 접힘 상태 저장
-        self._settings.setValue(_SETTINGS_SEC_CONN_COL,   self.sec_conn.is_collapsed())
-        self._settings.setValue(_SETTINGS_SEC_AXIS_COL,   self.sec_axis.is_collapsed())
-        self._settings.setValue(_SETTINGS_SEC_GLOBAL_COL, self.sec_global.is_collapsed())
-        self._settings.setValue(_SETTINGS_SEC_KIN_COL,    self.sec_kin.is_collapsed())
+        c = self._cfg
+        c.set(_CFG_IP,   self.edit_ip.text().strip())
+        c.set(_CFG_PORT, self.edit_port.text().strip())
 
-        self._settings.setValue(_SETTINGS_KEY_DRY,   self.check_dry.isChecked())
-        self._settings.setValue("acs/settle_ms",    self.spin_settle.value())
-        
-        # Individual Steps 저장
-        for i, spin in enumerate(self._dof_step_spins):
-            self._settings.setValue(f"acs/kin_step_{i}", spin.value())
+        c.set(_CFG_SEC_CONN,   self.sec_conn.is_collapsed())
+        c.set(_CFG_SEC_AXIS,   self.sec_axis.is_collapsed())
+        c.set(_CFG_SEC_GLOBAL, self.sec_global.is_collapsed())
+        c.set(_CFG_SEC_KIN,    self.sec_kin.is_collapsed())
+
+        c.set(_CFG_DRY,    self.check_dry.isChecked())
+        c.set(_CFG_SETTLE, int(self.spin_settle.value()))
+
+        c.set(_CFG_KIN_STEPS, [float(spin.value()) for spin in self._dof_step_spins])
+        c.save()
 
     def _load_settings(self):
-        self.edit_ip.setText(self._settings.value(_SETTINGS_KEY_IP,   "10.0.0.100"))
-        self.edit_port.setText(self._settings.value(_SETTINGS_KEY_PORT, str(DEFAULT_PORT)))
-        
-        # 섹션 접힘 상태 복원 (type=bool 명시로 안정성 확보)
-        self.sec_conn.set_collapsed(self._settings.value(_SETTINGS_SEC_CONN_COL,   False, type=bool))
-        self.sec_axis.set_collapsed(self._settings.value(_SETTINGS_SEC_AXIS_COL,   False, type=bool))
-        self.sec_global.set_collapsed(self._settings.value(_SETTINGS_SEC_GLOBAL_COL, False, type=bool))
-        self.sec_kin.set_collapsed(self._settings.value(_SETTINGS_SEC_KIN_COL,    False, type=bool))
+        c = self._cfg
+        self.edit_ip.setText(str(c.get(_CFG_IP,   "10.0.0.100")))
+        self.edit_port.setText(str(c.get(_CFG_PORT, DEFAULT_PORT)))
 
-        self.check_dry.setChecked(self._settings.value(_SETTINGS_KEY_DRY, False, type=bool))
-        self.spin_settle.setValue(self._settings.value("acs/settle_ms", 500, type=int))
-        
-        # Individual Steps 로드
+        self.sec_conn.set_collapsed(bool(c.get(_CFG_SEC_CONN,   False)))
+        self.sec_axis.set_collapsed(bool(c.get(_CFG_SEC_AXIS,   False)))
+        self.sec_global.set_collapsed(bool(c.get(_CFG_SEC_GLOBAL, False)))
+        self.sec_kin.set_collapsed(bool(c.get(_CFG_SEC_KIN,    False)))
+
+        self.check_dry.setChecked(bool(c.get(_CFG_DRY, False)))
+        self.spin_settle.setValue(int(c.get(_CFG_SETTLE, 500)))
+
+        steps = c.get(_CFG_KIN_STEPS, [0.1] * len(self._dof_step_spins))
         for i, spin in enumerate(self._dof_step_spins):
-            val = self._settings.value(f"acs/kin_step_{i}", 0.1, type=float)
+            val = float(steps[i]) if i < len(steps) else 0.1
             spin.setValue(val)
 
     # ── 로그 ─────────────────────────────────────────────────────────

@@ -24,7 +24,8 @@ from core.session.session_state import CameraConnectionState
 from core.spe_writer import save_spe
 from ui.deepalign.deepalign_camera_hub_mixin import CameraHubMixin
 from ui.deepalign.deepalign_timing import clamp_frame_elapsed, overall_progress_ratio, format_hms
-from ui.deepalign.deepalign_workers import _AcquireWorker, _SnapWorker
+from ui.deepalign.deepalign_workers import _AcquireWorker
+from core.workers import SnapWorker
 
 
 class CameraControllerMixin(CameraHubMixin):
@@ -89,7 +90,7 @@ class CameraControllerMixin(CameraHubMixin):
         self._snap_progress_timer.start()
 
         self._snap_thread = QThread(self)
-        self._snap_worker = _SnapWorker(snap_fn)
+        self._snap_worker = SnapWorker(snap_fn)
         self._snap_worker.moveToThread(self._snap_thread)
         self._snap_thread.started.connect(self._snap_worker.run)
         self._snap_worker.success.connect(self._on_snap_success)

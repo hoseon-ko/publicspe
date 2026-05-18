@@ -18,7 +18,8 @@ from PyQt6.QtWidgets import (
     QFrame, QGroupBox, QGridLayout
 )
 
-from PyQt6.QtCore import Qt, QTimer, QSettings, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from core.config import get_config
 
 from core.motor.picomotor import PicomotorController
 from ui.widgets.collapsible_section import CollapsibleSection
@@ -610,38 +611,41 @@ class MotorPanel(QWidget):
 
     def _restore_step_settings(self):
         """앱 재시작 시 마지막 스텝 값 복원."""
-        s = QSettings("SpeAnalyze", "MotorPanel")
+        c = get_config()
         for i, card in enumerate(self.motor_cards, 1):
-            val = s.value(f"step_m{i}", card.spin.value(), type=int)
-            card.spin.setValue(val)
+            val = c.get(f"devices.picomotor.motors.m{i}.step", card.spin.value())
+            try:
+                card.spin.setValue(int(val))
+            except (TypeError, ValueError):
+                pass
         for m, (sf, sb) in self._weight_spins.items():
-            fwd = s.value(f"weight_fwd_m{m}", sf.value(), type=float)
-            bwd = s.value(f"weight_bwd_m{m}", sb.value(), type=float)
-            sf.setValue(fwd)
-            sb.setValue(bwd)
-        
-        # 섹션 상태 복원
+            fwd = c.get(f"devices.picomotor.motors.m{m}.weight_fwd", sf.value())
+            bwd = c.get(f"devices.picomotor.motors.m{m}.weight_bwd", sb.value())
+            try:
+                sf.setValue(float(fwd)); sb.setValue(float(bwd))
+            except (TypeError, ValueError):
+                pass
+
         for sec in self._sections:
-            key = f"sec/{sec._title_lbl.text()}_collapsed"
-            val = s.value(key, None)
+            name = sec._title_lbl.text().replace(' ', '_').lower()
+            val = c.get(f"ui.sections_collapsed.{name}", None)
             if val is not None:
-                sec.set_collapsed(str(val).lower() == 'true')
+                sec.set_collapsed(bool(val))
 
     def _save_step_settings(self):
-        """스텝 값 + 가중치를 QSettings에 저장."""
-        s = QSettings("SpeAnalyze", "MotorPanel")
+        """스텝 값 + 가중치를 설정 파일에 저장."""
+        c = get_config()
         for i, card in enumerate(self.motor_cards, 1):
-            s.setValue(f"step_m{i}", card.spin.value())
+            c.set(f"devices.picomotor.motors.m{i}.step", int(card.spin.value()))
         for m, (sf, sb) in self._weight_spins.items():
-            s.setValue(f"weight_fwd_m{m}", sf.value())
-            s.setValue(f"weight_bwd_m{m}", sb.value())
-        
-        # 섹션 상태 저장
+            c.set(f"devices.picomotor.motors.m{m}.weight_fwd", float(sf.value()))
+            c.set(f"devices.picomotor.motors.m{m}.weight_bwd", float(sb.value()))
+
         for sec in self._sections:
-            key = f"sec/{sec._title_lbl.text()}_collapsed"
-            s.setValue(key, sec.is_collapsed())
-            
-        s.sync()
+            name = sec._title_lbl.text().replace(' ', '_').lower()
+            c.set(f"ui.sections_collapsed.{name}", sec.is_collapsed())
+
+        c.save()
 
     # ── Public ────────────────────────────────────────────────────────
 

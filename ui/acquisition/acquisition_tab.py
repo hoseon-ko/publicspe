@@ -25,7 +25,8 @@ from PyQt6.QtWidgets import (
     QComboBox, QCheckBox, QLineEdit, QProgressBar,
     QTextEdit, QFileDialog, QSizePolicy, QFrame, QToolButton
 )
-from PyQt6.QtCore import Qt, QThread, QObject, QSettings, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, QObject, QTimer, pyqtSignal
+from core.config import get_config
 
 from core.async_worker import TempPollerThread
 from core.background_manager import BackgroundManager
@@ -970,29 +971,29 @@ class AcquisitionTab(QWidget):
         self.log_message.emit(msg)
 
     def _save_settings(self):
-        s = QSettings("SpeAnalyze", "AcquisitionTab")
-        s.setValue("save_dir", self.edit_save_dir.text())
-        s.setValue("base_name", self.edit_base_name.text())
-        s.setValue("inc_date", self.check_inc_date.isChecked())
-        s.setValue("inc_time", self.check_inc_time.isChecked())
-        s.setValue("inc_num", self.check_inc_num.isChecked())
-        s.setValue("exposure", self.spin_exposure.value())
-        s.setValue("frames", self.spin_frames.value())
-        s.setValue("timeout", self.spin_timeout.value())
-        s.setValue("auto_open", self.check_auto_open.isChecked())
-        s.sync()
+        c = get_config()
+        c.set("tabs.acquisition.save_dir",  self.edit_save_dir.text())
+        c.set("tabs.acquisition.base_name", self.edit_base_name.text())
+        c.set("tabs.acquisition.inc_date",  self.check_inc_date.isChecked())
+        c.set("tabs.acquisition.inc_time",  self.check_inc_time.isChecked())
+        c.set("tabs.acquisition.inc_num",   self.check_inc_num.isChecked())
+        c.set("tabs.acquisition.exposure",  float(self.spin_exposure.value()))
+        c.set("tabs.acquisition.frames",    int(self.spin_frames.value()))
+        c.set("tabs.acquisition.timeout",   float(self.spin_timeout.value()))
+        c.set("tabs.acquisition.auto_open", self.check_auto_open.isChecked())
+        c.save()
 
     def _restore_settings(self):
-        s = QSettings("SpeAnalyze", "AcquisitionTab")
-        self.edit_save_dir.setText(s.value("save_dir", "acquisitions"))
-        self.edit_base_name.setText(s.value("base_name", "picam_data"))
-        self.check_inc_date.setChecked(s.value("inc_date", True, type=bool))
-        self.check_inc_time.setChecked(s.value("inc_time", True, type=bool))
-        self.check_inc_num.setChecked(s.value("inc_num", True, type=bool))
-        self.spin_exposure.setValue(float(s.value("exposure", 100.0)))
-        self.spin_frames.setValue(int(s.value("frames", 10)))
-        self.spin_timeout.setValue(float(s.value("timeout", 30.0)))
-        self.check_auto_open.setChecked(s.value("auto_open", True, type=bool))
+        c = get_config()
+        self.edit_save_dir.setText(str(c.get("tabs.acquisition.save_dir", "acquisitions")))
+        self.edit_base_name.setText(str(c.get("tabs.acquisition.base_name", "picam_data")))
+        self.check_inc_date.setChecked(bool(c.get("tabs.acquisition.inc_date", True)))
+        self.check_inc_time.setChecked(bool(c.get("tabs.acquisition.inc_time", True)))
+        self.check_inc_num.setChecked(bool(c.get("tabs.acquisition.inc_num", True)))
+        self.spin_exposure.setValue(float(c.get("tabs.acquisition.exposure", 100.0)))
+        self.spin_frames.setValue(int(c.get("tabs.acquisition.frames", 10)))
+        self.spin_timeout.setValue(float(c.get("tabs.acquisition.timeout", 30.0)))
+        self.check_auto_open.setChecked(bool(c.get("tabs.acquisition.auto_open", True)))
         self._update_file_preview()
 
     def cleanup(self):

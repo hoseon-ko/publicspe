@@ -8,7 +8,8 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, 
     QPushButton, QFrame, QDoubleSpinBox, QLineEdit, QSizePolicy
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QSettings
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from core.config import get_config
 from theme.styles import (
     C_ACCENT, C_DANGER, C_WARN, C_BORDER, C_TEXT, C_TEXT_DIM,
     Fonts, BTN_SMALL, SPIN_STYLE, EDIT_STYLE, lbl
@@ -23,7 +24,7 @@ class KimmZCard(QFrame):
         super().__init__(parent)
         self._session_hub = None
         self._jog_btns: list[QPushButton] = []
-        self._settings = QSettings("SpeAnalyze", "MainWindow")
+        self._cfg = get_config()
         self.setObjectName("motionCard")
         
         # 스타일 적용 (MotionTab과 동일)
@@ -265,12 +266,14 @@ class KimmZCard(QFrame):
         if self._session_hub: self._session_hub.kimm_move_to_z(self.spin_abs.value())
 
     def _save_settings(self):
-        self._settings.setValue("kimm/ip", self.edit_ip.text().strip())
-        self._settings.setValue("kimm/port", self.edit_port.text().strip())
-        self._settings.sync()  # 디스크 물리 저장 강제 동기화
+        c = self._cfg
+        c.set("devices.kimm.ip",   self.edit_ip.text().strip())
+        c.set("devices.kimm.port", self.edit_port.text().strip())
+        c.save()
 
     def _load_settings(self):
-        self.edit_ip.setText(self._settings.value("kimm/ip", "192.168.1.100"))
-        self.edit_port.setText(self._settings.value("kimm/port", "5000"))
+        c = self._cfg
+        self.edit_ip.setText(str(c.get("devices.kimm.ip",   "192.168.1.100")))
+        self.edit_port.setText(str(c.get("devices.kimm.port", "5000")))
 
 

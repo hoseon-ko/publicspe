@@ -518,3 +518,78 @@ class AcsStageController(QObject):
         # 스레드가 완전히 멈춘 후 참조 해제
         self._worker = None
         self._thread = None
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# KinematicMoveWorker — canonical 7-step servo ON → move → servo OFF 시퀀스
+# (이전: ui/live, ui/deepalign, ui/widgets 에 3벌 중복 → 단일화)
+# ──────────────────────────────────────────────────────────────────────────────
+
+class KinematicMoveWorker(QThread):
+    """7-step servo ON → move → servo OFF 시퀀스를 GUI 스레드 밖에서 실행."""
+
+    log      = pyqtSignal(str)
+    finished = pyqtSignal()
+    error    = pyqtSignal(str)
+
+    _SERVO_ON_MS   = 1000   # 서보 ON 확인 대기
+    _SETTLE_MS     = 500    # In-Position 후 정착 대기
+    _INPOS_TIMEOUT = 30000  # WaitMotionEnd 타임아웃 (ms)
+
+    def __init__(self, ctrl, targets, limits_plus, limits_minus,
+                 settle_ms: int = 500, dry: bool = False):
+        super().__init__()
+        self._ctrl = ctrl
+        self._targets = targets
+        self._limits_plus = limits_plus
+        self._limits_minus = limits_minus
+        self._settle_ms = settle_ms
+        self._dry = dry
+        self._stop_requested = False
+
+    def stop(self):
+        self._stop_requested = True
+
+    def run(self):
+        try:
+            if self._dry:
+                self.log.emit("[DRY RUN] 서보 ON → 이동 → 서보 OFF 시뮬레이션")
+                self.msleep(300)
+                if self._stop_requested: return
+                self.log.emit("[DRY RUN] KINEMATIC MOVE 완료")
+                self.finished.emit()
+                return
+
+            if self._stop_requested: return
+            self.log.emit("[ACS] ① Servo ON")
+            self._ctrl.enable_all()
+
+            if self._stop_requested: return
+            self.log.emit("[ACS] ② Servo ON 상태 확인 대기...")
+            if not self._ctrl.wait_for_enabled_all(timeout_ms=self._SERVO_ON_MS):
+                raise RuntimeError("Servo ON 확인 실패 (Timeout)")
+            self.log.emit("[ACS] ② Servo ON 확인 완료")
+
+            if self._stop_requested: return
+            motor_names = ["Y1", "Z1", "X1", "Z2", "Y2", "Z3"]
+            self.log.emit("[ACS] ③ Move 명령 전송 (전축 동시)")
+            for i, (name, target, p_lim, n_lim) in enumerate(zip(motor_names, self._targets, self._limits_plus, self._limits_minus)):
+                if self._stop_requested: return
+                self.log.emit(f"   [ACS] [{name}] POS: {target:+.4f} [PLIM: {p_lim:+.4f}, NLIM: {n_lim:+.4f}]")
+                self._ctrl.move_to(i, float(target), wait=False)
+
+            if self._stop_requested: return
+            self.log.emit("[ACS] ④ In-Position 완료 대기")
+            self._ctrl.wait_in_position_all(timeout_ms=self._INPOS_TIMEOUT)
+
+            self.log.emit(f"[ACS] ⑤ Settle Time 대기 ({self._settle_ms} ms)")
+            self.msleep(self._settle_ms)
+
+            self.log.emit("[ACS] ⑥ Servo OFF (락 걸기)")
+            self._ctrl.disable_all()
+
+            self.log.emit("[KINEMATICS] ⑦ KINEMATIC MOVE 완료")
+            self.finished.emit()
+
+        except Exception as e:
+            self.error.emit(str(e))

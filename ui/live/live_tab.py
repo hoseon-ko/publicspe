@@ -26,7 +26,8 @@ from PyQt6.QtWidgets import (
     QLabel, QPushButton, QTextEdit, QSizePolicy,
     QApplication, QListWidget, QListWidgetItem,
 )
-from PyQt6.QtCore import Qt, QTimer, QSize, QSettings, QThread, QObject, pyqtSignal, QEvent
+from PyQt6.QtCore import Qt, QTimer, QSize, QThread, QObject, pyqtSignal, QEvent
+from core.config import get_config
 from PyQt6.QtGui import QAction
 
 from core.camera.base import BaseCamera
@@ -45,6 +46,7 @@ from ui.live.kimm_z_panel import KIMMZPanel
 from ui.live.acs_stage_panel import AcsStagePanel
 from theme.styles import Fonts, Sizes, C_ACCENT, C_TEXT_DEAD, BTN_PRIMARY, TEXTEDIT_LOG
 from ui.widgets.collapsible_section import CollapsibleSection
+from core.workers import SnapWorker
 
 try:
     import cv2
@@ -60,23 +62,7 @@ _FS_SMALL   = Sizes.SMALL
 
 
 # ── 카메라 연결 백그라운드 워커 ──────────────────────────────────────────────
-
-class _SnapWorker(QObject):
-    """snap() 1장 촬영을 백그라운드에서 실행 — UI 멈춤 방지."""
-    success = pyqtSignal(object)   # np.ndarray
-    error   = pyqtSignal(str)
-
-    def __init__(self, camera: BaseCamera):
-        super().__init__()
-        self._camera = camera
-
-    def run(self):
-        try:
-            frame = self._camera.snap()
-            self.success.emit(np.asarray(frame))
-        except Exception as e:
-            dev_logger.exception("[_SnapWorker] snap failed")
-            self.error.emit(str(e))
+# SnapWorker는 core.workers 로 이동(상단 import). LiveTab은 lambda 로 camera.snap 을 전달.
 
 
 class _DisconnectWorker(QObject):
@@ -281,7 +267,7 @@ class LiveTab(QMainWindow):
         self._conn_thread: Optional[QThread] = None
         self._conn_worker: Optional[_ConnectWorker] = None
         self._snap_thread: Optional[QThread] = None
-        self._snap_worker: Optional[_SnapWorker] = None
+        self._snap_worker: Optional[SnapWorker] = None
         self._pending_connect_index: Optional[int] = None  # 해제 후 재연결 대기
 
         # ── 처리 전용 워커 (카메라 스레드 블로킹 방지) ──
@@ -295,8 +281,7 @@ class LiveTab(QMainWindow):
         self._log("Live Tab Initialized", "sys")
 
         # #21 독 레이아웃 복원
-        _s = QSettings("SpeAnalyze", "LiveTab")
-        _state = _s.value("dockState")
+        _state = get_config().get("window.live.dockState")
         if _state is not None:
             self.restoreState(_state)
 
@@ -425,17 +410,21 @@ class LiveTab(QMainWindow):
         sidebar_v.addStretch(1)
 
         # ── #21 상태 복원 ──
-        _s = QSettings("SpeAnalyze", "LiveTab")
-        self._sec_cam  .set_collapsed(_s.value("sec/camera_collapsed",  False, type=bool))
-        self._sec_motor.set_collapsed(_s.value("sec/motor_collapsed",   False, type=bool))
-        self._sec_kimm .set_collapsed(_s.value("sec/kimm_collapsed",    True,  type=bool))
-        self._sec_acs  .set_collapsed(_s.value("sec/acs_collapsed",     True,  type=bool))
+        _c = get_config()
+        self._sec_cam  .set_collapsed(bool(_c.get("ui.sections_collapsed.camera", False)))
+        self._sec_motor.set_collapsed(bool(_c.get("ui.sections_collapsed.motor",  False)))
+        self._sec_kimm .set_collapsed(bool(_c.get("ui.sections_collapsed.kimm",   True)))
+        self._sec_acs  .set_collapsed(bool(_c.get("ui.sections_collapsed.acs",    True)))
 
         # 변경 시 자동 저장 연결
-        self._sec_cam  .toggled.connect(lambda c: _s.setValue("sec/camera_collapsed", c))
-        self._sec_motor.toggled.connect(lambda c: _s.setValue("sec/motor_collapsed", c))
-        self._sec_kimm .toggled.connect(lambda c: _s.setValue("sec/kimm_collapsed", c))
-        self._sec_acs  .toggled.connect(lambda c: _s.setValue("sec/acs_collapsed", c))
+        def _toggle_setter(path):
+            def _h(c):
+                _c.set(path, c); _c.save()
+            return _h
+        self._sec_cam  .toggled.connect(_toggle_setter("ui.sections_collapsed.camera"))
+        self._sec_motor.toggled.connect(_toggle_setter("ui.sections_collapsed.motor"))
+        self._sec_kimm .toggled.connect(_toggle_setter("ui.sections_collapsed.kimm"))
+        self._sec_acs  .toggled.connect(_toggle_setter("ui.sections_collapsed.acs"))
 
         left_scroll = QScrollArea()
         left_scroll.setWidget(sidebar)
@@ -969,7 +958,7 @@ class LiveTab(QMainWindow):
             self._set_live_progress(100)
 
         self._snap_thread = QThread()
-        self._snap_worker = _SnapWorker(self._camera)
+        self._snap_worker = SnapWorker(self._camera.snap)
         self._snap_worker.moveToThread(self._snap_thread)
         self._snap_thread.started.connect(self._snap_worker.run)
         self._snap_worker.success.connect(self._on_snap_success)
@@ -1297,20 +1286,20 @@ class LiveTab(QMainWindow):
     # ── 설정 / 정리 ───────────────────────────────────────────────────
 
     def _save_settings(self):
-        s = QSettings("SpeAnalyze", "LiveTab")
-        s.setValue("dockState", self.saveState())
-        s.sync()
+        c = get_config()
+        c.set("window.live.dockState", self.saveState())
+        c.save()
 
     def _restore_settings(self):
-        s = QSettings("SpeAnalyze", "LiveTab")
-        state = s.value("dockState")
+        state = get_config().get("window.live.dockState")
         if state:
             self.restoreState(state)
 
     def reset_layout(self):
         """도킹 레이아웃을 초기 상태(Profile/Histogram 좌우 분할 등)로 복구합니다."""
-        s = QSettings("SpeAnalyze", "LiveTab")
-        s.remove("dockState")
+        c = get_config()
+        c.remove("window.live.dockState")
+        c.save()
         
         # 모든 독 보이기
         for d in [self.dock_left, self.dock_plot, self.dock_hist, self.dock_roi]:

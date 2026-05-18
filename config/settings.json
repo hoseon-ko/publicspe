@@ -1,0 +1,175 @@
+{
+  "version": 1,
+  "window": {
+    "main": {
+      "geometry": "b64:AdnQywADAAAAAAAA////+QAACf8AAAVvAAACHgAAAJgAAAkZAAAFbgAAAAACAAAACgAAAAAAAAAAFwAACf8AAAVv",
+      "windowState": "b64:AAAA/wAAAAD9AAAAAQAAAAMAAAoAAAAAgPwBAAAAAfsAAAAeAGQAbwBjAGsAXwBnAGwAbwBiAGEAbABfAGwAbwBnAQAAAAAAAAoAAAAAiAD///8AAAoAAAAEuwAAAAQAAAAEAAAACAAAAAj8AAAAAA==",
+      "active_tab": 0,
+      "auto_connect": false
+    },
+    "live": {
+      "dockState": "b64:AAAA/wAAAAD9AAAAAwAAAAAAAAEEAAACnvwCAAAABPsAAAAQAGQAbwBjAGsAXwBjAGEAbQEAAAAnAAAA6QAAAAAAAAAA+wAAABQAZABvAGMAawBfAG0AbwB0AG8AcgEAAAETAAAA6gAAAAAAAAAA+wAAABIAZABvAGMAawBfAGsAaQBtAG0BAAACAAAAAOkAAAAAAAAAAPsAAAASAGQAbwBjAGsAXwBsAGUAZgB0AQAAACIAAAKeAAAARAD///8AAAABAAAA0AAAAp78AgAAAAL7AAAAEABkAG8AYwBrAF8AbABvAGcAAAAAJwAABPYAAAAAAAAAAPsAAAAQAGQAbwBjAGsAXwByAG8AaQEAAAAiAAACngAAAGIA////AAAAAwAABkAAAADD/AEAAAAC+wAAABIAZABvAGMAawBfAHAAbABvAHQBAAAAAAAABkAAAADcAP////sAAAASAGQAbwBjAGsAXwBoAGkAcwB0AAAAAAAAAAn+AAAAuAD///8AAARgAAACngAAAAQAAAAEAAAACAAAAAj8AAAAAQAAAAIAAAABAAAAGABsAGkAdgBlAF8AdABvAG8AbABiAGEAcgEAAAAA/////wAAAAAAAAAA"
+    },
+    "analysis": {
+      "geometry": "b64:AdnQywADAAAAAAABAAAAGQAACf4AAARZAAAAAAAAAAD//////////wAAAAAAAAAACgAAAAABAAAAGQAACf4AAARZ",
+      "windowState": "b64:AAAA/wAAAAD9AAAAAwAAAAAAAAD4AAADavwCAAAAAvsAAAAUAGQAbwBjAGsAXwBmAGkAbABlAHMBAAAALgAAArcAAAEQAP///vsAAAAWAGQAbwBjAGsAXwBmAHIAYQBtAGUAcwEAAALoAAAAsAAAAGsA///+AAAAAQAAAJ0AAANq/AIAAAAB+wAAABAAZABvAGMAawBfAHIAbwBpAQAAAC4AAANqAAAAawD///4AAAADAAAKAAAAAIv8AQAAAAL7AAAAEgBkAG8AYwBrAF8AcABsAG8AdAEAAAAAAAAGrgAAAOAA////+wAAABwAZABvAGMAawBfAGgAaQBzAHQAbwBnAHIAYQBtAQAABrEAAANPAAAAugD///8AAAhlAAADagAAAAQAAAAEAAAACAAAAAj8AAAAAQAAAAIAAAABAAAAIABhAG4AYQBsAHkAcwBpAHMAXwB0AG8AbwBsAGIAYQByAQAAAAD/////AAAAAAAAAAA="
+    }
+  },
+  "devices": {
+    "acs": {
+      "ip": "10.0.0.100",
+      "port": "700",
+      "sim": false,
+      "dry_run": false,
+      "settle_ms": 500,
+      "kin_steps": [
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1
+      ]
+    },
+    "kimm": {
+      "ip": "192.168.1.100",
+      "port": "5000",
+      "dry_run": false
+    },
+    "picomotor": {
+      "motors": {
+        "m1": {
+          "step": 100,
+          "weight_fwd": 1.0,
+          "weight_bwd": 1.0
+        },
+        "m2": {
+          "step": 100,
+          "weight_fwd": 1.0,
+          "weight_bwd": 1.0
+        },
+        "m3": {
+          "step": 100,
+          "weight_fwd": 1.0,
+          "weight_bwd": 1.0
+        },
+        "m4": {
+          "step": 100
+        }
+      }
+    }
+  },
+  "camera": {
+    "vendor": "Simulation",
+    "type": "SIMULATED",
+    "exposure_ms": 20.0,
+    "fps": 30.0,
+    "fps_lock": false,
+    "temp_c": -70.0,
+    "adc": {
+      "quality": "",
+      "speed": "",
+      "gain": "",
+      "bit": ""
+    }
+  },
+  "tabs": {
+    "acquisition": {
+      "save_dir": "acquisitions",
+      "base_name": "picam_data",
+      "inc_date": true,
+      "inc_time": true,
+      "inc_num": true,
+      "exposure": 1000.0,
+      "frames": 10,
+      "timeout": 30.0,
+      "auto_open": true
+    },
+    "autofocus": {
+      "metric": 3,
+      "z_center": 0.1,
+      "z_range": 11.0,
+      "z_step": 0.1,
+      "avg": 1,
+      "settle_ms": 200,
+      "goto_best": true,
+      "save_frames": false,
+      "save_dir": "",
+      "splitter": "b64:AAAA/wAAAAEAAAACAAABQAAABLAB/////wEAAAABAA==",
+      "main_splitter": "b64:AAAA/wAAAAEAAAACAAAD4wAAAZAB/////wEAAAABAA==",
+      "side_splitter": "b64:AAAA/wAAAAEAAAADAAAAegAAASwAAADIAf////8BAAAAAgA="
+    },
+    "scan": {
+      "name": "Scan",
+      "num_steps": 5,
+      "steps_move": 5000,
+      "bin_threshold": 195,
+      "motor": "M3",
+      "settle_ms": 500,
+      "save_dir": "Scan_Data",
+      "right_splitter_sizes": [
+        95,
+        174,
+        75,
+        124
+      ]
+    },
+    "deepalign": {
+      "save": {
+        "frame_to_save": 10,
+        "folder": "Live_Captures",
+        "file_base": "Capture",
+        "inc_name": false,
+        "add_date": true,
+        "add_time": true,
+        "date_fmt": "YYYY-Month-DD",
+        "time_fmt": "hh:mm:ss (24h)",
+        "place": "Suffix"
+      }
+    }
+  },
+  "ui": {
+    "sections_collapsed": {
+      "ADC SETTINGS": false,
+      "AVERAGING": false,
+      "BACKGROUND": false,
+      "CAMERA DEVICE": false,
+      "CENTROID / STATS": false,
+      "Centroid Mode": false,
+      "DARK / FLAT": false,
+      "DISPLAY STRETCH": false,
+      "EXPOSURE": false,
+      "FRAMERATE": false,
+      "LOG SCALE": false,
+      "PROCESSING": false,
+      "SPATIAL FILTER": false,
+      "TEMPERATURE": false,
+      "Threshold Mode": false,
+      "AXIS CONTROLS": false,
+      "PICOMOTOR 8742": true,
+      "STEP WEIGHT SETTINGS": true,
+      "acs": false,
+      "camera": true,
+      "kimm": false,
+      "motor": true,
+      "camera_device": false,
+      "exposure": false,
+      "framerate": false,
+      "averaging": false,
+      "processing": false,
+      "threshold_mode": false,
+      "centroid_mode": false,
+      "log_scale": false,
+      "background": false,
+      "dark_/_flat": false,
+      "centroid_/_stats": false,
+      "temperature": false,
+      "adc_settings": false,
+      "spatial_filter": false,
+      "display_stretch": false,
+      "picomotor_8742": false,
+      "axis_controls": false,
+      "step_weight_settings": true
+    }
+  }
+}

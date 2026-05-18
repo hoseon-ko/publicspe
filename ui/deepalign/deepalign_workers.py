@@ -117,22 +117,6 @@ class _AcquireWorker(QObject):
             self.error.emit(str(e))
 
 
-class _SnapWorker(QObject):
-    success = pyqtSignal(object)
-    error = pyqtSignal(str)
-
-    def __init__(self, snap_fn):
-        super().__init__()
-        self._snap_fn = snap_fn
-
-    def run(self):
-        try:
-            frame = self._snap_fn()
-            self.success.emit(frame)
-        except Exception as e:
-            self.error.emit(str(e))
-
-
 class _BgCaptureWorker(QObject):
     """N프레임 snap → 평균 → 배경 프레임 반환."""
 

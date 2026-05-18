@@ -10,7 +10,8 @@ import os
 from typing import Optional
 
 import numpy as np
-from PyQt6.QtCore import Qt, pyqtSignal, QSettings, QSize, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, QSize, QTimer
+from core.config import get_config
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
     QLabel, QPushButton, QSpinBox, QDoubleSpinBox,
@@ -1246,36 +1247,36 @@ class ScanTab(QWidget):
         self.log_display.append(log_html(msg, ts))
 
     def _restore_settings(self):
-        s = QSettings("SpeAnalyze", "ScanTab")
-        self.combo_motor.setCurrentText(s.value("motor", "M1"))
-        self.spin_steps_move.setValue(int(s.value("steps_move", 500)))
-        self.spin_num_steps.setValue(int(s.value("num_steps", 10)))
-        self.spin_settle.setValue(int(s.value("settle_ms", 500)))
-        self.edit_save_dir.setText(s.value("save_dir", "Scan_Data"))
-        self.edit_scan_name.setText(s.value("scan_name", "Scan"))
-        raw = s.value("right_splitter_sizes")
+        c = get_config()
+        self.combo_motor.setCurrentText(str(c.get("tabs.scan.motor", "M1")))
+        self.spin_steps_move.setValue(int(c.get("tabs.scan.steps_move", 500)))
+        self.spin_num_steps.setValue(int(c.get("tabs.scan.num_steps", 10)))
+        self.spin_settle.setValue(int(c.get("tabs.scan.settle_ms", 500)))
+        self.edit_save_dir.setText(str(c.get("tabs.scan.save_dir", "Scan_Data")))
+        self.edit_scan_name.setText(str(c.get("tabs.scan.name", "Scan")))
+        raw = c.get("tabs.scan.right_splitter_sizes")
         if raw:
             try:
                 self._right_splitter.setSizes([int(x) for x in raw])
             except Exception:
                 pass
-        thresh = int(s.value("bin_threshold", 1000))
+        thresh = int(c.get("tabs.scan.bin_threshold", 1000))
         self.slider_thresh.setValue(thresh)
         # _proc 동기화
         self._proc.bin_threshold = float(thresh)
         self.slider_thresh.setEnabled(False)  # 원본 모드 기본
 
     def _save_settings(self):
-        s = QSettings("SpeAnalyze", "ScanTab")
-        s.setValue("motor",      self.combo_motor.currentText())
-        s.setValue("steps_move", self.spin_steps_move.value())
-        s.setValue("num_steps",  self.spin_num_steps.value())
-        s.setValue("settle_ms",  self.spin_settle.value())
-        s.setValue("save_dir",   self.edit_save_dir.text())
-        s.setValue("scan_name",  self.edit_scan_name.text())
-        s.setValue("right_splitter_sizes", self._right_splitter.sizes())
-        s.setValue("bin_threshold", self.slider_thresh.value())
-        s.sync()
+        c = get_config()
+        c.set("tabs.scan.motor",      self.combo_motor.currentText())
+        c.set("tabs.scan.steps_move", int(self.spin_steps_move.value()))
+        c.set("tabs.scan.num_steps",  int(self.spin_num_steps.value()))
+        c.set("tabs.scan.settle_ms",  int(self.spin_settle.value()))
+        c.set("tabs.scan.save_dir",   self.edit_save_dir.text())
+        c.set("tabs.scan.name",       self.edit_scan_name.text())
+        c.set("tabs.scan.right_splitter_sizes", self._right_splitter.sizes())
+        c.set("tabs.scan.bin_threshold", int(self.slider_thresh.value()))
+        c.save()
 
     def cleanup(self):
         if self._worker and self._worker.isRunning():

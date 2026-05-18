@@ -19,7 +19,8 @@ from PyQt6.QtWidgets import (
     QLabel, QFrame, QVBoxLayout, QHBoxLayout, QPushButton,
     QDockWidget, QTextEdit, QTabWidget, QApplication, QCheckBox,
 )
-from PyQt6.QtCore import Qt, QSize, QSettings, QTimer
+from PyQt6.QtCore import Qt, QSize, QTimer
+from core.config import get_config
 from PyQt6.QtGui import QFont, QShortcut, QKeySequence, QPixmap, QPainter
 
 from ui.live.live_tab import LiveTab
@@ -226,9 +227,7 @@ class MainWindow(QMainWindow):
             }}
         """)
         # 영구 저장 상태 복원
-        settings = QSettings("SpeAnalyze", "MainWindow")
-        auto_val = settings.value("app/auto_connect", True)
-        self.check_auto_conn.setChecked(str(auto_val).lower() == 'true' or auto_val is True)
+        self.check_auto_conn.setChecked(bool(get_config().get("window.main.auto_connect", True)))
         self.check_auto_conn.stateChanged.connect(self._on_auto_connect_toggled)
         hdr_h.addWidget(self.check_auto_conn)
 
@@ -468,10 +467,11 @@ class MainWindow(QMainWindow):
     def save_all_settings(self):
         """aboutToQuit / SIGINT 등 모든 종료 경로에서 설정 저장 및 UI 상태 저장."""
         # 1. MainWindow 상태 저장
-        s = QSettings("SpeAnalyze", "MainWindow")
-        s.setValue("geometry", self.saveGeometry())
-        s.setValue("windowState", self.saveState())
-        s.setValue("active_tab", self.stack.currentIndex())
+        cfg = get_config()
+        cfg.set("window.main.geometry", self.saveGeometry())
+        cfg.set("window.main.windowState", self.saveState())
+        cfg.set("window.main.active_tab", self.stack.currentIndex())
+        cfg.save()
 
         # 2. 서브 탭 설정 저장 및 하드웨어/워커 정리
         for tab in (self.live_tab, self.acq_tab, self.scan_tab, self.af_tab, self.kin_tab, self.analysis_tab, self.deep_align_tab):
@@ -571,15 +571,15 @@ class MainWindow(QMainWindow):
 
     def _restore_settings(self):
         """Load saved MainWindow UI state and forward to sub‑tabs."""
-        s = QSettings("SpeAnalyze", "MainWindow")
+        cfg = get_config()
         try:
-            geom = s.value("geometry")
+            geom = cfg.get("window.main.geometry")
             if geom:
                 self.restoreGeometry(geom)
-            state = s.value("windowState")
+            state = cfg.get("window.main.windowState")
             if state:
                 self.restoreState(state)
-            idx = s.value("active_tab")
+            idx = cfg.get("window.main.active_tab")
             if idx is not None:
                 idx = int(idx)
                 if 0 <= idx < self.stack.count():
@@ -617,10 +617,7 @@ class MainWindow(QMainWindow):
 
     def _auto_connect_startup(self):
         """프로그램 실행 0.5초 후 백그라운드에서 모든 하드웨어 연결 자동 시도 (예외 안전)"""
-        # QSettings에서 사용자의 자동 연결 활성화 여부 확인
-        settings = QSettings("SpeAnalyze", "MainWindow")
-        auto_val = settings.value("app/auto_connect", True)
-        auto_connect_enabled = str(auto_val).lower() == 'true' or auto_val is True
+        auto_connect_enabled = bool(get_config().get("window.main.auto_connect", True))
         
         if not auto_connect_enabled:
             app_logger.info("[Auto-Connect] 자동 장비 연결 기능이 비활성화 상태입니다. (자동 연결 스킵)")
@@ -642,9 +639,9 @@ class MainWindow(QMainWindow):
 
             # 2. KIMM Z-Stage 자동 연결
             try:
-                kimm_settings = QSettings("SpeAnalyze", "MainWindow")
-                ip = kimm_settings.value("kimm/ip", "192.168.1.100")
-                port_val = kimm_settings.value("kimm/port", "5000")
+                cfg = get_config()
+                ip = cfg.get("devices.kimm.ip", "192.168.1.100")
+                port_val = cfg.get("devices.kimm.port", "5000")
                 port = int(port_val) if port_val else 5000
                 app_logger.info(f"[Auto-Connect] KIMM Z-Stage 연결 시도 ({ip}:{port})...")
                 self.session_hub.kimm_connect(ip, port)
@@ -654,12 +651,11 @@ class MainWindow(QMainWindow):
 
             # 3. ACS Stage 자동 연결
             try:
-                acs_settings = QSettings("SpeAnalyze", "MainWindow")
-                ip = acs_settings.value("acs/ip", "10.0.0.100")
-                port_val = acs_settings.value("acs/port", "700")
+                cfg = get_config()
+                ip = cfg.get("devices.acs.ip", "10.0.0.100")
+                port_val = cfg.get("devices.acs.port", "700")
                 port = int(port_val) if port_val else 700
-                sim_val = acs_settings.value("acs/sim", False)
-                sim = str(sim_val).lower() == 'true' or sim_val is True
+                sim = bool(cfg.get("devices.acs.sim", False))
                 app_logger.info(f"[Auto-Connect] ACS Stage 연결 시도 ({ip}:{port}, sim={sim})...")
                 self.session_hub.acs_connect(ip, port, sim)
                 app_logger.info("[Auto-Connect] ACS Stage 연결 성공.")
@@ -675,9 +671,8 @@ class MainWindow(QMainWindow):
     def _auto_connect_camera_on_gui(self):
         """메인 GUI 스레드에서 안전하게 카메라 자동 연결 수행 (DeepAlign 탭 기준)"""
         try:
-            # 1. QSettings("SpeAnalyze", "DeepAlignTab")에서 저장된 vendor 로드
-            settings = QSettings("SpeAnalyze", "DeepAlignTab")
-            vendor = str(settings.value("camera/vendor", "Simulation")).strip()
+            # 저장된 카메라 vendor 로드 (단일 출처 camera.vendor)
+            vendor = str(get_config().get("camera.vendor", "Simulation")).strip()
             
             app_logger.info(f"[Auto-Connect] 저장된 카메라 벤더 로드: {vendor}")
             
@@ -766,9 +761,10 @@ class MainWindow(QMainWindow):
             app_logger.warning(f"[Auto-Connect] 카메라 자동 연결 실패: {e}")
 
     def _on_auto_connect_toggled(self):
-        """사용자가 헤더 바에서 AUTO CONNECT 체크박스를 토글할 때 QSettings에 상태 저장"""
-        settings = QSettings("SpeAnalyze", "MainWindow")
+        """사용자가 헤더 바에서 AUTO CONNECT 체크박스를 토글할 때 설정 파일에 상태 저장"""
+        cfg = get_config()
         checked = self.check_auto_conn.isChecked()
-        settings.setValue("app/auto_connect", checked)
+        cfg.set("window.main.auto_connect", checked)
+        cfg.save()
         app_logger.info(f"[Auto-Connect] 자동 연결 기능 설정 변경 -> {'활성화' if checked else '비활성화'}")
 

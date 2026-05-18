@@ -31,7 +31,8 @@ from PyQt6.QtWidgets import (
     QFrame, QSizePolicy, QLineEdit, QToolButton,
 )
 from ui.widgets.auto_splitter import AutoSplitter
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QSettings, QSize
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QSize
+from core.config import get_config
 from PyQt6.QtGui import QFont, QIcon, QPixmap, QImage
 
 import pyqtgraph as pg
@@ -1310,40 +1311,44 @@ class AutoFocusTab(QWidget):
     # ── 설정 저장 및 복원 ────────────────────────────────────────────────
 
     def _save_settings(self):
-        s = QSettings("SpeAnalyze", "AutoFocusTab")
-        s.setValue("spin_center", self.spin_center.value())
-        s.setValue("spin_range", self.spin_range.value())
-        s.setValue("spin_step", self.spin_step.value())
-        s.setValue("combo_metric", self.combo_metric.currentIndex())
-        s.setValue("spin_settle", self.spin_settle.value())
-        s.setValue("spin_avg", self.spin_avg.value())
-        s.setValue("chk_goto_best", self.chk_goto_best.isChecked())
-        s.setValue("chk_save_frames", self.chk_save_frames.isChecked())
-        s.setValue("save_dir", self.edit_save_dir.text())
+        c = get_config()
+        c.set("tabs.autofocus.z_center", float(self.spin_center.value()))
+        c.set("tabs.autofocus.z_range",  float(self.spin_range.value()))
+        c.set("tabs.autofocus.z_step",   float(self.spin_step.value()))
+        c.set("tabs.autofocus.metric",   int(self.combo_metric.currentIndex()))
+        c.set("tabs.autofocus.settle_ms", int(self.spin_settle.value()))
+        c.set("tabs.autofocus.avg",      int(self.spin_avg.value()))
+        c.set("tabs.autofocus.goto_best", self.chk_goto_best.isChecked())
+        c.set("tabs.autofocus.save_frames", self.chk_save_frames.isChecked())
+        c.set("tabs.autofocus.save_dir", self.edit_save_dir.text())
         if hasattr(self, "_splitter"):
-            s.setValue("splitter", self._splitter.saveState())
+            c.set("tabs.autofocus.splitter", self._splitter.saveState())
         if hasattr(self, "_main_splitter"):
-            s.setValue("main_splitter", self._main_splitter.saveState())
+            c.set("tabs.autofocus.main_splitter", self._main_splitter.saveState())
         if hasattr(self, "_side_splitter"):
-            s.setValue("side_splitter", self._side_splitter.saveState())
+            c.set("tabs.autofocus.side_splitter", self._side_splitter.saveState())
+        c.save()
 
     def _restore_settings(self):
-        s = QSettings("SpeAnalyze", "AutoFocusTab")
+        c = get_config()
         try:
-            self.spin_center.setValue(float(s.value("spin_center", 0.0)))
-            self.spin_range.setValue(float(s.value("spin_range", 50.0)))
-            self.spin_step.setValue(float(s.value("spin_step", 5.0)))
-            self.combo_metric.setCurrentIndex(int(s.value("combo_metric", 0)))
-            self.spin_settle.setValue(int(s.value("spin_settle", 200)))
-            self.spin_avg.setValue(int(s.value("spin_avg", 1)))
-            self.chk_goto_best.setChecked(s.value("chk_goto_best", True, type=bool))
-            self.chk_save_frames.setChecked(s.value("chk_save_frames", False, type=bool))
-            self.edit_save_dir.setText(s.value("save_dir", ""))
-            if hasattr(self, "_splitter") and s.value("splitter"):
-                self._splitter.restoreState(s.value("splitter"))
-            if hasattr(self, "_main_splitter") and s.value("main_splitter"):
-                self._main_splitter.restoreState(s.value("main_splitter"))
-            if hasattr(self, "_side_splitter") and s.value("side_splitter"):
-                self._side_splitter.restoreState(s.value("side_splitter"))
+            self.spin_center.setValue(float(c.get("tabs.autofocus.z_center", 0.0)))
+            self.spin_range.setValue(float(c.get("tabs.autofocus.z_range", 50.0)))
+            self.spin_step.setValue(float(c.get("tabs.autofocus.z_step", 5.0)))
+            self.combo_metric.setCurrentIndex(int(c.get("tabs.autofocus.metric", 0)))
+            self.spin_settle.setValue(int(c.get("tabs.autofocus.settle_ms", 200)))
+            self.spin_avg.setValue(int(c.get("tabs.autofocus.avg", 1)))
+            self.chk_goto_best.setChecked(bool(c.get("tabs.autofocus.goto_best", True)))
+            self.chk_save_frames.setChecked(bool(c.get("tabs.autofocus.save_frames", False)))
+            self.edit_save_dir.setText(str(c.get("tabs.autofocus.save_dir", "")))
+            sp = c.get("tabs.autofocus.splitter")
+            if hasattr(self, "_splitter") and sp:
+                self._splitter.restoreState(sp)
+            sp = c.get("tabs.autofocus.main_splitter")
+            if hasattr(self, "_main_splitter") and sp:
+                self._main_splitter.restoreState(sp)
+            sp = c.get("tabs.autofocus.side_splitter")
+            if hasattr(self, "_side_splitter") and sp:
+                self._side_splitter.restoreState(sp)
         except Exception as e:
             print(f"AutoFocusTab settings restore error: {e}")

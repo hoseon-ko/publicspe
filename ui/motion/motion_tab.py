@@ -10,7 +10,8 @@ from __future__ import annotations
 import threading
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QTimer, QSettings, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from core.config import get_config
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton,
     QFrame, QScrollArea, QDoubleSpinBox, QLineEdit, QTextEdit, QSpinBox,
@@ -130,7 +131,7 @@ class MotionTab(QWidget):
         self._map_combos: list[QComboBox] = []
         self._stage_setup_spins: list[QDoubleSpinBox] = []
         self._encoder_pos_spins: list[QDoubleSpinBox] = []
-        self._settings = QSettings("SpeAnalyze", "MainWindow")
+        self._cfg = get_config()
         self._default_stage_setup = self._calc.stage_setup.copy()
         self._default_encoder_pos = self._calc.encoder_pos.copy()
         self._default_plus_limits = self._calc.plus_limits.copy()

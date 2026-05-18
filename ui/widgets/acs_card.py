@@ -5,6 +5,7 @@ ACS SPiiPlus 6축 키네마틱 스테이지 제어 카드 — 전용 위젯 버�
 """
 
 from __future__ import annotations
+from core.logger import dev_logger
 
 import threading
 import numpy as np
@@ -13,10 +14,11 @@ from PyQt6.QtWidgets import (
     QPushButton, QLineEdit, QGridLayout,
     QDoubleSpinBox, QSpinBox, QCheckBox, QTextEdit, QFrame
 )
-from PyQt6.QtCore import Qt, QSettings, QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
+from core.config import get_config
 from PyQt6.QtGui import QKeyEvent
 
-from core.motor.acs_stage import AcsStageController, AXIS_LABELS, DEFAULT_PORT
+from core.motor.acs_stage import AcsStageController, AXIS_LABELS, DEFAULT_PORT, KinematicMoveWorker
 from core.motor.kinematic_calc import KinematicCalc, is_available as kinematic_available
 from ui.widgets.collapsible_section import CollapsibleSection
 from theme.styles import (
@@ -143,53 +145,6 @@ class _AxisRow:
         inpos_color = "#10b981" if in_pos else "#304060"
         self.lbl_inpos.setStyleSheet(f"color:{inpos_color}; font-size:16px;")
 
-class _KinematicMoveWorker(QThread):
-    log      = pyqtSignal(str)
-    finished = pyqtSignal()
-    error    = pyqtSignal(str)
-    
-    def __init__(self, ctrl: AcsStageController, targets: np.ndarray, 
-                 limits_plus: np.ndarray, limits_minus: np.ndarray,
-                 settle_ms: int = 500, dry: bool = False):
-        super().__init__()
-        self._ctrl = ctrl
-        self._targets = targets
-        self._limits_plus = limits_plus
-        self._limits_minus = limits_minus
-        self._settle_ms = settle_ms
-        self._dry = dry
-        self._stop_requested = False
-
-    def stop(self): self._stop_requested = True
-
-    def run(self):
-        try:
-            if self._dry:
-                self.log.emit("[DRY RUN] 시뮬레이션 이동 중...")
-                self.msleep(1000)
-                self.finished.emit(); return
-
-            self.log.emit("[ACS] Servo ON...")
-            self._ctrl.enable_all()
-            if not self._ctrl.wait_for_enabled_all(timeout_ms=1000):
-                raise RuntimeError("Servo ON 확인 실패")
-
-            self.log.emit("[ACS] Move 시작...")
-            for i, target in enumerate(self._targets):
-                if self._stop_requested: return
-                self._ctrl.move_to(i, float(target), wait=False)
-
-            self.log.emit("[ACS] In-Position 대기...")
-            self._ctrl.wait_in_position_all(timeout_ms=30000)
-            self.msleep(self._settle_ms)
-
-            self.log.emit("[ACS] Servo OFF...")
-            self._ctrl.disable_all()
-            self.log.emit("[ACS] 이동 완료")
-            self.finished.emit()
-        except Exception as e:
-            self.error.emit(str(e))
-
 class AcsCard(QFrame):
     """
     ACS 6-Axis Stage 카드 (전체 기능 포함).
@@ -214,9 +169,9 @@ class AcsCard(QFrame):
         self._axis_rows: list[_AxisRow] = []
         self._motion_widgets: list[QWidget] = []
         self._session_hub = None
-        self._settings = QSettings("SpeAnalyze", "MainWindow")
+        self._cfg = get_config()
         self._calc = KinematicCalc()
-        self._kin_worker: _KinematicMoveWorker | None = None
+        self._kin_worker: KinematicMoveWorker | None = None
         self._last_actual_dof = None
         self._is_fwd_calculating = False
 
@@ -511,7 +466,7 @@ class AcsCard(QFrame):
 
     def _on_kin_move(self):
         if self._last_cal_pos is None or not self._ctrl_ref[0]: return
-        self._kin_worker = _KinematicMoveWorker(self._ctrl_ref[0], self._last_cal_pos, self._calc.plus_limits, self._calc.minus_limits, self.spin_settle.value(), self.check_dry.isChecked())
+        self._kin_worker = KinematicMoveWorker(self._ctrl_ref[0], self._last_cal_pos, self._calc.plus_limits, self._calc.minus_limits, self.spin_settle.value(), self.check_dry.isChecked())
         self._kin_worker.log.connect(self.log_message.emit); self._kin_worker.finished.connect(lambda: self.log_message.emit("ACS: Move Finished"))
         self._kin_worker.start()
 
@@ -522,22 +477,21 @@ class AcsCard(QFrame):
         for i in range(3): self._dof_spins[i+3].setValue(res[i] * 1000)
 
     def _save_settings(self):
-        self._settings.setValue("acs/ip", self.edit_ip.text().strip())
-        self._settings.setValue("acs/port", self.edit_port.text().strip())
-        self._settings.setValue("acs/sim", self.check_sim.isChecked())
-        self._settings.setValue("acs/dry_run", self.check_dry.isChecked())
-        self._settings.setValue("acs/settle", self.spin_settle.value())
-        self._settings.sync()  # 디스크 물리 저장 강제 동기화
+        c = self._cfg
+        c.set("devices.acs.ip",        self.edit_ip.text().strip())
+        c.set("devices.acs.port",      self.edit_port.text().strip())
+        c.set("devices.acs.sim",       self.check_sim.isChecked())
+        c.set("devices.acs.dry_run",   self.check_dry.isChecked())
+        c.set("devices.acs.settle_ms", int(self.spin_settle.value()))
+        c.save()
 
     def _load_settings(self):
-        self.edit_ip.setText(self._settings.value("acs/ip", "10.0.0.100"))
-        self.edit_port.setText(self._settings.value("acs/port", "700"))
-        
-        sim_val = self._settings.value("acs/sim", False)
-        self.check_sim.setChecked(str(sim_val).lower() == 'true' or sim_val is True)
-        
-        dry_val = self._settings.value("acs/dry_run", False)
-        self.check_dry.setChecked(str(dry_val).lower() == 'true' or dry_val is True)
-        
-        settle_val = self._settings.value("acs/settle", 500)
-        self.spin_settle.setValue(int(settle_val) if settle_val else 500)
+        c = self._cfg
+        self.edit_ip.setText(str(c.get("devices.acs.ip", "10.0.0.100")))
+        self.edit_port.setText(str(c.get("devices.acs.port", "700")))
+        self.check_sim.setChecked(bool(c.get("devices.acs.sim", False)))
+        self.check_dry.setChecked(bool(c.get("devices.acs.dry_run", False)))
+        try:
+            self.spin_settle.setValue(int(c.get("devices.acs.settle_ms", 500)))
+        except (TypeError, ValueError):
+            self.spin_settle.setValue(500)

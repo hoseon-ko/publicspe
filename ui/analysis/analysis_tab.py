@@ -18,7 +18,8 @@ from PyQt6.QtWidgets import (
     QToolBar, QMessageBox, QWidget,
     QVBoxLayout, QHBoxLayout,
 )
-from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSignal, QSettings
+from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSignal
+from core.config import get_config
 from PyQt6.QtGui import QAction
 
 from ui.image_viewer import ImageViewer
@@ -576,18 +577,18 @@ class AnalysisTab(QMainWindow):
                 for c in re.split(r'(\d+)', s)]
 
     def _save_settings(self):
-        s = QSettings("SpeAnalyze", "AnalysisTab")
-        s.setValue("geometry", self.saveGeometry())
-        s.setValue("windowState", self.saveState())
-        s.sync()
+        c = get_config()
+        c.set("window.analysis.geometry", self.saveGeometry())
+        c.set("window.analysis.windowState", self.saveState())
+        c.save()
 
     def _restore_settings(self):
-        s = QSettings("SpeAnalyze", "AnalysisTab")
+        c = get_config()
         try:
-            geom = s.value("geometry")
+            geom = c.get("window.analysis.geometry")
             if geom:
                 self.restoreGeometry(geom)
-            state = s.value("windowState")
+            state = c.get("window.analysis.windowState")
             if state:
                 self.restoreState(state)
         except Exception as e:

@@ -20,7 +20,8 @@ from PyQt6.QtWidgets import (
     QFileDialog, QListWidgetItem, QMessageBox,
     QFrame, QLabel, QProgressBar, QPushButton,
 )
-from PyQt6.QtCore import Qt, QThread, QTimer, QSettings, pyqtSignal, QSize, QEvent
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal, QSize, QEvent
+from core.config import get_config
 from PyQt6.QtGui import QIcon, QPixmap, QImage, QPainter, QColor
 from typing import Optional
 import numpy as np
@@ -36,8 +37,9 @@ from ui.deepalign.deepalign_frame_pipeline import FramePipelineMixin
 from ui.deepalign.deepalign_layout import LayoutBuilderMixin
 from ui.deepalign.deepalign_styles import DeepAlignStylesMixin
 from ui.deepalign.deepalign_workers import (
-    _AcquireWorker, _SnapWorker, _LiveWorker, _BgCaptureWorker,
+    _AcquireWorker, _LiveWorker, _BgCaptureWorker,
 )
+from core.workers import SnapWorker
 from ui.deepalign.scan import (
     MirrorMover, KimmMover, AcsMover,
     _MirrorScanWorker, _KimmScanWorker, _AcsScanWorker,
@@ -274,7 +276,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self._acq_thread: Optional[QThread] = None
         self._acq_worker: Optional[_AcquireWorker] = None
         self._snap_thread: Optional[QThread] = None
-        self._snap_worker: Optional[_SnapWorker] = None
+        self._snap_worker: Optional[SnapWorker] = None
         self._live_worker_thread: Optional[QThread] = None
         self._live_worker: Optional[_LiveWorker] = None
         self._af_worker: Optional[AutoFocusWorker] = None
@@ -333,7 +335,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self.mirror_scan = MirrorScanWidget()
         self.kimm_scan   = KimmScanWidget()
         self.acs_scan    = AcsScanWidget()
-        self._settings = QSettings("SpeAnalyze", "DeepAlignTab")
+        self._cfg = get_config()
 
         self._init_ui()
         self._bg_overlay = _BgProgressOverlay(self)
@@ -762,48 +764,51 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
             self.lbl_bg_status.setStyleSheet(f"color: {C_TEXT_DEAD}; font-size: 11px; font-weight: bold;")
 
     def _save_settings(self):
-        # Camera
-        self._settings.setValue("camera/vendor",      self.cb_vendor.currentText())
-        self._settings.setValue("camera/exposure_ms", float(self.spin_exposure.value()))
-        self._settings.setValue("camera/fps",         float(self.spin_fps.value()))
-        self._settings.setValue("camera/fps_lock",    bool(self.check_fps_lock.isChecked()))
-        self._settings.setValue("camera/temp",        float(self.spin_temp.value()))
-        self._settings.setValue("camera/adc_quality", self.cb_adc_quality.currentText())
-        self._settings.setValue("camera/adc_speed",   self.cb_adc_speed.currentText())
-        self._settings.setValue("camera/adc_gain",    self.cb_adc_gain.currentText())
-        self._settings.setValue("camera/adc_bit",     self.cb_adc_bit.currentText())
-        # Save
-        self._settings.setValue("save/frame_to_save", int(self.spin_frame_to_save.value()))
-        self._settings.setValue("save/folder",         self.edit_folder.text())
-        self._settings.setValue("save/file_base",      self.edit_file_base.text())
-        self._settings.setValue("save/inc_name",       bool(self.check_inc_name.isChecked()))
-        self._settings.setValue("save/add_date",       bool(self.check_add_date.isChecked()))
-        self._settings.setValue("save/add_time",       bool(self.check_add_time.isChecked()))
-        self._settings.setValue("save/date_fmt",       self.cb_date_fmt.currentText())
-        self._settings.setValue("save/time_fmt",       self.cb_time_fmt.currentText())
-        self._settings.setValue("save/place",          self.cb_place.currentText())
+        c = self._cfg
+        # Camera (단일 출처 camera.*)
+        c.set("camera.vendor",      self.cb_vendor.currentText())
+        c.set("camera.exposure_ms", float(self.spin_exposure.value()))
+        c.set("camera.fps",         float(self.spin_fps.value()))
+        c.set("camera.fps_lock",    bool(self.check_fps_lock.isChecked()))
+        c.set("camera.temp_c",      float(self.spin_temp.value()))
+        c.set("camera.adc.quality", self.cb_adc_quality.currentText())
+        c.set("camera.adc.speed",   self.cb_adc_speed.currentText())
+        c.set("camera.adc.gain",    self.cb_adc_gain.currentText())
+        c.set("camera.adc.bit",     self.cb_adc_bit.currentText())
+        # Save (DeepAlign 전용: tabs.deepalign.save.*)
+        c.set("tabs.deepalign.save.frame_to_save", int(self.spin_frame_to_save.value()))
+        c.set("tabs.deepalign.save.folder",        self.edit_folder.text())
+        c.set("tabs.deepalign.save.file_base",     self.edit_file_base.text())
+        c.set("tabs.deepalign.save.inc_name",      bool(self.check_inc_name.isChecked()))
+        c.set("tabs.deepalign.save.add_date",      bool(self.check_add_date.isChecked()))
+        c.set("tabs.deepalign.save.add_time",      bool(self.check_add_time.isChecked()))
+        c.set("tabs.deepalign.save.date_fmt",      self.cb_date_fmt.currentText())
+        c.set("tabs.deepalign.save.time_fmt",      self.cb_time_fmt.currentText())
+        c.set("tabs.deepalign.save.place",         self.cb_place.currentText())
+        c.save()
 
     def _restore_settings(self):
+        c = self._cfg
         # Camera
-        vendor    = str(self._settings.value("camera/vendor",      "Simulation"))
-        exposure  = self._settings.value("camera/exposure_ms", 20.0,  type=float)
-        fps       = self._settings.value("camera/fps",         30.0,  type=float)
-        fps_lock  = self._settings.value("camera/fps_lock",    False, type=bool)
-        temp      = self._settings.value("camera/temp",        -70.0, type=float)
-        adc_qual  = str(self._settings.value("camera/adc_quality", ""))
-        adc_spd   = str(self._settings.value("camera/adc_speed",   ""))
-        adc_gain  = str(self._settings.value("camera/adc_gain",    ""))
-        adc_bit   = str(self._settings.value("camera/adc_bit",     ""))
+        vendor    = str(c.get("camera.vendor",      "Simulation"))
+        exposure  = float(c.get("camera.exposure_ms", 20.0))
+        fps       = float(c.get("camera.fps",         30.0))
+        fps_lock  = bool(c.get("camera.fps_lock",    False))
+        temp      = float(c.get("camera.temp_c",     -70.0))
+        adc_qual  = str(c.get("camera.adc.quality", ""))
+        adc_spd   = str(c.get("camera.adc.speed",   ""))
+        adc_gain  = str(c.get("camera.adc.gain",    ""))
+        adc_bit   = str(c.get("camera.adc.bit",     ""))
         # Save
-        frame_to_save = self._settings.value("save/frame_to_save", 10,    type=int)
-        save_folder   = str(self._settings.value("save/folder",    "Live_Captures"))
-        file_base     = str(self._settings.value("save/file_base", "Capture"))
-        inc_name      = self._settings.value("save/inc_name",  False, type=bool)
-        add_date      = self._settings.value("save/add_date",  True,  type=bool)
-        add_time      = self._settings.value("save/add_time",  True,  type=bool)
-        date_fmt      = str(self._settings.value("save/date_fmt", "YYYY-Month-DD"))
-        time_fmt      = str(self._settings.value("save/time_fmt", "hh:mm:ss (24h)"))
-        place         = str(self._settings.value("save/place",    "Suffix"))
+        frame_to_save = int(c.get("tabs.deepalign.save.frame_to_save", 10))
+        save_folder   = str(c.get("tabs.deepalign.save.folder",    "Live_Captures"))
+        file_base     = str(c.get("tabs.deepalign.save.file_base", "Capture"))
+        inc_name      = bool(c.get("tabs.deepalign.save.inc_name",  False))
+        add_date      = bool(c.get("tabs.deepalign.save.add_date",  True))
+        add_time      = bool(c.get("tabs.deepalign.save.add_time",  True))
+        date_fmt      = str(c.get("tabs.deepalign.save.date_fmt", "YYYY-Month-DD"))
+        time_fmt      = str(c.get("tabs.deepalign.save.time_fmt", "hh:mm:ss (24h)"))
+        place         = str(c.get("tabs.deepalign.save.place",    "Suffix"))
 
         # Camera 복원
         idx = self.cb_vendor.findText(vendor)

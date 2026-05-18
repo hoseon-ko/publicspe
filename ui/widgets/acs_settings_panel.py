@@ -11,7 +11,8 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, 
     QPushButton, QFrame, QDoubleSpinBox, QComboBox, QCheckBox, QSizePolicy
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QSettings
+from PyQt6.QtCore import Qt, pyqtSignal
+from core.config import get_config
 from theme.styles import (
     C_ACCENT, C_DANGER, C_WARN, C_BORDER, C_TEXT, C_TEXT_DIM,
     Fonts, BTN_SMALL, SPIN_STYLE, EDIT_STYLE, CHECKBOX_STYLE, lbl
@@ -27,7 +28,7 @@ class AcsSettingsCard(QFrame):
         super().__init__(parent)
         self._calc = calc or KinematicCalc()
         self._session_hub = None
-        self._settings = QSettings("SpeAnalyze", "MainWindow")
+        self._cfg = get_config()
         self.setObjectName("motionCard")
         
         # Default copies for reset
@@ -282,25 +283,23 @@ class AcsSettingsCard(QFrame):
 
     def save_settings(self):
         self.apply_to_calc()
-        s = self._settings
-        prefix = "motion/acs_kin"
-        s.setValue(f"{prefix}/stage_setup", [sp.value() for sp in self._stage_setup_spins])
-        s.setValue(f"{prefix}/encoder_pos", [sp.value() for sp in self._encoder_pos_spins])
-        s.setValue(f"{prefix}/plus_limits", [sp.value() for sp in self._limit_plus_spins])
-        s.setValue(f"{prefix}/minus_limits", [sp.value() for sp in self._limit_minus_spins])
-        s.setValue(f"{prefix}/direction", [cb.currentIndex() for cb in self._dir_combos])
-        s.setValue(f"{prefix}/mapping", [cb.currentIndex() for cb in self._map_combos])
-        s.setValue(f"{prefix}/pivot", [sp.value() for sp in self._pivot_spins])
-        s.setValue(f"{prefix}/beam_z", self.spin_beam_z.value())
-        self.log_message.emit("ACS Kinematic settings saved to registry.")
+        c = self._cfg
+        c.set("devices.acs.stage_setup",  [sp.value() for sp in self._stage_setup_spins])
+        c.set("devices.acs.encoder_pos",  [sp.value() for sp in self._encoder_pos_spins])
+        c.set("devices.acs.plus_limits",  [sp.value() for sp in self._limit_plus_spins])
+        c.set("devices.acs.minus_limits", [sp.value() for sp in self._limit_minus_spins])
+        c.set("devices.acs.direction",    [cb.currentIndex() for cb in self._dir_combos])
+        c.set("devices.acs.mapping",      [cb.currentIndex() for cb in self._map_combos])
+        c.set("devices.acs.pivot",        [sp.value() for sp in self._pivot_spins])
+        c.set("devices.acs.beam_z",       self.spin_beam_z.value())
+        c.save()
+        self.log_message.emit("ACS Kinematic settings saved.")
 
     def load_settings(self, apply_after_load=True):
-        s = self._settings
-        prefix = "motion/acs_kin"
-        
+        c = self._cfg
+
         def _get(key, default):
-            v = s.value(f"{prefix}/{key}")
-            return v if v is not None else default
+            return c.get(f"devices.acs.{key}", default)
 
         setup = _get("stage_setup", list(self._default_stage_setup.reshape(-1)))
         enc = _get("encoder_pos", list(self._default_encoder_pos.reshape(-1)))

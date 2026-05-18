@@ -16,7 +16,8 @@ from PyQt6.QtWidgets import (
     QCheckBox, QRadioButton,
     QButtonGroup, QListWidget, QSizePolicy
 )
-from PyQt6.QtCore import Qt, QObject, QThread, pyqtSignal, QSettings
+from PyQt6.QtCore import Qt, QObject, QThread, pyqtSignal
+from core.config import get_config
 from core.async_worker import TempPollerThread
 
 from core.camera.base import BaseCamera, CameraCapabilities
@@ -85,7 +86,7 @@ class CameraControlPanel(QWidget):
         self._temp_thread: Optional[TempPollerThread] = None
         self._cmd_thread:  Optional[QThread] = None
         self._cmd_worker:  Optional[_CameraCommandWorker] = None
-        self._settings = QSettings("SpeAnalyze", "CameraPanel")
+        self._cfg = get_config()
         self._sections: list[CollapsibleSection] = []
 
         self._build_ui()
@@ -690,9 +691,8 @@ class CameraControlPanel(QWidget):
             # setpoint 읽기: SDK가 25°C로 리셋했으면 저장된 마지막값 복원
             try:
                 reading, setpoint, status = camera.get_temperature()
-                saved_sp = QSettings("SpeAnalyze", "CameraPanel").value(
-                    "last_temp_setpoint", None, type=float
-                )
+                saved_sp = get_config().get("camera.temp_c", None)
+                saved_sp = float(saved_sp) if saved_sp is not None else None
                 if saved_sp is not None and (setpoint is None or abs(float(setpoint) - 25.0) < 0.5):
                     # SDK가 25°C로 초기화했으면 이전 설정값 복원
                     self.spin_temp.setValue(saved_sp)
@@ -940,10 +940,10 @@ class CameraControlPanel(QWidget):
                 setpoint = requested
             self.update_temperature_display(reading, setpoint, status)
             confirmed = float(setpoint)
-            # 성공한 setpoint를 QSettings에 저장 (다음 연결 시 자동 복원)
-            QSettings("SpeAnalyze", "CameraPanel").setValue(
-                "last_temp_setpoint", confirmed
-            )
+            # 성공한 setpoint를 설정 파일에 저장 (다음 연결 시 자동 복원)
+            _c = get_config()
+            _c.set("camera.temp_c", confirmed)
+            _c.save()
             if abs(confirmed - requested) > 0.1:
                 self.log_message.emit(
                     f"⚠ SP 요청 {requested:.1f}°C → 카메라 확인 {confirmed:.1f}°C (범위 클램프됨)"
@@ -1008,21 +1008,22 @@ class CameraControlPanel(QWidget):
             self.camera_list.setCurrentRow(0)
 
     def _save_settings(self):
+        c = self._cfg
         for sec in self._sections:
-            key = f"sec/{sec._title_lbl.text()}_collapsed"
-            self._settings.setValue(key, sec.is_collapsed())
-        self._settings.setValue("camera/type", self.combo_cam_type.currentText())
+            name = sec._title_lbl.text().replace(' ', '_').lower()
+            c.set(f"ui.sections_collapsed.{name}", sec.is_collapsed())
+        c.set("camera.type", self.combo_cam_type.currentText())
+        c.save()
 
     def _load_settings(self):
+        c = self._cfg
         for sec in self._sections:
-            key = f"sec/{sec._title_lbl.text()}_collapsed"
-            val = self._settings.value(key, None)
+            name = sec._title_lbl.text().replace(' ', '_').lower()
+            val = c.get(f"ui.sections_collapsed.{name}", None)
             if val is not None:
-                # QSettings에서 가져올 때 bool 타입 명시
-                collapsed = str(val).lower() == 'true'
-                sec.set_collapsed(collapsed)
+                sec.set_collapsed(bool(val))
 
-        saved_type = self._settings.value("camera/type", "SIMULATED")
+        saved_type = c.get("camera.type", "SIMULATED")
         idx = self.combo_cam_type.findText(str(saved_type))
         if idx < 0:
             idx = self.combo_cam_type.findText("SIMULATED")
