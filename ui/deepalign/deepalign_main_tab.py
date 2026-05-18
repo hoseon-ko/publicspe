@@ -525,7 +525,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self.roi_panel.roi_goto.connect(self._on_roi_goto)
 
         # ── Settings persistence ──────────────────────────────────────
-        self.cb_vendor.currentTextChanged.connect(self._save_settings)
+        self.cb_vendor.currentTextChanged.connect(self._on_vendor_changed)
         self.spin_exposure.valueChanged.connect(self._save_settings)
         self.spin_fps.valueChanged.connect(self._save_settings)
         self.check_fps_lock.toggled.connect(self._save_settings)
@@ -789,6 +789,64 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         else:
             self.lbl_bg_status.setText("No background set")
             self.lbl_bg_status.setStyleSheet(f"color: {C_TEXT_DEAD}; font-size: 11px; font-weight: bold;")
+
+    def _on_vendor_changed(self, new_vendor: str):
+        """Vendor 콤보박스 전환 시 호출.
+
+        주의: 이 핸들러는 _save_settings 를 호출하면 안 된다.
+        이유: 콤보박스가 막 바뀐 시점의 spinbox/콤보 값들은 여전히 *이전* vendor 의
+        값을 들고 있다. 그대로 _save_settings 가 돌면 `vendor=new_vendor` 키에
+        이전 vendor 값이 덮어쓰여 vendor 격리가 무너진다.
+
+        대신: 새 vendor 의 저장값을 UI 에 로드 (시그널 차단하여 _save_settings
+        재트리거 방지) → last_used 만 갱신 → save.
+        """
+        new_vendor = (new_vendor or "").strip()
+        if not new_vendor:
+            return
+        c = self._cfg
+
+        # 새 vendor 의 저장값 읽기
+        exposure = float(c.get_camera_setting("exposure_ms", 20.0,  vendor=new_vendor))
+        fps      = float(c.get_camera_setting("fps",         30.0,  vendor=new_vendor))
+        fps_lock = bool(c.get_camera_setting("fps_lock",     False, vendor=new_vendor))
+        temp     = float(c.get_camera_setting("temp_c",     -70.0,  vendor=new_vendor))
+        adc_qual = str(c.get_camera_setting("adc.quality", "", vendor=new_vendor))
+        adc_spd  = str(c.get_camera_setting("adc.speed",   "", vendor=new_vendor))
+        adc_gain = str(c.get_camera_setting("adc.gain",    "", vendor=new_vendor))
+        adc_bit  = str(c.get_camera_setting("adc.bit",     "", vendor=new_vendor))
+
+        # UI 반영 — 모두 시그널 차단 (각 위젯의 *Changed → _save_settings 막기)
+        widgets = (self.spin_exposure, self.spin_fps, self.check_fps_lock,
+                   self.spin_temp, self.cb_adc_quality, self.cb_adc_speed,
+                   self.cb_adc_gain, self.cb_adc_bit)
+        for w in widgets:
+            w.blockSignals(True)
+        try:
+            self.spin_exposure.setValue(exposure)
+            self.spin_fps.setValue(fps)
+            self.check_fps_lock.setChecked(fps_lock)
+            self.spin_temp.setValue(temp)
+            for cb, val in [
+                (self.cb_adc_quality, adc_qual),
+                (self.cb_adc_speed,   adc_spd),
+                (self.cb_adc_gain,    adc_gain),
+                (self.cb_adc_bit,     adc_bit),
+            ]:
+                if val:
+                    idx = cb.findText(val)
+                    if idx >= 0:
+                        cb.setCurrentIndex(idx)
+                else:
+                    # 저장값 없으면 첫 항목으로 (혹은 -1 로 비우기)
+                    pass
+        finally:
+            for w in widgets:
+                w.blockSignals(False)
+
+        # last_used 만 갱신 — vendor별 dict 는 건드리지 않음
+        c.set_last_camera(new_vendor, device_id=getattr(self, "_active_device_id", ""))
+        c.save()
 
     def _save_settings(self):
         c = self._cfg

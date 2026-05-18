@@ -573,6 +573,13 @@ class CameraControllerMixin(CameraHubMixin):
                 self.spin_exposure.blockSignals(True)
                 self.spin_exposure.setValue(actual)
                 self.spin_exposure.blockSignals(False)
+                # blockSignals 때문에 valueChanged → _save_settings 가 안 뜨므로 직접 저장
+                try:
+                    v = self.cb_vendor.currentText().strip()
+                    self._cfg.set_camera_setting("exposure_ms", actual, vendor=v)
+                    self._cfg.save()
+                except Exception:
+                    dev_logger.exception("[DeepAlign] exposure save failed")
                 dev_logger.debug(
                     f"[DeepAlign] exposure applied via hub requested={requested:.3f}, actual={actual:.3f}"
                 )
@@ -585,13 +592,25 @@ class CameraControllerMixin(CameraHubMixin):
     def _on_apply_fps_clicked(self):
         if self._session_hub is not None and self._is_hub_camera_connected():
             try:
+                v = self.cb_vendor.currentText().strip()
                 if self.check_fps_lock.isChecked():
                     actual = float(self._session_hub.camera_set_fps(OWNER_DEEPALIGN, float(self.spin_fps.value())))
                     self.spin_fps.blockSignals(True)
                     self.spin_fps.setValue(actual)
                     self.spin_fps.blockSignals(False)
+                    try:
+                        self._cfg.set_camera_setting("fps", actual, vendor=v)
+                        self._cfg.set_camera_setting("fps_lock", True, vendor=v)
+                        self._cfg.save()
+                    except Exception:
+                        dev_logger.exception("[DeepAlign] fps save failed")
                 else:
                     self._session_hub.camera_disable_fps_lock(OWNER_DEEPALIGN)
+                    try:
+                        self._cfg.set_camera_setting("fps_lock", False, vendor=v)
+                        self._cfg.save()
+                    except Exception:
+                        dev_logger.exception("[DeepAlign] fps_lock save failed")
                 return
             except Exception:
                 dev_logger.exception("[DeepAlign] fps apply via hub failed")
@@ -606,6 +625,14 @@ class CameraControllerMixin(CameraHubMixin):
                 self.lbl_temp_read.setText(f"Reading: {reading}")
                 self.lbl_temp_set.setText(f"Setpoint: {setpoint}")
                 self.lbl_temp_state.setText(f"Status: {status}")
+                # setpoint(카메라가 채택한 값) 우선, 없으면 사용자 target 저장
+                try:
+                    save_val = float(setpoint) if setpoint is not None else target
+                    v = self.cb_vendor.currentText().strip()
+                    self._cfg.set_camera_setting("temp_c", save_val, vendor=v)
+                    self._cfg.save()
+                except Exception:
+                    dev_logger.exception("[DeepAlign] temperature save failed")
                 return
             except Exception:
                 dev_logger.exception("[DeepAlign] temperature apply via hub failed")
