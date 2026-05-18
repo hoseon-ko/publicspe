@@ -296,11 +296,21 @@ class AcsWorker(QObject):
 
     @pyqtSlot()
     def stop(self):
+        """폴링 정지 + .NET API 명시적 close (terminate 회피)."""
         self._is_polling = False
         if self._timer:
             self._timer.stop()
             self._timer.deleteLater()
             self._timer = None
+        # .NET API 연결을 명시적으로 닫아둠. 호출 안 하면 TCP 소켓이 leak 되고
+        # 다음 connect 시 같은 IP 재접속이 실패하거나, 워커 GC 타이밍에서
+        # finalizer 가 .NET interop 객체에 접근해 crash.
+        if self._api is not None:
+            try:
+                self._api.CloseComm()
+            except Exception:
+                pass
+            self._api = None
 
 
 class AcsStageController(QObject):

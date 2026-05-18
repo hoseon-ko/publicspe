@@ -389,33 +389,52 @@ class AcsCard(QFrame):
             self.update_status(True, None, states)
             
     def _on_session_event(self, event):
+        """ACS_DISCONNECTED 이벤트는 UI 정리만 — hub.acs_disconnect 를 재호출하지 말 것.
+
+        이벤트가 mark_acs_disconnected() 에서 동기 emit 되므로, 핸들러 안에서
+        다시 acs_disconnect() 를 부르면 같은 콜스택에서 disconnect 가 두 번
+        실행되어 신호 정리 / .NET 인터롭이 위험한 재진입 상태에 빠진다.
+        """
         from core.session.session_events import SessionEventType
         if event.event_type == SessionEventType.ACS_CONNECTED:
             self._load_settings()  # 실시간 타 탭 입력 동기화
             ctrl = getattr(self._session_hub, "acs_controller", None)
             if ctrl: self.set_controller(ctrl)
         elif event.event_type == SessionEventType.ACS_DISCONNECTED:
-            self._on_disconnect()
+            # AcsStagePanel 과 동일하게 UI cleanup 만 수행
+            self._ctrl_ref[0] = None
+            self._set_disconnected_ui()
 
     def _on_disconnect(self):
-        if self._session_hub:
-            try:
-                self.log_message.emit("ACS Stage: Disconnecting...")
-                self._session_hub.acs_disconnect()
-                self.log_message.emit("ACS Stage: Disconnected successfully.")
-            except Exception as e:
-                self.log_message.emit(f"ACS Stage: Disconnect failed: {e}")
-        elif self._ctrl_ref[0]:
-            try:
-                self.log_message.emit("ACS Stage: Disconnecting (Standalone)...")
-                self._ctrl_ref[0].disconnect()
-                self.log_message.emit("ACS Stage: Disconnected (Standalone) successfully.")
-            except Exception as e:
-                self.log_message.emit(f"ACS Stage: Disconnect (Standalone) failed: {e}")
-        
-        self._ctrl_ref[0] = None
-        self._set_disconnected_ui()
-        self.acs_disconnected.emit()
+        """버튼 클릭 진입점 — 재진입 가드 포함.
+
+        hub.acs_disconnect() 내부에서 ACS_DISCONNECTED 이벤트가 동기 emit 되어
+        같은 콜스택에서 본 메서드가 다시 호출될 수 있다. 가드로 중복 실행 차단.
+        """
+        if getattr(self, "_is_disconnecting", False):
+            return
+        self._is_disconnecting = True
+        try:
+            if self._session_hub:
+                try:
+                    self.log_message.emit("ACS Stage: Disconnecting...")
+                    self._session_hub.acs_disconnect()
+                    self.log_message.emit("ACS Stage: Disconnected successfully.")
+                except Exception as e:
+                    self.log_message.emit(f"ACS Stage: Disconnect failed: {e}")
+            elif self._ctrl_ref[0]:
+                try:
+                    self.log_message.emit("ACS Stage: Disconnecting (Standalone)...")
+                    self._ctrl_ref[0].disconnect()
+                    self.log_message.emit("ACS Stage: Disconnected (Standalone) successfully.")
+                except Exception as e:
+                    self.log_message.emit(f"ACS Stage: Disconnect (Standalone) failed: {e}")
+
+            self._ctrl_ref[0] = None
+            self._set_disconnected_ui()
+            self.acs_disconnected.emit()
+        finally:
+            self._is_disconnecting = False
 
     def _on_lost(self): self._on_disconnect(); self.log_message.emit("ACS Connection Lost")
 

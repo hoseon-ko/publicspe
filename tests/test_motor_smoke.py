@@ -341,6 +341,54 @@ def t_acs_last_states_independent():
             f"axis {i} 가 axis 2 와 dict 공유됨"
 
 
+@case("Disconnect: AcsCard 이벤트 핸들러는 hub.acs_disconnect 재호출 안 함")
+def t_acs_card_event_no_reentry():
+    """ACS_DISCONNECTED 이벤트 수신 시 UI cleanup 만 — hub 메서드 재호출 금지."""
+    import sys
+    from PyQt6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication(sys.argv)
+
+    from ui.widgets.acs_card import AcsCard
+    card = AcsCard()
+    fake_hub = MagicMock()
+    fake_hub.is_acs_connected.return_value = False
+    card._session_hub = fake_hub
+
+    # ACS_DISCONNECTED 이벤트 simulation
+    from core.session.session_events import SessionEventType
+    ev = MagicMock()
+    ev.event_type = SessionEventType.ACS_DISCONNECTED
+    card._on_session_event(ev)
+
+    # 이벤트 핸들러는 절대 hub.acs_disconnect 를 부르면 안 됨 (재진입 방지)
+    fake_hub.acs_disconnect.assert_not_called()
+    assert card._ctrl_ref[0] is None
+
+
+@case("Disconnect: AcsCard._on_disconnect 재진입 가드")
+def t_acs_card_disconnect_reentry_guard():
+    """버튼 핸들러가 같은 콜스택에서 두 번 호출돼도 hub.acs_disconnect 는 1회만."""
+    import sys
+    from PyQt6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication(sys.argv)
+
+    from ui.widgets.acs_card import AcsCard
+    card = AcsCard()
+    fake_hub = MagicMock()
+    fake_hub.is_acs_connected.return_value = False
+
+    # hub.acs_disconnect 가 호출될 때, 같은 콜스택에서 _on_disconnect 가
+    # 한 번 더 호출되도록 setup (이벤트 cascade 시뮬레이션)
+    def _reentrant(*a, **kw):
+        card._on_disconnect()
+    fake_hub.acs_disconnect.side_effect = _reentrant
+
+    card._session_hub = fake_hub
+    card._on_disconnect()
+    # 가드 덕분에 hub.acs_disconnect 는 단 1회만 호출됨
+    assert fake_hub.acs_disconnect.call_count == 1
+
+
 @case("L5: AcsScanWidget sweep spin range 가 ±10 으로 클램프")
 def t_acs_widget_sweep_clamp():
     import sys

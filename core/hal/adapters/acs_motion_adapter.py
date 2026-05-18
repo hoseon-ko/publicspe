@@ -74,6 +74,17 @@ class AcsMotionAdapter(QObject):
         if ctrl is None:
             dev_logger.debug("[AcsMotionAdapter] disconnect skipped (no controller)")
             return
+        # ctrl → adapter 신호를 먼저 끊어 ctrl 폴링이 죽을 때 dangling slot 호출 방지
+        try:
+            if hasattr(ctrl, "positions_updated"):
+                ctrl.positions_updated.disconnect(self.positions_updated)
+        except Exception:
+            pass
+        try:
+            if hasattr(ctrl, "states_updated"):
+                ctrl.states_updated.disconnect(self.state_updated)
+        except Exception:
+            pass
         try:
             ctrl.disconnect()
             dev_logger.debug("[AcsMotionAdapter] disconnect succeeded")
