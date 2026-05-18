@@ -161,10 +161,14 @@ class AcsWorker(QObject):
 
     def _poll(self):
         if not self._is_polling: return
+        if self._api is None: return   # stop() 이후 보호
         try:
             positions = []
             states = []
             for i in range(6):
+                # 루프 중간에도 종료 신호 체크 — 6축 API 호출 누적 지연 방지
+                if not self._is_polling or self._api is None:
+                    return
                 ax = _axis_enum(i)
                 positions.append(float(self._api.GetFPosition(ax)))
                 mstate = int(self._api.GetMotorState(ax))
@@ -173,6 +177,7 @@ class AcsWorker(QObject):
                     "moving":  bool(mstate & _MST_ANY_MOTION),
                     "in_pos":  bool(mstate & _MST_INPOS)
                 })
+            if not self._is_polling: return
             self.positions_updated.emit(positions)
             self.states_updated.emit(states)
         except Exception as e:
@@ -535,29 +540,43 @@ class AcsStageController(QObject):
         if self._thread and self._thread.isRunning():
             dev_logger.info("[ACS] Stopping polling thread...")
             if self._worker:
-                # 시그널 연결 해제 (명령 스트림 차단)
+                # (1) main thread 에서 즉시 _is_polling=False 로 새로 트리거되는
+                #     _poll() 의 본문 실행 차단. 이미 진행 중인 .NET 호출에는
+                #     영향 없지만, 다음 timer tick 부터는 즉시 return.
                 try:
-                    self._cmd_enable.disconnect()
-                    self._cmd_enable_all.disconnect()
-                    self._cmd_disable_all.disconnect()
-                    self._cmd_move_to.disconnect()
-                    self._cmd_stop_axis.disconnect()
-                    self._cmd_stop_all.disconnect()
+                    self._worker._is_polling = False
                 except Exception:
                     pass
-                
-                # 워커 정지 명령 (Queued)
+
+                # (2) 명령 다운스트림 신호 해제 (입력 차단)
+                for sig in (self._cmd_enable, self._cmd_enable_all,
+                            self._cmd_disable_all, self._cmd_move_to,
+                            self._cmd_stop_axis, self._cmd_stop_all):
+                    try: sig.disconnect()
+                    except Exception: pass
+
+                # (3) 워커 → 컨트롤러 신호 해제 (queued 이벤트가 죽은 슬롯
+                #     호출하는 dangling 방지)
+                for sig_name in ("positions_updated", "states_updated", "connection_lost"):
+                    sig = getattr(self._worker, sig_name, None)
+                    if sig is not None:
+                        try: sig.disconnect()
+                        except Exception: pass
+
+                # (4) 워커 정지 명령 (queued — 워커가 idle 일 때 처리)
                 QMetaObject.invokeMethod(self._worker, "stop",
                                          Qt.ConnectionType.QueuedConnection)
-            
+
             self._thread.quit()
-            if not self._thread.wait(2000):
-                dev_logger.warning("[ACS] Worker thread quit timeout - forcing terminate")
-                self._thread.terminate()
-                if not self._thread.wait(2000):
-                    dev_logger.error("[ACS] Worker thread FAILED to terminate even after force")
-            
-            dev_logger.info("[ACS] Polling thread stopped safely")
+            if not self._thread.wait(3000):
+                # terminate() 는 .NET API 호출 중인 스레드를 강제로 죽이면
+                # CLR runtime crash 위험. terminate 대신 leak 을 감수하고 진행.
+                dev_logger.warning(
+                    "[ACS] Worker thread quit timeout 3s — terminate 회피, "
+                    "스레드 leak 가능 (재연결 시 새 워커 생성됨)"
+                )
+            else:
+                dev_logger.info("[ACS] Polling thread stopped safely")
 
         # 스레드가 완전히 멈춘 후 참조 해제
         self._worker = None
