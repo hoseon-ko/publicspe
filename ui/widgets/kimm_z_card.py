@@ -167,9 +167,9 @@ class KimmZCard(QFrame):
         lay.addStretch()
         self.update_status(False, None)
 
-        # Connect text edits to auto-save settings
-        self.edit_ip.textChanged.connect(self._save_settings)
-        self.edit_port.textChanged.connect(self._save_settings)
+        # NOTE: edit_ip/edit_port 는 line 73, 84 에서 이미 editingFinished 로 연결됨.
+        # textChanged 로 추가 연결하면 _load_settings 의 setText() 가 startup 마다
+        # _save_settings 를 발화시켜 settings.json 을 덮어쓴다.
 
     def bind_session_hub(self, hub):
         if self._session_hub:

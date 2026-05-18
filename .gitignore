@@ -30,3 +30,6 @@ Scan_Data/
 *.log
 *.bak
 Python/
+*.diff
+config/settings.json
+*.xml

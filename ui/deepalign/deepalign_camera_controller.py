@@ -436,6 +436,7 @@ class CameraControllerMixin(CameraHubMixin):
 
         self._set_camera_action_state(True, busy=True)
         self._hub_live_progress_started_at = time.monotonic()
+        self._hub_live_first_frame = True  # 첫 프레임 도착 시 cycle_s 즉시 보정
         self._set_master_progress(0)
         self._hub_live_progress_timer.start()
         dev_logger.debug("[DeepAlign] hub live stream started")
@@ -468,13 +469,20 @@ class CameraControllerMixin(CameraHubMixin):
         if self._acq.running:
             return
         now = time.monotonic()
-        # 실제 프레임 간격으로 cycle_s adaptive 업데이트 (EMA α=0.2)
+        # 실제 프레임 간격으로 cycle_s 보정.
+        # 첫 프레임: 추정값(_estimate_frame_seconds)이 실제와 크게 다를 수 있어
+        #            (예: 추정 0.25s vs 실제 0.05s → 게이지가 20%에서 멈칫) 즉시 덮어쓴다.
+        # 이후: EMA α=0.2 로 완만하게 추적.
         if self._hub_live_progress_started_at > 0:
             actual_interval = now - self._hub_live_progress_started_at
             if 0.01 < actual_interval < 10.0:
-                self._hub_live_progress_cycle_s = (
-                    0.8 * self._hub_live_progress_cycle_s + 0.2 * actual_interval
-                )
+                if getattr(self, "_hub_live_first_frame", False):
+                    self._hub_live_progress_cycle_s = actual_interval
+                    self._hub_live_first_frame = False
+                else:
+                    self._hub_live_progress_cycle_s = (
+                        0.8 * self._hub_live_progress_cycle_s + 0.2 * actual_interval
+                    )
         self._hub_live_progress_started_at = now
         self._push_frame(raw, drop_if_busy=True)
 
