@@ -1121,7 +1121,11 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
 
     def _scan_start(self, scan_widget, worker, on_finished_extra=None) -> None:
         """공용 워커 부트스트랩: thread 부착, 시그널 연결, start.
-        scan_widget은 *Scan*Widget 인스턴스 (set_scan_status / set_scan_running 보유)."""
+        scan_widget은 *Scan*Widget 인스턴스 (set_scan_status / set_scan_running 보유).
+
+        on_finished_extra 는 finished / error 양쪽에서 호출됨 — 안전 disable 등
+        cleanup 코드를 반드시 실행하기 위함.
+        """
         self._scan_owner_panel = scan_widget
         self._scan_worker = worker
         self._scan_thread = QThread(self)
@@ -1134,17 +1138,31 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         worker.error.connect(lambda msg: scan_widget.set_scan_status(msg, "err"))
         worker.log.connect(lambda msg: dev_logger.info(f"[Scan] {msg}"))
 
+        # 중복 실행 방지 플래그 (finished/error 한쪽만 실행되도록)
+        self._scan_cleanup_called = False
+
+        def _run_extra():
+            if self._scan_cleanup_called:
+                return
+            self._scan_cleanup_called = True
+            if on_finished_extra is not None:
+                try: on_finished_extra()
+                except Exception as e:
+                    dev_logger.warning(f"[Scan] on_finished_extra 예외: {e}")
+
         def _on_done(_results):
             stopped = getattr(worker, "_stop", False)
             scan_widget.set_scan_status("stopped" if stopped else "done",
                                         "warn" if stopped else "ok")
-            if on_finished_extra is not None:
-                try: on_finished_extra()
-                except Exception: pass
+            _run_extra()
+            self._scan_thread.quit()
+
+        def _on_error(_msg):
+            _run_extra()
             self._scan_thread.quit()
 
         worker.finished.connect(_on_done)
-        worker.error.connect(lambda _m: self._scan_thread.quit())
+        worker.error.connect(_on_error)
         self._scan_thread.finished.connect(self._scan_cleanup)
 
         scan_widget.set_scan_running(True)

@@ -744,9 +744,9 @@ class DeviceSessionHub(QObject):
         hal = self._require_acs_hal()
         try:
             hal.move_to(int(axis), float(pos_mm))
-            self.publish_status(
-                f"ACS move_to requested: axis={axis}, pos_mm={float(pos_mm):.6f}",
-                source="hub",
+            # 스캔 시 포인트당 6회 호출돼 publish_status 노이즈가 큼 → DEBUG 로그만 남김.
+            dev_logger.debug(
+                f"[DeviceSessionHub] acs_move_to axis={axis}, pos_mm={float(pos_mm):.6f}"
             )
         except Exception as exc:
             dev_logger.exception(

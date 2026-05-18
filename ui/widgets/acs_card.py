@@ -452,9 +452,17 @@ class AcsCard(QFrame):
         elif self._ctrl_ref[0]: self._ctrl_ref[0].stop_all()
 
     def _on_kin_jog(self, idx, direction):
+        """Jog: spin 업데이트 → calc → 안전(limit OK)하면 자동 이동.
+
+        이전 acs_stage_panel 의 _on_kin_jog 동작과 동일하게 +/- 클릭 한 번으로
+        목표 위치까지 이동까지 수행. 리밋 위반 시 btn_kin_move 가 disabled 되어
+        자동 이동을 건너뜀.
+        """
         step = self._dof_step_spins[idx].value()
         self._dof_spins[idx].setValue(self._dof_spins[idx].value() + step * direction)
         self._on_kin_calc()
+        if self.btn_kin_move.isEnabled():
+            self._on_kin_move()
 
     def _on_kin_calc(self):
         t_vals = [self._dof_spins[i].value() for i in range(3)]

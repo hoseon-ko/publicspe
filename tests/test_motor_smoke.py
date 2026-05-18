@@ -116,6 +116,7 @@ def t_acs_seq():
     import numpy as np
     from ui.deepalign.scan.acs_mover import AcsMover
     hub = MagicMock()
+    hub.acs_controller = None   # dry_run 가드 우회
     hub.acs_wait_for_enabled_all.return_value = True
     m = AcsMover(hub, move_timeout_ms=20000)
     m.enable(timeout_ms=1500)
@@ -135,6 +136,7 @@ def t_acs_seq():
 def t_acs_enable_fail():
     from ui.deepalign.scan.acs_mover import AcsMover
     hub = MagicMock()
+    hub.acs_controller = None
     hub.acs_wait_for_enabled_all.return_value = False
     m = AcsMover(hub, move_timeout_ms=10000)
     try:
@@ -149,6 +151,7 @@ def t_acs_enable_fail():
 def t_acs_point_size():
     from ui.deepalign.scan.acs_mover import AcsMover
     hub = MagicMock()
+    hub.acs_controller = None
     m = AcsMover(hub, move_timeout_ms=10000)
     try:
         m.move([1, 2, 3])
@@ -156,6 +159,75 @@ def t_acs_point_size():
         assert "6" in str(e)
         return
     raise AssertionError("ValueError 미발생")
+
+
+@case("AcsMover: dry_run 컨트롤러 → move()는 명시 RuntimeError")
+def t_acs_dry_run_blocks_move():
+    from ui.deepalign.scan.acs_mover import AcsMover
+    hub = MagicMock()
+    hub.acs_controller = MagicMock(dry_run=True)
+    m = AcsMover(hub, move_timeout_ms=10000)
+    try:
+        m.move([0, 0, 0, 0, 0, 0])
+    except RuntimeError as e:
+        assert "dry_run" in str(e)
+        # dry_run 일 땐 hub 명령이 한 번도 emit 되면 안 됨
+        hub.acs_move_to.assert_not_called()
+        hub.acs_wait_in_position_all.assert_not_called()
+        return
+    raise AssertionError("RuntimeError 미발생")
+
+
+@case("AcsMover: dry_run 컨트롤러 → enable/disable no-op")
+def t_acs_dry_run_enable_noop():
+    from ui.deepalign.scan.acs_mover import AcsMover
+    hub = MagicMock()
+    hub.acs_controller = MagicMock(dry_run=True)
+    m = AcsMover(hub, move_timeout_ms=10000)
+    m.enable(timeout_ms=500)
+    m.disable()
+    hub.acs_enable_all.assert_not_called()
+    hub.acs_disable_all.assert_not_called()
+
+
+@case("AcsMover: 중간 axis 실패 시 acs_stop_all 호출")
+def t_acs_partial_failure_stops():
+    from ui.deepalign.scan.acs_mover import AcsMover
+    hub = MagicMock()
+    hub.acs_controller = None
+    # 4번째 axis (index 3) 호출에서 실패하도록 설정
+    call_log = []
+    def _move_to(axis, pos):
+        call_log.append(axis)
+        if axis == 3:
+            raise ValueError(f"Limit Violation: Axis{axis}")
+    hub.acs_move_to.side_effect = _move_to
+
+    m = AcsMover(hub, move_timeout_ms=10000)
+    try:
+        m.move([0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
+    except RuntimeError as e:
+        assert "axis=3 전송 후" in str(e)
+        hub.acs_stop_all.assert_called_once()
+        hub.acs_wait_in_position_all.assert_not_called()
+        return
+    raise AssertionError("RuntimeError 미발생")
+
+
+@case("AcsMover: wait timeout 시 acs_stop_all 후 재전파")
+def t_acs_wait_timeout_stops():
+    from ui.deepalign.scan.acs_mover import AcsMover
+    hub = MagicMock()
+    hub.acs_controller = None
+    hub.acs_wait_in_position_all.side_effect = TimeoutError("test timeout")
+    m = AcsMover(hub, move_timeout_ms=1000)
+    try:
+        m.move([0, 0, 0, 0, 0, 0])
+    except TimeoutError:
+        hub.acs_stop_all.assert_called_once()
+        assert hub.acs_move_to.call_count == 6
+        return
+    raise AssertionError("TimeoutError 미전파")
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -255,6 +327,30 @@ def t_import_hub():
     assert hasattr(DeviceSessionHub, "pico_wait_motion_done")
     assert hasattr(DeviceSessionHub, "acs_wait_in_position_all")
     assert hasattr(DeviceSessionHub, "acs_wait_for_enabled_all")
+
+
+@case("L2: AcsStageController._last_states 가 axis 별 독립 dict")
+def t_acs_last_states_independent():
+    from core.motor.acs_stage import AcsStageController
+    ctrl = AcsStageController()
+    # 한 축 dict 수정 시 다른 축에 영향 없어야 함
+    ctrl._last_states[2]["enabled"] = True
+    others = [i for i in range(6) if i != 2]
+    for i in others:
+        assert ctrl._last_states[i]["enabled"] is False, \
+            f"axis {i} 가 axis 2 와 dict 공유됨"
+
+
+@case("L5: AcsScanWidget sweep spin range 가 ±10 으로 클램프")
+def t_acs_widget_sweep_clamp():
+    import sys
+    sys.modules.setdefault("PyQt6.QtWidgets", __import__("PyQt6.QtWidgets", fromlist=["*"]))
+    from PyQt6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication(sys.argv)
+    from ui.deepalign.scan.scan_widgets.acs_scan_widget import AcsScanWidget
+    w = AcsScanWidget()
+    lo, hi = w.spin_start.minimum(), w.spin_start.maximum()
+    assert lo == -10.0 and hi == 10.0, f"sweep range 비정상: [{lo}, {hi}]"
 
 
 @case("Mover 시그니처: 3종 모두 session_hub 단일 인자 + move_timeout_ms")

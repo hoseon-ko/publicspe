@@ -102,8 +102,10 @@ class AcsScanWidget(QWidget):
         self.cb_dof.currentIndexChanged.connect(self._on_dof_changed)
 
         def _dspin(decs=4) -> QDoubleSpinBox:
+            # sweep 범위는 ±10 (mm/mrad). 실제 stroke 보다 약간 여유.
+            # 큰 값 실수 입력 방지 — 필요시 baseline DOF 로 base 이동 후 sweep.
             s = QDoubleSpinBox()
-            s.setRange(-500.0, 500.0); s.setDecimals(decs)
+            s.setRange(-10.0, 10.0); s.setDecimals(decs)
             s.setStyleSheet(SPIN_STYLE)
             return s
 

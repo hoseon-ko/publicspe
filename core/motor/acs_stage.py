@@ -329,8 +329,9 @@ class AcsStageController(QObject):
         self._axes      = list(range(6))
         
         # 캐시된 하드웨어 상태 (스레드 간 경합 방지용)
+        # _last_states 는 axis 별 독립 dict 여야 함 (리스트 곱셈은 동일 객체 6개 → 한 축 수정시 모두 변경되는 버그)
         self._last_positions = [0.0] * 6
-        self._last_states    = [{"enabled": False, "moving": False, "in_pos": False}] * 6
+        self._last_states    = [{"enabled": False, "moving": False, "in_pos": False} for _ in range(6)]
         
         # 동기식 초기 연결 대기용 플래그
         self._first_poll_done = False
@@ -424,13 +425,14 @@ class AcsStageController(QObject):
 
     def wait_for_enabled_all(self, timeout_ms: int = 2000) -> bool:
         start = time.time()
-        main_thread = QApplication.instance().thread()
+        app = QApplication.instance()
+        main_thread = app.thread() if app is not None else None
         while (time.time() - start) * 1000 < timeout_ms:
-            if all(self.is_enabled(i) for i in range(6)): 
+            if all(self.is_enabled(i) for i in range(6)):
                 return True
             # 메인 스레드에서 호출될 경우에만 UI 이벤트 처리
-            if QThread.currentThread() == main_thread:
-                QApplication.processEvents()
+            if main_thread is not None and QThread.currentThread() == main_thread:
+                app.processEvents()
             time.sleep(0.05)
         return False
 
@@ -447,12 +449,13 @@ class AcsStageController(QObject):
         time.sleep(0.25)
 
         start = time.time()
-        main_thread = QApplication.instance().thread()
+        app = QApplication.instance()
+        main_thread = app.thread() if app is not None else None
         while (time.time() - start) * 1000 < timeout_ms:
             if not any(self.is_moving(i) for i in range(6)):
                 return
-            if QThread.currentThread() == main_thread:
-                QApplication.processEvents()
+            if main_thread is not None and QThread.currentThread() == main_thread:
+                app.processEvents()
             time.sleep(0.05)
         raise TimeoutError(f"ACS wait_in_position_all timeout after {int(timeout_ms)}ms")
 
