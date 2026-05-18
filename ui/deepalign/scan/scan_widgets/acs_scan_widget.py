@@ -80,16 +80,21 @@ class AcsScanWidget(QWidget):
         self.spin_start.setValue(-0.1)
         self.spin_end   = _dspin()
         self.spin_end.setValue(0.1)
-        self.spin_n      = _ispin(2, 999, 5)
-        self.spin_settle = _ispin(0, 10000, 500)
-        self.spin_avg    = _ispin(1, 32, 1)
+        self.spin_n       = _ispin(2, 999, 5)
+        self.spin_settle  = _ispin(0, 10000, 500)
+        self.spin_avg     = _ispin(1, 32, 1)
+        self.spin_timeout = QDoubleSpinBox()
+        self.spin_timeout.setRange(1.0, 120.0); self.spin_timeout.setDecimals(1)
+        self.spin_timeout.setSingleStep(1.0); self.spin_timeout.setValue(30.0)
+        self.spin_timeout.setSuffix(" s"); self.spin_timeout.setStyleSheet(SPIN_QSS)
 
-        grid.addWidget(label_dim("DOF"),       0, 0); grid.addWidget(self.cb_dof,      0, 1)
-        grid.addWidget(label_dim("N points"),  0, 2); grid.addWidget(self.spin_n,      0, 3)
-        grid.addWidget(label_dim("Start"),     1, 0); grid.addWidget(self.spin_start,  1, 1)
-        grid.addWidget(label_dim("End"),       1, 2); grid.addWidget(self.spin_end,    1, 3)
-        grid.addWidget(label_dim("Settle ms"), 2, 0); grid.addWidget(self.spin_settle, 2, 1)
-        grid.addWidget(label_dim("Avg"),       2, 2); grid.addWidget(self.spin_avg,    2, 3)
+        grid.addWidget(label_dim("DOF"),          0, 0); grid.addWidget(self.cb_dof,       0, 1)
+        grid.addWidget(label_dim("N points"),     0, 2); grid.addWidget(self.spin_n,       0, 3)
+        grid.addWidget(label_dim("Start"),        1, 0); grid.addWidget(self.spin_start,   1, 1)
+        grid.addWidget(label_dim("End"),          1, 2); grid.addWidget(self.spin_end,     1, 3)
+        grid.addWidget(label_dim("Settle ms"),    2, 0); grid.addWidget(self.spin_settle,  2, 1)
+        grid.addWidget(label_dim("Avg"),          2, 2); grid.addWidget(self.spin_avg,     2, 3)
+        grid.addWidget(label_dim("Move Timeout"), 3, 0); grid.addWidget(self.spin_timeout, 3, 1)
         lay.addLayout(grid)
 
         # ─ Baseline DOF 6 입력 (다른 5 DOF용) ─
@@ -243,3 +248,6 @@ class AcsScanWidget(QWidget):
     def set_scan_running(self, running: bool) -> None:
         self.btn_start.setEnabled(not running)
         self.btn_stop.setEnabled(running)
+
+    def get_move_timeout_ms(self) -> int:
+        return int(round(float(self.spin_timeout.value()) * 1000.0))

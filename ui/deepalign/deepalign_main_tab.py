@@ -20,7 +20,8 @@ from PyQt6.QtWidgets import (
     QFileDialog, QListWidgetItem, QMessageBox,
     QFrame, QLabel, QProgressBar, QPushButton,
 )
-from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal, QSize, QEvent
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal, QSize, QEvent, QUrl
+from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from core.config import get_config
 from PyQt6.QtGui import QIcon, QPixmap, QImage, QPainter, QColor
 from typing import Optional
@@ -343,6 +344,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self._init_frame_convert_worker()
         self._restore_settings()
         self._wire_camera_actions()
+        self._init_laser_control()
         self._apply_camera_capabilities(None)
         self._set_camera_action_state(False)
         self._apply_global_styles()
@@ -460,12 +462,16 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self.acs_scan.scan_stop_requested.connect(self._on_scan_stop_requested)
         # baseline DOF 동기화: AcsScanWidget의 SYNC 버튼 → align_panel의 현재 DOF값
         self.acs_scan.set_baseline_provider(self.align_panel.get_baseline_dof)
-        # current pos provider: MirrorScanWidget → Picomotor 컨트롤러 위치 조회
-        self.mirror_scan.set_current_pos_provider(
-            lambda motor: (self._picos.get_position(motor)
-                           if getattr(self, "_picos", None) is not None
-                              and getattr(self._picos, "is_connected", False) else None)
-        )
+        # current pos provider: MirrorScanWidget → session_hub 경유 Picomotor 위치 조회
+        def _pico_pos(motor: int):
+            hub = self._session_hub
+            if hub is None or not hub.is_pico_connected():
+                return None
+            try:
+                return int(hub.pico_get_position(int(motor)))
+            except Exception:
+                return None
+        self.mirror_scan.set_current_pos_provider(_pico_pos)
 
         # ── Master bar — Align 탭 ─────────────────────────────────────
         self.btn_align_enable.clicked.connect(self.align_panel.enable_all)
@@ -891,6 +897,16 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         c.set("tabs.deepalign.proc_stats.show_mean", bool(ps.chk_mean.isChecked()))
         c.set("tabs.deepalign.proc_stats.show_min",  bool(ps.chk_min.isChecked()))
         c.set("tabs.deepalign.proc_stats.show_max",  bool(ps.chk_max.isChecked()))
+
+        # Laser HTTP 설정 저장
+        c.set("tabs.deepalign.laser.ip", self.edit_laser_ip.text())
+        c.set("tabs.deepalign.laser.port", self.edit_laser_port.text())
+        c.set("tabs.deepalign.laser.auth_mode", self.combo_laser_auth_type.currentIndex())
+        c.set("tabs.deepalign.laser.id", self.edit_laser_id.text())
+        c.set("tabs.deepalign.laser.pw", self.edit_laser_pw.text())
+        c.set("tabs.deepalign.laser.token", self.edit_laser_token.text())
+        c.set("tabs.deepalign.laser.poll", bool(self.btn_laser_poll.isChecked()))
+
         c.save()
         # 디바이스 패널 강제 저장 (사용자가 IP/Port 만 바꾸고 connect 안 한 경우 대비)
         for p in (self.align_panel, self.af_panel, self.mirror_panel, self.motion_panel):
@@ -1007,6 +1023,24 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
 
             self._update_save_control_state()
             self._update_save_preview()
+
+            # Laser HTTP 복원
+            laser_ip = str(c.get("tabs.deepalign.laser.ip", "127.0.0.1"))
+            laser_port = str(c.get("tabs.deepalign.laser.port", "5643"))
+            laser_auth_mode = int(c.get("tabs.deepalign.laser.auth_mode", 0))
+            laser_id = str(c.get("tabs.deepalign.laser.id", "viewer"))
+            laser_pw = str(c.get("tabs.deepalign.laser.pw", ""))
+            laser_token = str(c.get("tabs.deepalign.laser.token", ""))
+            laser_poll = bool(c.get("tabs.deepalign.laser.poll", False))
+            
+            self.edit_laser_ip.setText(laser_ip)
+            self.edit_laser_port.setText(laser_port)
+            self.combo_laser_auth_type.setCurrentIndex(laser_auth_mode)
+            self.edit_laser_id.setText(laser_id)
+            self.edit_laser_pw.setText(laser_pw)
+            self.edit_laser_token.setText(laser_token)
+            self._on_laser_auth_type_changed(laser_auth_mode)
+            self.btn_laser_poll.setChecked(laser_poll)
         finally:
             self._is_loading = False
 
@@ -1048,17 +1082,6 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self._acs = None
         if hasattr(self, "align_panel"):
             self.align_panel.set_controller(None)
-
-    def set_picos_ctrl(self, ctrl):
-        self._picos = ctrl
-        if hasattr(self, "mirror_panel") and ctrl is not None:
-            self.mirror_panel.set_controller(ctrl)
-
-    def clear_picos_ctrl(self):
-        """Picomotor 연결 해제 시 mirror_panel 컨트롤러 초기화."""
-        self._picos = None
-        if hasattr(self, "mirror_panel"):
-            self.mirror_panel.set_controller(None)
 
     def _on_sub_panel_log(self, msg: str):
         dev_logger.debug(f"[DeepAlign] {msg}")
@@ -1161,13 +1184,15 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
     def _on_mirror_scan_requested(self, points: list, settle_ms: int, avg_frames: int) -> None:
         if self._scan_is_running():
             self.mirror_scan.set_scan_status("다른 스캔 실행중", "warn"); return
-        pico_ctrl = getattr(self, "_picos", None)
-        if pico_ctrl is None or not getattr(pico_ctrl, "is_connected", False):
+        if self._session_hub is None or not self._session_hub.is_pico_connected():
             self.mirror_scan.set_scan_status("Picomotor 미연결", "err"); return
-        if self._session_hub is None or not self._is_hub_camera_connected():
+        if not self._is_hub_camera_connected():
             self.mirror_scan.set_scan_status("카메라 미연결", "err"); return
 
-        mover = MirrorMover(pico_ctrl)
+        mover = MirrorMover(
+            self._session_hub,
+            move_timeout_ms=self.mirror_scan.get_move_timeout_ms(),
+        )
         worker = _MirrorScanWorker(
             mover, self._scan_snap_fn, points,
             process_fn=None, settle_ms=settle_ms, avg_frames=avg_frames,
@@ -1181,7 +1206,10 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         if self._session_hub is None or not self._is_hub_camera_connected():
             self.kimm_scan.set_scan_status("카메라 미연결", "err"); return
 
-        mover = KimmMover(self._session_hub)
+        mover = KimmMover(
+            self._session_hub,
+            move_timeout_ms=self.kimm_scan.get_move_timeout_ms(),
+        )
         worker = _KimmScanWorker(
             mover, self._scan_snap_fn, z_positions,
             process_fn=None, settle_ms=settle_ms, avg_frames=avg_frames,
@@ -1198,7 +1226,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         if self._session_hub is None or not self._is_hub_camera_connected():
             self.acs_scan.set_scan_status("카메라 미연결", "err"); return
 
-        mover = AcsMover(acs_ctrl)
+        mover = AcsMover(acs_ctrl, move_timeout_ms=self.acs_scan.get_move_timeout_ms())
         try:
             mover.enable(timeout_ms=2000)
         except Exception as e:
@@ -1601,3 +1629,421 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self.btn_toggle_plot_sm.setChecked(True)
         self.btn_toggle_hist_sm.setChecked(True)
         self.btn_toggle_roi_sm.setChecked(False)
+
+    def _init_laser_control(self) -> None:
+        """HTTP 레이저 제어 및 실시간 폴링 초기화. __init__ 에서 호출됨."""
+        self.laser_manager = QNetworkAccessManager(self)
+        self.laser_manager.finished.connect(self._on_laser_http_response)
+
+        self.laser_poll_timer = QTimer(self)
+        self.laser_poll_timer.setInterval(3000)
+        self.laser_poll_timer.timeout.connect(self._poll_laser_status)
+
+        # 실시간 수신 상태 취합 딕셔너리
+        self.laser_states = {"temp": "N/A", "on": "N/A", "hf": "N/A"}
+
+        # 동적 세션 토큰 관리 상태
+        self._current_session_token = ""
+        self._login_success_callback = None
+        self._is_logging_in = False
+
+        # UI 버튼 및 컨트롤 시그널 바인딩
+        self.btn_laser_poll.toggled.connect(self._on_laser_poll_toggled)
+        self.btn_laser_toggle.clicked.connect(self._on_laser_toggle_clicked)
+        self.combo_laser_auth_type.currentIndexChanged.connect(self._on_laser_auth_type_changed)
+        self.btn_laser_token_browse.clicked.connect(self._on_browse_laser_token)
+
+        # 초기 UI 출력
+        self._update_laser_status_ui()
+
+        # 복원된 설정에 따라 폴링 즉시 실행
+        if self.btn_laser_poll.isChecked():
+            self._on_laser_poll_toggled(True)
+
+    def _on_laser_auth_type_changed(self, index: int) -> None:
+        """인증 방식 변경에 따른 UI 토글."""
+        is_idpw = (index == 0)
+        self.laser_idpw_widget.setVisible(is_idpw)
+        self.laser_token_widget.setVisible(not is_idpw)
+        # 인증 방식 변경 시 기존 세션 캐시 초기화
+        self._current_session_token = ""
+
+    def _on_browse_laser_token(self) -> None:
+        """토큰 JSON 파일 선택 대화상자 표시."""
+        import os
+        current_path = self.edit_laser_token.text().strip()
+        if not current_path or not os.path.exists(current_path):
+            current_path = os.getcwd()
+        else:
+            if os.path.isfile(current_path):
+                current_path = os.path.dirname(current_path)
+
+        selected_file, _ = QFileDialog.getOpenFileName(
+            self, "Select Laser Token JSON", current_path, "JSON Files (*.json);;All Files (*)"
+        )
+        if selected_file:
+            self.edit_laser_token.setText(selected_file)
+
+    def _get_laser_token_from_file(self, filepath: str) -> str:
+        """JSON 파일에서 토큰 값 파싱 및 추출, 또는 Plain Text 토큰 반환."""
+        import os
+        import json
+        if not filepath or not os.path.exists(filepath) or not os.path.isfile(filepath):
+            # 파일 경로가 아니거나 없는 경우 입력된 텍스트 자체를 토큰으로 사용
+            return filepath
+
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            
+            if isinstance(data, dict):
+                # 대소문자 구분 없이 흔한 토큰 키 후보 검색
+                for candidate in ["token", "access_token", "apiKey", "api_key", "key", "access-token", "id_token"]:
+                    for k, v in data.items():
+                        if k.lower() == candidate.lower():
+                            return str(v).strip()
+                # 후보 키가 없으면 첫 번째 문자열/숫자 값을 반환하는 fallback
+                for k, v in data.items():
+                    if isinstance(v, (str, int, float)):
+                        return str(v).strip()
+            elif isinstance(data, str):
+                return data.strip()
+        except Exception as e:
+            dev_logger.warning(f"[DeepAlign] Failed to parse laser token JSON file {filepath}: {e}")
+        return filepath
+
+    def _login_to_laser_server(self, success_callback, endpoint_path: str = "/api/login") -> None:
+        """서버 로그인 요청을 수행하여 HTTP Basic Auth 토큰 생성 또는 Bearer Token 로드."""
+        # 1. 토큰 방식 (Bearer Token)인 경우 -> 아디비번이 필요 없으므로 바로 세션 완료 처리
+        if self.combo_laser_auth_type.currentIndex() == 1:
+            token_input = self.edit_laser_token.text().strip()
+            self._current_session_token = self._get_laser_token_from_file(token_input)
+            self.lbl_laser_info.setText("Logged in (Bearer Token)")
+            success_callback()
+            return
+
+        # 2. 아이디/비번 방식 (HTTP Basic Auth)인 경우 -> 접속자 권한 확인 수행
+        user_id = self.edit_laser_id.text().strip()
+        user_pw = self.edit_laser_pw.text()  # 패스워드 공백 유지
+
+        import base64
+        credentials = f"{user_id}:{user_pw}"
+        credentials_bytes = credentials.encode("utf-8")
+        base64_credentials = base64.b64encode(credentials_bytes).decode("utf-8")
+        self._current_session_token = f"Basic {base64_credentials}"
+        
+        self._query_user_access_level()
+        success_callback()
+
+    def _query_user_access_level(self) -> None:
+        """/api/server/users/{user}/accessLevel 요청을 비동기 전송하여 접속자 권한 확인 (ID/PW 모드 전용)."""
+        if not self._current_session_token:
+            return
+
+        ip = self.edit_laser_ip.text().strip() or "127.0.0.1"
+        port = self.edit_laser_port.text().strip() or "5643"
+        token = self._current_session_token
+
+        # ID/PW 방식이므로 입력된 ID를 user로 사용
+        user = self.edit_laser_id.text().strip() or "viewer"
+
+        url_str = f"http://{ip}:{port}/api/server/users/{user}/accessLevel"
+        request = QNetworkRequest(QUrl(url_str))
+        
+        if token.startswith("Basic "):
+            request.setRawHeader(b"Authorization", token.encode("utf-8"))
+        else:
+            request.setRawHeader(b"Authorization", f"Bearer {token}".encode("utf-8"))
+            request.setRawHeader(b"X-Auth-Token", token.encode("utf-8"))
+
+        reply = self.laser_manager.get(request)
+        reply.setProperty("req_type", "GET_ACCESS_LEVEL")
+        reply.setProperty("user", user)
+        
+        dev_logger.info(f"[DeepAlign] Querying access level for user '{user}' -> {url_str}")
+
+    def _poll_laser_status(self) -> None:
+        """HTTP GET 요청으로 3개 엔드포인트의 레이저/챔버 상태 비동기 폴링."""
+        # 세션 토큰이 없으면 먼저 로그인부터 비동기 수행 후, 성공 시 자신을 다시 호출하도록 유도
+        if not self._current_session_token:
+            self._login_to_laser_server(self._poll_laser_status)
+            return
+
+        ip = self.edit_laser_ip.text().strip() or "127.0.0.1"
+        port = self.edit_laser_port.text().strip() or "5643"
+        token = self._current_session_token
+
+        base_url = f"http://{ip}:{port}"
+        endpoints = {
+            "GET_TEMP": f"{base_url}/api/euvChamber/target/disk/temperature/value",
+            "GET_ON": f"{base_url}/api/laser/on",
+            "GET_HF": f"{base_url}/api/laser/enableHighFrequency"
+        }
+
+        for req_type, url_str in endpoints.items():
+            request = QNetworkRequest(QUrl(url_str))
+            if token.startswith("Basic "):
+                request.setRawHeader(b"Authorization", token.encode("utf-8"))
+            else:
+                request.setRawHeader(b"Authorization", f"Bearer {token}".encode("utf-8"))
+                request.setRawHeader(b"X-Auth-Token", token.encode("utf-8"))
+
+            reply = self.laser_manager.get(request)
+            reply.setProperty("req_type", req_type)
+
+    def _on_laser_toggle_clicked(self, checked: bool) -> None:
+        """HTTP PUT 요청으로 레이저 ON/OFF 제어."""
+        # 세션 토큰이 없으면 먼저 로그인부터 비동기 수행 후, 성공 시 자신을 다시 호출하도록 유도
+        if not self._current_session_token:
+            self._login_to_laser_server(lambda: self._on_laser_toggle_clicked(checked))
+            return
+
+        ip = self.edit_laser_ip.text().strip() or "127.0.0.1"
+        port = self.edit_laser_port.text().strip() or "5643"
+        token = self._current_session_token
+
+        url_str = f"http://{ip}:{port}/api/laser/on"
+        request = QNetworkRequest(QUrl(url_str))
+        request.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader, "application/json")
+
+        if token.startswith("Basic "):
+            request.setRawHeader(b"Authorization", token.encode("utf-8"))
+        else:
+            request.setRawHeader(b"Authorization", f"Bearer {token}".encode("utf-8"))
+            request.setRawHeader(b"X-Auth-Token", token.encode("utf-8"))
+
+        status_val = "on" if checked else "off"
+        body = f'{{"status": "{status_val}", "on": {str(checked).lower()}}}'.encode("utf-8")
+
+        reply = self.laser_manager.put(request, body)
+        reply.setProperty("req_type", "PUT_ON")
+        reply.setProperty("target_status", status_val)
+
+        # 통신 상태 피드백 UI 표시
+        self.lbl_laser_info.setText(f"Turning Laser {status_val.upper()}...")
+
+    def _on_laser_poll_toggled(self, checked: bool) -> None:
+        """폴링 타이머 ON/OFF 제어."""
+        if checked:
+            self.laser_poll_timer.start(3000)
+            self.btn_laser_poll.setText("STOP POLL")
+            self._poll_laser_status()  # 활성화 즉시 1회 강제 호출
+        else:
+            self.laser_poll_timer.stop()
+            self.btn_laser_poll.setText("START POLL")
+            self.laser_states = {"temp": "N/A", "on": "N/A", "hf": "N/A"}
+            self._current_session_token = ""  # 토큰 캐시 초기화로 다음 폴링 시 클린 로그인 유도
+            self._update_laser_status_ui()
+
+    def _on_laser_http_response(self, reply) -> None:
+        """HTTP 응답 처리 콜백."""
+        reply.deleteLater()  # QNetworkReply 리소스 지연 해제
+
+        req_type = reply.property("req_type")
+        if not req_type:
+            return
+
+        # 네트워크 통신 에러 처리
+        if reply.error() != reply.NetworkError.NoError:
+            status_code = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+            err_msg = reply.errorString()
+            dev_logger.warning(f"[DeepAlign] HTTP Error: Req={req_type}, Status={status_code}, Msg={err_msg}")
+            
+            # 401/403 에러 발생 시 현재 토큰을 무효화하여 다음 요청 시 재로그인을 시도하도록 가이드
+            if status_code in (401, 403):
+                dev_logger.warning(f"[DeepAlign] Unauthorized ({status_code}). Clearing cached session token.")
+                self._current_session_token = ""
+                # 무단/만료 토큰 또는 ID/PW 에러 시 즉시 폴링 정지 및 UI 알림
+                if self.combo_laser_auth_type.currentIndex() == 1:
+                    self.lbl_laser_info.setText(f"Unauthorized ({status_code}): Check Bearer Token")
+                else:
+                    self.lbl_laser_info.setText(f"Unauthorized ({status_code}): Check ID / PW")
+                self.btn_laser_poll.setChecked(False)
+                return
+
+            if req_type == "POST_LOGIN":
+                endpoint = reply.property("endpoint") or "/api/login"
+                
+                # 404 에러 시 차선책 로그인 엔드포인트 자동 재시도
+                if status_code == 404 and endpoint == "/api/login":
+                    dev_logger.info("[DeepAlign] /api/login failed with 404, trying fallback /api/auth")
+                    self._login_to_laser_server(self._login_success_callback, endpoint_path="/api/auth")
+                    return
+                elif status_code == 404 and endpoint == "/api/auth":
+                    dev_logger.info("[DeepAlign] /api/auth failed with 404, trying fallback /api/authenticate")
+                    self._login_to_laser_server(self._login_success_callback, endpoint_path="/api/authenticate")
+                    return
+
+                self.lbl_laser_info.setText(f"Login Error ({status_code}): {err_msg}")
+                self.btn_laser_poll.setChecked(False)
+                
+            elif req_type == "GET_TEMP":
+                self.laser_states["temp"] = "Error"
+            elif req_type == "GET_ON":
+                self.laser_states["on"] = "Error"
+            elif req_type == "GET_HF":
+                self.laser_states["hf"] = "Error"
+            elif req_type == "PUT_ON":
+                self.lbl_laser_info.setText(f"Control Error: {err_msg}")
+                target_status = reply.property("target_status")
+                # 요청 실패 시 원래 상태로 버튼 UI 복원
+                is_on = (target_status == "off")
+                self.btn_laser_toggle.blockSignals(True)
+                self.btn_laser_toggle.setChecked(is_on)
+                self.btn_laser_toggle.setText("🟢 LASER ON" if is_on else "🔴 LASER OFF")
+                self.btn_laser_toggle.setStyleSheet(self._laser_btn_style(is_on))
+                self.btn_laser_toggle.blockSignals(False)
+            elif req_type == "GET_ACCESS_LEVEL":
+                user = reply.property("user") or "unknown"
+                dev_logger.warning(f"[DeepAlign] Failed to query access level for user '{user}': {err_msg}")
+                self.lbl_laser_info.setText(f"Logged in as {user} (Access Level Failed)")
+            
+            self._update_laser_status_ui()
+            return
+
+        # 정상 응답 바디 파싱
+        data_bytes = reply.readAll().data()
+        data_str = data_bytes.decode("utf-8").strip()
+        dev_logger.info(f"[DeepAlign] HTTP Success: Req={req_type}, Response={data_str[:200]}")
+
+        if req_type == "POST_LOGIN":
+            token = ""
+            try:
+                import json
+                parsed = json.loads(data_str)
+                if isinstance(parsed, dict):
+                    for candidate in ["token", "access_token", "apiKey", "api_key", "key", "id_token"]:
+                        for k, v in parsed.items():
+                            if k.lower() == candidate.lower():
+                                token = str(v).strip()
+                                break
+                        if token:
+                            break
+                    if not token:
+                        for k, v in parsed.items():
+                            if isinstance(v, (str, int, float)):
+                                token = str(v).strip()
+                                break
+                else:
+                    token = data_str
+            except Exception:
+                token = data_str
+
+            if token:
+                self._current_session_token = token
+                self.lbl_laser_info.setText("Login Successful")
+                if self._login_success_callback:
+                    self._login_success_callback()
+            else:
+                self.lbl_laser_info.setText("Login Error: Token not found")
+                self.btn_laser_poll.setChecked(False)
+
+        elif req_type == "GET_ACCESS_LEVEL":
+            user = reply.property("user") or "unknown"
+            access_level = "Unknown"
+            try:
+                import json
+                parsed = json.loads(data_str)
+                if isinstance(parsed, dict):
+                    for candidate in ["accessLevel", "level", "role", "type"]:
+                        for k, v in parsed.items():
+                            if k.lower() == candidate.lower():
+                                access_level = str(v).strip()
+                                break
+                        if access_level != "Unknown":
+                            break
+                    if access_level == "Unknown":
+                        for k, v in parsed.items():
+                            if isinstance(v, (str, int, float)):
+                                access_level = str(v).strip()
+                                break
+                else:
+                    access_level = data_str
+            except Exception:
+                access_level = data_str if data_str else "Unknown"
+
+            dev_logger.info(f"[DeepAlign] User Access Level: User={user}, Level={access_level}")
+            self.lbl_laser_info.setText(f"Logged in as {user} ({access_level})")
+
+        elif req_type == "GET_TEMP":
+            # EUV Chamber 온도 파싱
+            try:
+                import json
+                parsed = json.loads(data_str)
+                if isinstance(parsed, dict) and "value" in parsed:
+                    val = float(parsed["value"])
+                else:
+                    val = float(data_str)
+                self.laser_states["temp"] = f"{val:.1f} °C"
+            except Exception:
+                self.laser_states["temp"] = data_str[:15]
+
+        elif req_type == "GET_ON":
+            # 레이저 전원 상태 파싱 (on / true / 1)
+            is_on = ("true" in data_str.lower() or "on" in data_str.lower() or "1" == data_str)
+            self.laser_states["on"] = "ON" if is_on else "OFF"
+            
+            # 레이저 온/오프 버튼 상태 및 스타일 자동 동기화
+            self.btn_laser_toggle.blockSignals(True)
+            self.btn_laser_toggle.setChecked(is_on)
+            self.btn_laser_toggle.setText("🟢 LASER ON" if is_on else "🔴 LASER OFF")
+            self.btn_laser_toggle.setStyleSheet(self._laser_btn_style(is_on))
+            self.btn_laser_toggle.blockSignals(False)
+
+        elif req_type == "GET_HF":
+            # High Frequency Enable 상태 파싱 (true / on / enable / 1)
+            is_hf = ("true" in data_str.lower() or "on" in data_str.lower() or "1" == data_str or "enable" in data_str.lower())
+            self.laser_states["hf"] = "ENABLED" if is_hf else "DISABLED"
+
+        elif req_type == "PUT_ON":
+            # 제어 성공 시 상태 강제 싱크
+            target_status = reply.property("target_status")
+            is_on = (target_status == "on")
+            self.laser_states["on"] = "ON" if is_on else "OFF"
+            
+            self.btn_laser_toggle.blockSignals(True)
+            self.btn_laser_toggle.setChecked(is_on)
+            self.btn_laser_toggle.setText("🟢 LASER ON" if is_on else "🔴 LASER OFF")
+            self.btn_laser_toggle.setStyleSheet(self._laser_btn_style(is_on))
+            self.btn_laser_toggle.blockSignals(False)
+
+        self._update_laser_status_ui()
+
+    def _update_laser_status_ui(self) -> None:
+        """수집된 실시간 레이저 및 챔버 정보들을 정교하게 렌더링."""
+        temp = self.laser_states.get("temp", "N/A")
+        on_state = self.laser_states.get("on", "N/A")
+        hf_state = self.laser_states.get("hf", "N/A")
+
+        on_icon = "🟢" if on_state == "ON" else "🔴" if on_state == "OFF" else "⚪"
+        hf_icon = "🟢" if hf_state == "ENABLED" else "🔴" if hf_state == "DISABLED" else "⚪"
+
+        status_text = (
+            f"🌡️ Target Temp : {temp}\n"
+            f"{on_icon} Laser State : {on_state}\n"
+            f"{hf_icon} High Freq  : {hf_state}"
+        )
+        self.lbl_laser_info.setText(status_text)
+
+    def _laser_btn_style(self, is_on: bool) -> str:
+        """레이저 상태에 따른 프리미엄 버튼 CSS 스타일."""
+        if is_on:
+            return """
+                QPushButton {
+                    background: #10b981; color: white; border: 1px solid #10b981;
+                    border-radius: 4px; font-weight: bold; font-size: 12px; padding: 4px;
+                }
+                QPushButton:hover {
+                    background: #059669;
+                }
+            """
+        else:
+            return """
+                QPushButton {
+                    background: #1e1e2f; color: #ef4444; border: 1px solid #ef4444;
+                    border-radius: 4px; font-weight: bold; font-size: 12px; padding: 4px;
+                }
+                QPushButton:hover {
+                    background: #ef444422;
+                }
+            """

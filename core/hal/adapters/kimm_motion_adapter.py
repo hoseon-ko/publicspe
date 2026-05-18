@@ -39,11 +39,14 @@ class KimmMotionAdapter(KimmHal):
         finally:
             self._controller = None
 
-    def move_to_z(self, um: float) -> None:
+    def move_to_z(self, um: float, done_timeout_s: float | None = None) -> None:
         dev_logger.debug(f"[KimmMotionAdapter] move_to_z requested um={um}")
         ctrl = self._require_connected()
         try:
-            ctrl.move_to_z(float(um))
+            if done_timeout_s is None:
+                ctrl.move_to_z(float(um))
+            else:
+                ctrl.move_to_z(float(um), done_timeout_s=float(done_timeout_s))
             dev_logger.debug(f"[KimmMotionAdapter] move_to_z succeeded um={um}")
         except Exception as exc:
             dev_logger.exception(f"[KimmMotionAdapter] move_to_z failed um={um}")

@@ -435,7 +435,17 @@ class AcsStageController(QObject):
         return False
 
     def wait_in_position_all(self, timeout_ms: int = 30000):
-        """하드웨어 API 직접 호출 없이 캐시된 moving 상태를 체크하며 대기"""
+        """하드웨어 API 직접 호출 없이 캐시된 moving 상태를 체크하며 대기.
+
+        주의: move 명령 emit 직후 호출되는 경우 캐시(_last_states)가 아직
+        moving=True 로 갱신되기 전일 수 있어 wait가 즉시 반환되는 race가 존재.
+        이를 방지하기 위해 시작 시 한 polling cycle(250ms) 강제 settle.
+
+        timeout_ms 만료 시 TimeoutError 를 raise (silent return 금지).
+        """
+        # 캐시 갱신 대기 (worker polling 주기 200ms + 여유)
+        time.sleep(0.25)
+
         start = time.time()
         main_thread = QApplication.instance().thread()
         while (time.time() - start) * 1000 < timeout_ms:
@@ -444,6 +454,7 @@ class AcsStageController(QObject):
             if QThread.currentThread() == main_thread:
                 QApplication.processEvents()
             time.sleep(0.05)
+        raise TimeoutError(f"ACS wait_in_position_all timeout after {int(timeout_ms)}ms")
 
     # 워커 생명주기 관리
     def start_polling(self, on_positions=None, on_states=None, on_lost=None):

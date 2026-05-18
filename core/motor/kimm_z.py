@@ -126,11 +126,12 @@ class KIMMZController:
 
     # ── 이동 명령 ────────────────────────────────────────────────────
 
-    def move_to_z(self, target_um: float, velocity: Optional[float] = None) -> None:
-        """Z축 절대 이동."""
+    def move_to_z(self, target_um: float, velocity: Optional[float] = None,
+                  done_timeout_s: Optional[float] = None) -> None:
+        """Z축 절대 이동. done_timeout_s 지정 시 Done 대기 타임아웃을 덮어쓴다."""
         if not self._connected and not self.dry_run:
             raise ConnectionError("KIMM Not connected")
-            
+
         vel = velocity if velocity is not None else self.default_velocity
 
         # 안전 리밋 체크 (상한/하한 동시 체크)
@@ -154,10 +155,11 @@ class KIMMZController:
             # Ack 대기 (5초)
             if not self._ack_received.wait(timeout=5.0):
                 raise TimeoutError("Move Ack timeout")
-            # Done 대기 (30초)
-            if not self._done_received.wait(timeout=30.0):
-                raise TimeoutError("Move Done timeout")
-            
+            # Done 대기 (기본 30초, 호출자가 override 가능)
+            done_to = 30.0 if done_timeout_s is None else float(done_timeout_s)
+            if not self._done_received.wait(timeout=done_to):
+                raise TimeoutError(f"Move Done timeout after {done_to:.1f}s")
+
             log.info(f"[KIMM] Move_to {target_um:.2f} 완료")
         finally:
             self._cmd_lock.release()

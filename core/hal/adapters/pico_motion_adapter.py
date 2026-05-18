@@ -101,6 +101,12 @@ class PicoMotionAdapter(PicoHal):
             dev_logger.exception("[PicoMotionAdapter] stop_all failed")
             raise HalCommandError(f"Picomotor stop_all failed: {exc}", cause=exc) from exc
 
+    def wait_motion_done(self, axis: int, timeout_ms: int) -> None:
+        ctrl = self._require_connected()
+        motor = self._to_motor_index(axis)
+        # TimeoutError는 그대로 전파(워커가 직접 잡아 사용자에게 노출).
+        ctrl.wait_motion_done(motor, int(timeout_ms))
+
     def _require_connected(self) -> PicomotorController:
         if self._controller is None or not self._controller.is_connected:
             raise HalNotConnectedError("Picomotor is not connected")

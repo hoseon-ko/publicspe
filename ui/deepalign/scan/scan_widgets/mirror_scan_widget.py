@@ -7,15 +7,17 @@ scan_requested(points, settle_ms, avg_frames)에서
 from __future__ import annotations
 from typing import Callable, Optional
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QSpinBox, QPushButton, QLabel,
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QSpinBox, QDoubleSpinBox,
+    QPushButton, QLabel, QFrame,
 )
 
-from theme.styles import C_ACCENT, C_DANGER
-from ui.deepalign.scan.scan_widgets._common import (
-    SPIN_QSS, btn_qss, section_frame, label_dim, status_label, apply_status,
+from theme.styles import (
+    C_ACCENT, C_DANGER, C_TEXT_DIM, Fonts, BTN_SMALL, SPIN_STYLE, lbl,
 )
+from ui.widgets.collapsible_section import CollapsibleSection
+from ui.deepalign.scan.scan_widgets._common import status_label, apply_status
 
 
 class MirrorScanWidget(QWidget):
@@ -46,39 +48,79 @@ class MirrorScanWidget(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
 
-        frame, lay = section_frame("MIRROR SCAN (Picomotor)", C_ACCENT)
-        root.addWidget(frame)
+        # PicoCard와 동일한 외곽 카드 스타일
+        card = QFrame()
+        card.setObjectName("motionCard")
+        card.setStyleSheet("""
+            QFrame#motionCard {
+                background: #0f1729;
+                border: 1px solid #11345f;
+                border-radius: 6px;
+            }
+        """)
+        root.addWidget(card)
+
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(8, 8, 8, 8)
+        lay.setSpacing(7)
+
+        # Title — PicoCard 대제목과 동일 톤
+        title = QLabel("▾  MIRROR SCAN")
+        title.setStyleSheet(
+            f"color: {C_ACCENT}; font-family: '{Fonts.MONO}';"
+            f" font-size: 20px; font-weight: bold; letter-spacing: 2px;"
+            f" background: transparent; border: none;"
+        )
+        lay.addWidget(title)
+
+        # Parameters section
+        sec_params = CollapsibleSection("SCAN PARAMETERS", accent=C_ACCENT)
+        params_l = sec_params.content_layout()
 
         grid = QGridLayout()
         grid.setSpacing(4)
 
         def _spin(lo, hi, val) -> QSpinBox:
-            s = QSpinBox(); s.setRange(lo, hi); s.setValue(val); s.setStyleSheet(SPIN_QSS)
+            s = QSpinBox(); s.setRange(lo, hi); s.setValue(val)
+            s.setStyleSheet(SPIN_STYLE)
             return s
 
-        self.spin_motor  = _spin(1, 4, 1)
-        self.spin_n      = _spin(2, 999, 5)
-        self.spin_delta  = _spin(-100000, 100000, 100)
-        self.spin_settle = _spin(0, 10000, 200)
-        self.spin_avg    = _spin(1, 32, 1)
+        def _lbl(text: str) -> QLabel:
+            l = QLabel(text)
+            l.setStyleSheet(lbl(C_TEXT_DIM, mono=True))
+            l.setStyleSheet(l.styleSheet() + " background: transparent; border: none;")
+            return l
 
-        grid.addWidget(label_dim("Motor"),     0, 0); grid.addWidget(self.spin_motor,  0, 1)
-        grid.addWidget(label_dim("N points"),  0, 2); grid.addWidget(self.spin_n,      0, 3)
-        grid.addWidget(label_dim("Δ steps"),   1, 0); grid.addWidget(self.spin_delta,  1, 1)
-        grid.addWidget(label_dim("Settle ms"), 1, 2); grid.addWidget(self.spin_settle, 1, 3)
-        grid.addWidget(label_dim("Avg frames"),2, 0); grid.addWidget(self.spin_avg,    2, 1)
-        lay.addLayout(grid)
+        self.spin_motor   = _spin(1, 4, 1)
+        self.spin_n       = _spin(2, 999, 5)
+        self.spin_delta   = _spin(-100000, 100000, 100)
+        self.spin_settle  = _spin(0, 10000, 200)
+        self.spin_avg     = _spin(1, 32, 1)
+        self.spin_timeout = QDoubleSpinBox()
+        self.spin_timeout.setRange(1.0, 120.0); self.spin_timeout.setDecimals(1)
+        self.spin_timeout.setSingleStep(1.0); self.spin_timeout.setValue(10.0)
+        self.spin_timeout.setSuffix(" s"); self.spin_timeout.setStyleSheet(SPIN_STYLE)
 
+        grid.addWidget(_lbl("Motor"),         0, 0); grid.addWidget(self.spin_motor,   0, 1)
+        grid.addWidget(_lbl("N points"),      0, 2); grid.addWidget(self.spin_n,       0, 3)
+        grid.addWidget(_lbl("Δ steps"),       1, 0); grid.addWidget(self.spin_delta,   1, 1)
+        grid.addWidget(_lbl("Settle ms"),     1, 2); grid.addWidget(self.spin_settle,  1, 3)
+        grid.addWidget(_lbl("Avg frames"),    2, 0); grid.addWidget(self.spin_avg,     2, 1)
+        grid.addWidget(_lbl("Move Timeout"),  2, 2); grid.addWidget(self.spin_timeout, 2, 3)
+        params_l.addLayout(grid)
+        lay.addWidget(sec_params)
+
+        # Action buttons — PicoCard와 동일한 BTN_SMALL
         btn_row = QHBoxLayout()
         self.btn_start = QPushButton("SCAN START")
         self.btn_stop  = QPushButton("SCAN STOP")
-        self.btn_start.setStyleSheet(btn_qss(C_ACCENT))
-        self.btn_stop.setStyleSheet(btn_qss(C_DANGER))
+        self.btn_start.setStyleSheet(BTN_SMALL)
+        self.btn_stop.setStyleSheet(BTN_SMALL.replace(C_ACCENT, C_DANGER))
         self.btn_stop.setEnabled(False)
         self.btn_start.clicked.connect(self._on_start)
         self.btn_stop.clicked.connect(self.scan_stop_requested)
-        btn_row.addWidget(self.btn_start, 1)
-        btn_row.addWidget(self.btn_stop, 1)
+        btn_row.addWidget(self.btn_start)
+        btn_row.addWidget(self.btn_stop)
         lay.addLayout(btn_row)
 
         self.lbl_status = status_label()
@@ -106,3 +148,6 @@ class MirrorScanWidget(QWidget):
     def set_scan_running(self, running: bool) -> None:
         self.btn_start.setEnabled(not running)
         self.btn_stop.setEnabled(running)
+
+    def get_move_timeout_ms(self) -> int:
+        return int(round(float(self.spin_timeout.value()) * 1000.0))

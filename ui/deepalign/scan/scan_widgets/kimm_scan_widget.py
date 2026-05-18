@@ -49,17 +49,19 @@ class KimmScanWidget(QWidget):
             s = QSpinBox(); s.setRange(lo, hi); s.setValue(val); s.setStyleSheet(SPIN_QSS)
             return s
 
-        self.spin_z_start = _dspin(-100000.0, 100000.0, 0.0)
-        self.spin_z_end   = _dspin(-100000.0, 100000.0, 10.0)
-        self.spin_n       = _ispin(2, 9999, 5)
-        self.spin_settle  = _ispin(0, 10000, 200)
-        self.spin_avg     = _ispin(1, 32, 1)
+        self.spin_z_start  = _dspin(-100000.0, 100000.0, 0.0)
+        self.spin_z_end    = _dspin(-100000.0, 100000.0, 10.0)
+        self.spin_n        = _ispin(2, 9999, 5)
+        self.spin_settle   = _ispin(0, 10000, 200)
+        self.spin_avg      = _ispin(1, 32, 1)
+        self.spin_timeout  = _dspin(1.0, 120.0, 30.0, decs=1, step=1.0, suffix=" s")
 
-        grid.addWidget(label_dim("Z start"),   0, 0); grid.addWidget(self.spin_z_start, 0, 1)
-        grid.addWidget(label_dim("Z end"),     0, 2); grid.addWidget(self.spin_z_end,   0, 3)
-        grid.addWidget(label_dim("N points"),  1, 0); grid.addWidget(self.spin_n,       1, 1)
-        grid.addWidget(label_dim("Settle ms"), 1, 2); grid.addWidget(self.spin_settle,  1, 3)
-        grid.addWidget(label_dim("Avg frames"),2, 0); grid.addWidget(self.spin_avg,     2, 1)
+        grid.addWidget(label_dim("Z start"),      0, 0); grid.addWidget(self.spin_z_start, 0, 1)
+        grid.addWidget(label_dim("Z end"),        0, 2); grid.addWidget(self.spin_z_end,   0, 3)
+        grid.addWidget(label_dim("N points"),     1, 0); grid.addWidget(self.spin_n,       1, 1)
+        grid.addWidget(label_dim("Settle ms"),    1, 2); grid.addWidget(self.spin_settle,  1, 3)
+        grid.addWidget(label_dim("Avg frames"),   2, 0); grid.addWidget(self.spin_avg,     2, 1)
+        grid.addWidget(label_dim("Move Timeout"), 2, 2); grid.addWidget(self.spin_timeout, 2, 3)
         lay.addLayout(grid)
 
         btn_row = QHBoxLayout()
@@ -90,3 +92,6 @@ class KimmScanWidget(QWidget):
     def set_scan_running(self, running: bool) -> None:
         self.btn_start.setEnabled(not running)
         self.btn_stop.setEnabled(running)
+
+    def get_move_timeout_ms(self) -> int:
+        return int(round(float(self.spin_timeout.value()) * 1000.0))

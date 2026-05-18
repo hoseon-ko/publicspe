@@ -9,6 +9,8 @@ import는 성공하며, connect() 시점에 RuntimeError를 올린다.
 from __future__ import annotations
 
 import sys
+import time
+import threading
 from typing import List, Optional
 
 from core.logger import dev_logger
@@ -181,6 +183,37 @@ class PicomotorController:
         """모든 축 즉시 정지."""
         self._require_connected()
         self._cmdlib.AbortMotion(self._key, self._master)
+
+    def wait_motion_done(self, motor: int, timeout_ms: int = 10000,
+                         poll_ms: int = 50, stable_n: int = 3) -> None:
+        """위치 안정성 기반 정지 판정.
+
+        poll_ms 간격으로 GetPosition 폴링 → 같은 값이 연속 stable_n회 관측되면
+        정지로 간주. timeout_ms 만료 시 TimeoutError.
+        8742 SDK에 명시적 motion-done 쿼리가 없어 위치 stability 로 대체.
+        """
+        self._require_connected()
+        deadline = time.perf_counter() + max(0, int(timeout_ms)) / 1000.0
+        stable = 0
+        last: Optional[int] = None
+        while True:
+            try:
+                ok, pos = self._cmdlib.GetPosition(self._key, self._master, int(motor), 0)
+            except Exception as exc:
+                raise RuntimeError(f"Picomotor M{motor} GetPosition 실패: {exc}") from exc
+            if ok:
+                if last is not None and pos == last:
+                    stable += 1
+                    if stable >= max(1, int(stable_n)):
+                        return
+                else:
+                    stable = 1
+                last = pos
+            if time.perf_counter() >= deadline:
+                raise TimeoutError(
+                    f"Picomotor M{motor} move timeout after {int(timeout_ms)}ms"
+                )
+            time.sleep(max(0.001, int(poll_ms) / 1000.0))
 
     # ── 폴링 ─────────────────────────────────────────────────────────
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from threading import RLock
-from typing import Callable
+from typing import Callable, Optional
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
@@ -804,10 +804,17 @@ class DeviceSessionHub(QObject):
             self._kimm_hal = None
             self.mark_kimm_disconnected()
 
-    def kimm_move_to_z(self, um: float) -> None:
+    def kimm_move_to_z(self, um: float, done_timeout_s: Optional[float] = None) -> None:
         hal = self._require_kimm_hal()
         try:
-            hal.move_to_z(float(um))
+            if done_timeout_s is None:
+                hal.move_to_z(float(um))
+            else:
+                # HAL 어댑터가 done_timeout_s 키워드를 지원하면 전달, 아니면 fallback.
+                try:
+                    hal.move_to_z(float(um), done_timeout_s=float(done_timeout_s))
+                except TypeError:
+                    hal.move_to_z(float(um))
             self.publish_status(
                 f"KIMM move_to_z requested: um={float(um):.6f}", source="hub"
             )
@@ -907,6 +914,11 @@ class DeviceSessionHub(QObject):
             dev_logger.exception("[DeviceSessionHub] pico_stop_all failed")
             self.publish_error("pico", f"stop_all failed: {exc}", source="hub")
             raise
+
+    def pico_wait_motion_done(self, axis: int, timeout_ms: int) -> None:
+        """위치 안정성 폴링으로 정지 대기. timeout 만료 시 TimeoutError 전파."""
+        hal = self._require_pico_hal()
+        hal.wait_motion_done(int(axis), int(timeout_ms))
 
     # ── Picomotor Hub-side 폴링 ─────────────────────────────────────────
 

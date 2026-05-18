@@ -9,12 +9,14 @@ class AcsMover:
 
     enable/disable는 호출자(스캔 부트스트랩)가 책임진다.
     move(point)는 6축 동시 move_to(wait=False) → wait_in_position_all 패턴.
+    timeout 만료 시 wait_in_position_all 이 TimeoutError 를 raise.
     """
 
     _MOTOR_NAMES = ["Y1", "Z1", "X1", "Z2", "Y2", "Z3"]
 
-    def __init__(self, ctrl):
+    def __init__(self, ctrl, move_timeout_ms: int = 30000):
         self._ctrl = ctrl
+        self._move_timeout_ms = int(move_timeout_ms)
 
     def enable(self, timeout_ms: int = 1000) -> None:
         self._ctrl.enable_all()
@@ -30,7 +32,7 @@ class AcsMover:
             raise ValueError(f"ACS point는 6개 값이어야 함 (got {targets.size})")
         for i, t in enumerate(targets):
             self._ctrl.move_to(i, float(t), wait=False)
-        self._ctrl.wait_in_position_all(timeout_ms=30000)
+        self._ctrl.wait_in_position_all(timeout_ms=self._move_timeout_ms)
 
     def current(self) -> np.ndarray:
         return np.array([self._ctrl.get_position(i) for i in range(6)], dtype=float)
