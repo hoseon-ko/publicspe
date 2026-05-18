@@ -744,14 +744,20 @@ class MainWindow(QMainWindow):
 
     def show_main_window(self):
         """스플래시 화면을 닫고 메인 윈도우를 표시합니다."""
+        # 1. 메인 윈도우 먼저 표시 (안전한 활성화 상태 전이)
+        self.show()
+        # 2. 스플래시 화면 숨김
         if hasattr(self, "startup_overlay"):
             self.startup_overlay.hide()
-        self.show()
+        # 3. 메인 윈도우가 켜진 상태이므로, 창이 전부 닫히면 앱이 정상 종료되는 Qt 기본 설정 복원
+        QApplication.setQuitOnLastWindowClosed(True)
 
     def start_application(self):
         """어플리케이션 시작 시 자동 연결 설정에 따라 스플래시 또는 메인 화면을 노출합니다."""
         auto_connect_enabled = bool(get_config().get("window.main.auto_connect", True))
         if auto_connect_enabled:
+            # 스플래시 화면만 떠 있는 동안 창 전환 시 Qt 앱이 강제 종료(quitOnLastWindowClosed)되는 것 방지
+            QApplication.setQuitOnLastWindowClosed(False)
             # 1. 스플래시 화면(독립 프레임리스 창) 노출
             if hasattr(self, "startup_overlay"):
                 self.startup_overlay.show()
@@ -932,7 +938,7 @@ class MainWindow(QMainWindow):
             self.auto_connect_status.emit("camera", "skipped")
         finally:
             # 1.2초 대기하여 사용자가 최종 상태를 눈으로 확인하게 한 뒤 오버레이 숨기기
-            QTimer.singleShot(1200, self.startup_overlay.hide)
+            QTimer.singleShot(1200, self.startup_overlay.hide_overlay)
 
     def _on_auto_connect_toggled(self):
         """사용자가 헤더 바에서 AUTO CONNECT 체크박스를 토글할 때 설정 파일에 상태 저장"""

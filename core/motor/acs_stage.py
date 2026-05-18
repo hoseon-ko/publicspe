@@ -132,14 +132,32 @@ class AcsWorker(QObject):
         # 2. 폴링 타이머 시작
         try:
             self._is_polling = True
-            self._poll() # 동기식 초기 1회 폴링 강제 실행 (GUI 스레드 대기 해제용)
+            self._do_initial_poll() # 동기식 초기 1회 폴링 강제 실행 (실패 시 예외 전파)
             self._timer = QTimer()
             self._timer.timeout.connect(self._poll)
             self._timer.setInterval(200)
             self._timer.start()
             log.info("[ACS Worker] Polling timer started")
         except Exception as e:
-            log.error(f"[ACS Worker] Timer start failed: {e}")
+            log.error(f"[ACS Worker] Initial poll or timer start failed: {e}")
+            self.connection_lost.emit()
+            return
+
+    def _do_initial_poll(self):
+        """초기 1회 동기 폴링. 실패 시 예외가 외부로 전파되어 connection_lost를 유발합니다."""
+        positions = []
+        states = []
+        for i in range(6):
+            ax = _axis_enum(i)
+            positions.append(float(self._api.GetFPosition(ax)))
+            mstate = int(self._api.GetMotorState(ax))
+            states.append({
+                "enabled": bool(mstate & _MST_ENABLE),
+                "moving":  bool(mstate & _MST_ANY_MOTION),
+                "in_pos":  bool(mstate & _MST_INPOS)
+            })
+        self.positions_updated.emit(positions)
+        self.states_updated.emit(states)
 
     def _poll(self):
         if not self._is_polling: return
