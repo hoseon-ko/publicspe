@@ -364,7 +364,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self.central_stack = QStackedWidget()
         self.central_stack.setObjectName("deepAlignStack")
         self.central_stack.setMinimumWidth(260)
-        self.central_stack.setMaximumWidth(440)
+        self.central_stack.setMaximumWidth(16_777_215)
         self.central_stack.setStyleSheet(
             "background-color: #0d121d; border-right: 1px solid #1e293b;"
         )
@@ -400,7 +400,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         main_splitter.addWidget(right_splitter)
         main_splitter.setStretchFactor(0, 1)
         main_splitter.setStretchFactor(1, 1)
-        main_splitter.setSizes([340, 1240])
+        main_splitter.setSizes([450, 1240])
         main_lay.addWidget(main_splitter, 1)
 
         # 시그널 연결
@@ -849,6 +849,8 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         c.save()
 
     def _save_settings(self):
+        if getattr(self, "_is_loading", False):
+            return
         c = self._cfg
         # Camera — vendor 별 분리 저장. last_used 도 갱신.
         vendor = self.cb_vendor.currentText()
@@ -898,111 +900,115 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
                 except Exception: pass
 
     def _restore_settings(self):
-        c = self._cfg
-        # Camera — last_used vendor 기준으로 그 vendor 의 설정만 로드
-        vendor    = str(c.get("camera.last_used.vendor", "Simulation"))
-        exposure  = float(c.get_camera_setting("exposure_ms", 20.0,  vendor=vendor))
-        fps       = float(c.get_camera_setting("fps",         30.0,  vendor=vendor))
-        fps_lock  = bool(c.get_camera_setting("fps_lock",     False, vendor=vendor))
-        temp      = float(c.get_camera_setting("temp_c",     -70.0,  vendor=vendor))
-        adc_qual  = str(c.get_camera_setting("adc.quality", "", vendor=vendor))
-        adc_spd   = str(c.get_camera_setting("adc.speed",   "", vendor=vendor))
-        adc_gain  = str(c.get_camera_setting("adc.gain",    "", vendor=vendor))
-        adc_bit   = str(c.get_camera_setting("adc.bit",     "", vendor=vendor))
-        # Save
-        frame_to_save = int(c.get("tabs.deepalign.save.frame_to_save", 10))
-        save_folder   = str(c.get("tabs.deepalign.save.folder",    "Live_Captures"))
-        file_base     = str(c.get("tabs.deepalign.save.file_base", "Capture"))
-        inc_name      = bool(c.get("tabs.deepalign.save.inc_name",  False))
-        add_date      = bool(c.get("tabs.deepalign.save.add_date",  True))
-        add_time      = bool(c.get("tabs.deepalign.save.add_time",  True))
-        date_fmt      = str(c.get("tabs.deepalign.save.date_fmt", "YYYY-Month-DD"))
-        time_fmt      = str(c.get("tabs.deepalign.save.time_fmt", "hh:mm:ss (24h)"))
-        place         = str(c.get("tabs.deepalign.save.place",    "Suffix"))
+        self._is_loading = True
+        try:
+            c = self._cfg
+            # Camera — last_used vendor 기준으로 그 vendor 의 설정만 로드
+            vendor    = str(c.get("camera.last_used.vendor", "Simulation"))
+            exposure  = float(c.get_camera_setting("exposure_ms", 20.0,  vendor=vendor))
+            fps       = float(c.get_camera_setting("fps",         30.0,  vendor=vendor))
+            fps_lock  = bool(c.get_camera_setting("fps_lock",     False, vendor=vendor))
+            temp      = float(c.get_camera_setting("temp_c",     -70.0,  vendor=vendor))
+            adc_qual  = str(c.get_camera_setting("adc.quality", "", vendor=vendor))
+            adc_spd   = str(c.get_camera_setting("adc.speed",   "", vendor=vendor))
+            adc_gain  = str(c.get_camera_setting("adc.gain",    "", vendor=vendor))
+            adc_bit   = str(c.get_camera_setting("adc.bit",     "", vendor=vendor))
+            # Save
+            frame_to_save = int(c.get("tabs.deepalign.save.frame_to_save", 10))
+            save_folder   = str(c.get("tabs.deepalign.save.folder",    "Live_Captures"))
+            file_base     = str(c.get("tabs.deepalign.save.file_base", "Capture"))
+            inc_name      = bool(c.get("tabs.deepalign.save.inc_name",  False))
+            add_date      = bool(c.get("tabs.deepalign.save.add_date",  True))
+            add_time      = bool(c.get("tabs.deepalign.save.add_time",  True))
+            date_fmt      = str(c.get("tabs.deepalign.save.date_fmt", "YYYY-Month-DD"))
+            time_fmt      = str(c.get("tabs.deepalign.save.time_fmt", "hh:mm:ss (24h)"))
+            place         = str(c.get("tabs.deepalign.save.place",    "Suffix"))
 
-        # Camera 복원
-        idx = self.cb_vendor.findText(vendor)
-        if idx >= 0:
-            self.cb_vendor.setCurrentIndex(idx)
-        self.spin_exposure.setValue(float(exposure))
-        self.spin_fps.setValue(float(fps))
-        self.check_fps_lock.setChecked(bool(fps_lock))
-        self.spin_temp.setValue(float(temp))
-        for cb, val in [
-            (self.cb_adc_quality, adc_qual),
-            (self.cb_adc_speed,   adc_spd),
-            (self.cb_adc_gain,    adc_gain),
-            (self.cb_adc_bit,     adc_bit),
-        ]:
-            if val:
+            # Camera 복원
+            idx = self.cb_vendor.findText(vendor)
+            if idx >= 0:
+                self.cb_vendor.setCurrentIndex(idx)
+            self.spin_exposure.setValue(float(exposure))
+            self.spin_fps.setValue(float(fps))
+            self.check_fps_lock.setChecked(bool(fps_lock))
+            self.spin_temp.setValue(float(temp))
+            for cb, val in [
+                (self.cb_adc_quality, adc_qual),
+                (self.cb_adc_speed,   adc_spd),
+                (self.cb_adc_gain,    adc_gain),
+                (self.cb_adc_bit,     adc_bit),
+            ]:
+                if val:
+                    idx = cb.findText(val)
+                    if idx >= 0:
+                        cb.setCurrentIndex(idx)
+
+            # Save 복원
+            self.spin_frame_to_save.setValue(int(frame_to_save))
+            self.edit_folder.setText(save_folder)
+            self.edit_file_base.setText(file_base)
+            self.check_inc_name.setChecked(bool(inc_name))
+            self.check_add_date.setChecked(bool(add_date))
+            self.check_add_time.setChecked(bool(add_time))
+
+            for cb, val in [
+                (self.cb_date_fmt, date_fmt),
+                (self.cb_time_fmt, time_fmt),
+                (self.cb_place,    place),
+            ]:
                 idx = cb.findText(val)
                 if idx >= 0:
                     cb.setCurrentIndex(idx)
 
-        # Save 복원
-        self.spin_frame_to_save.setValue(int(frame_to_save))
-        self.edit_folder.setText(save_folder)
-        self.edit_file_base.setText(file_base)
-        self.check_inc_name.setChecked(bool(inc_name))
-        self.check_add_date.setChecked(bool(add_date))
-        self.check_add_time.setChecked(bool(add_time))
+            # Image Processing 복원
+            proc_en     = bool(c.get("tabs.deepalign.proc.enabled", False))
+            proc_mode   = int(c.get("tabs.deepalign.proc.mode", 1))
+            proc_region = str(c.get("tabs.deepalign.proc.region", "full"))
+            self._proc_mode = proc_mode if proc_mode in (1, 2, 3) else 1
+            self._proc_region = proc_region if proc_region in ("full", "roi") else "full"
+            if self._proc_mode == 1: self.radio_proc_mode1.setChecked(True)
+            elif self._proc_mode == 2: self.radio_proc_mode2.setChecked(True)
+            else: self.radio_proc_mode3.setChecked(True)
+            if self._proc_region == "roi": self.radio_region_roi.setChecked(True)
+            else: self.radio_region_full.setChecked(True)
+            self.check_use_proc.setChecked(proc_en)
+            # _restore_settings 는 시그널 연결 이전에 호출되므로 핸들러 명시 호출
+            # (enable 규칙 / radio enable / mode·region 변수 동기화)
+            self._on_proc_enable_toggled(proc_en)
+            self._on_proc_mode_changed(self._proc_mode)
+            self._on_proc_region_changed(1 if self._proc_region == "roi" else 0)
 
-        for cb, val in [
-            (self.cb_date_fmt, date_fmt),
-            (self.cb_time_fmt, time_fmt),
-            (self.cb_place,    place),
-        ]:
-            idx = cb.findText(val)
-            if idx >= 0:
-                cb.setCurrentIndex(idx)
+            # DeepAlign 내부 dock 레이아웃 복원 (Plot/Hist/Proc/ROI 위치+가시성)
+            dstate = c.get("window.deepalign.dockState")
+            if dstate:
+                try:
+                    self.dock_host.restoreState(dstate)
+                except Exception:
+                    pass
+            # 복원 후 viewer toolbar 버튼들 강제 동기화
+            for dock, btn in (
+                (self.dock_plot, self.btn_toggle_plot_sm),
+                (self.dock_hist, self.btn_toggle_hist_sm),
+                (self.dock_proc_stats, self.btn_toggle_proc_sm),
+                (self.dock_roi, self.btn_toggle_roi_sm),
+            ):
+                self._sync_analysis_dock_toggle(dock, btn, dock.isVisible())
 
-        # Image Processing 복원
-        proc_en     = bool(c.get("tabs.deepalign.proc.enabled", False))
-        proc_mode   = int(c.get("tabs.deepalign.proc.mode", 1))
-        proc_region = str(c.get("tabs.deepalign.proc.region", "full"))
-        self._proc_mode = proc_mode if proc_mode in (1, 2, 3) else 1
-        self._proc_region = proc_region if proc_region in ("full", "roi") else "full"
-        if self._proc_mode == 1: self.radio_proc_mode1.setChecked(True)
-        elif self._proc_mode == 2: self.radio_proc_mode2.setChecked(True)
-        else: self.radio_proc_mode3.setChecked(True)
-        if self._proc_region == "roi": self.radio_region_roi.setChecked(True)
-        else: self.radio_region_full.setChecked(True)
-        self.check_use_proc.setChecked(proc_en)
-        # _restore_settings 는 시그널 연결 이전에 호출되므로 핸들러 명시 호출
-        # (enable 규칙 / radio enable / mode·region 변수 동기화)
-        self._on_proc_enable_toggled(proc_en)
-        self._on_proc_mode_changed(self._proc_mode)
-        self._on_proc_region_changed(1 if self._proc_region == "roi" else 0)
+            # ProcStats 복원
+            ps = self.proc_stats_panel
+            ps.chk_enable.setChecked(bool(c.get("tabs.deepalign.proc_stats.enabled", False)))
+            src = str(c.get("tabs.deepalign.proc_stats.source", "snap"))
+            if   src == "live": ps.radio_live.setChecked(True)
+            elif src == "all":  ps.radio_all.setChecked(True)
+            else:               ps.radio_snap.setChecked(True)
+            ps.chk_mean.setChecked(bool(c.get("tabs.deepalign.proc_stats.show_mean", True)))
+            ps.chk_min.setChecked(bool(c.get("tabs.deepalign.proc_stats.show_min",  True)))
+            ps.chk_max.setChecked(bool(c.get("tabs.deepalign.proc_stats.show_max",  True)))
 
-        # DeepAlign 내부 dock 레이아웃 복원 (Plot/Hist/Proc/ROI 위치+가시성)
-        dstate = c.get("window.deepalign.dockState")
-        if dstate:
-            try:
-                self.dock_host.restoreState(dstate)
-            except Exception:
-                pass
-        # 복원 후 viewer toolbar 버튼들 강제 동기화
-        for dock, btn in (
-            (self.dock_plot, self.btn_toggle_plot_sm),
-            (self.dock_hist, self.btn_toggle_hist_sm),
-            (self.dock_proc_stats, self.btn_toggle_proc_sm),
-            (self.dock_roi, self.btn_toggle_roi_sm),
-        ):
-            self._sync_analysis_dock_toggle(dock, btn, dock.isVisible())
-
-        # ProcStats 복원
-        ps = self.proc_stats_panel
-        ps.chk_enable.setChecked(bool(c.get("tabs.deepalign.proc_stats.enabled", False)))
-        src = str(c.get("tabs.deepalign.proc_stats.source", "snap"))
-        if   src == "live": ps.radio_live.setChecked(True)
-        elif src == "all":  ps.radio_all.setChecked(True)
-        else:               ps.radio_snap.setChecked(True)
-        ps.chk_mean.setChecked(bool(c.get("tabs.deepalign.proc_stats.show_mean", True)))
-        ps.chk_min.setChecked(bool(c.get("tabs.deepalign.proc_stats.show_min",  True)))
-        ps.chk_max.setChecked(bool(c.get("tabs.deepalign.proc_stats.show_max",  True)))
-
-        self._update_save_control_state()
-        self._update_save_preview()
+            self._update_save_control_state()
+            self._update_save_preview()
+        finally:
+            self._is_loading = False
 
     # ─────────────────────────────────────────────────────────────────
     # 공개 API (main_window 에서 호출)
@@ -1294,8 +1300,8 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         else:
             self._set_analysis_mode_ui(False)
             self.right_splitter.setVisible(True)
-            self.central_stack.setMaximumWidth(440)
-            self.main_splitter.setSizes([340, 1240])
+            self.central_stack.setMaximumWidth(16_777_215)
+            self.main_splitter.setSizes([450, 1240])
             if idx in _SCAN_TABS:
                 self.dock_af_result.hide()
                 self.dock_host.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_scan_result)

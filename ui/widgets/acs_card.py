@@ -481,6 +481,8 @@ class AcsCard(QFrame):
         for i in range(3): self._dof_spins[i+3].setValue(res[i] * 1000)
 
     def _save_settings(self):
+        if getattr(self, "_is_loading", False):
+            return
         c = self._cfg
         c.set("devices.acs.ip",        self.edit_ip.text().strip())
         c.set("devices.acs.port",      self.edit_port.text().strip())
@@ -490,12 +492,16 @@ class AcsCard(QFrame):
         c.save()
 
     def _load_settings(self):
-        c = self._cfg
-        self.edit_ip.setText(str(c.get("devices.acs.ip", "10.0.0.100")))
-        self.edit_port.setText(str(c.get("devices.acs.port", "700")))
-        self.check_sim.setChecked(bool(c.get("devices.acs.sim", False)))
-        self.check_dry.setChecked(bool(c.get("devices.acs.dry_run", False)))
+        self._is_loading = True
         try:
-            self.spin_settle.setValue(int(c.get("devices.acs.settle_ms", 500)))
-        except (TypeError, ValueError):
-            self.spin_settle.setValue(500)
+            c = self._cfg
+            self.edit_ip.setText(str(c.get("devices.acs.ip", "10.0.0.100")))
+            self.edit_port.setText(str(c.get("devices.acs.port", "700")))
+            self.check_sim.setChecked(bool(c.get("devices.acs.sim", False)))
+            self.check_dry.setChecked(bool(c.get("devices.acs.dry_run", False)))
+            try:
+                self.spin_settle.setValue(int(c.get("devices.acs.settle_ms", 500)))
+            except (TypeError, ValueError):
+                self.spin_settle.setValue(500)
+        finally:
+            self._is_loading = False

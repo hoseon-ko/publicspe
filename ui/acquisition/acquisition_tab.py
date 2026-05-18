@@ -971,6 +971,8 @@ class AcquisitionTab(QWidget):
         self.log_message.emit(msg)
 
     def _save_settings(self):
+        if getattr(self, "_is_loading", False):
+            return
         c = get_config()
         c.set("tabs.acquisition.save_dir",  self.edit_save_dir.text())
         c.set("tabs.acquisition.base_name", self.edit_base_name.text())
@@ -984,17 +986,21 @@ class AcquisitionTab(QWidget):
         c.save()
 
     def _restore_settings(self):
-        c = get_config()
-        self.edit_save_dir.setText(str(c.get("tabs.acquisition.save_dir", "acquisitions")))
-        self.edit_base_name.setText(str(c.get("tabs.acquisition.base_name", "picam_data")))
-        self.check_inc_date.setChecked(bool(c.get("tabs.acquisition.inc_date", True)))
-        self.check_inc_time.setChecked(bool(c.get("tabs.acquisition.inc_time", True)))
-        self.check_inc_num.setChecked(bool(c.get("tabs.acquisition.inc_num", True)))
-        self.spin_exposure.setValue(float(c.get("tabs.acquisition.exposure", 100.0)))
-        self.spin_frames.setValue(int(c.get("tabs.acquisition.frames", 10)))
-        self.spin_timeout.setValue(float(c.get("tabs.acquisition.timeout", 30.0)))
-        self.check_auto_open.setChecked(bool(c.get("tabs.acquisition.auto_open", True)))
-        self._update_file_preview()
+        self._is_loading = True
+        try:
+            c = get_config()
+            self.edit_save_dir.setText(str(c.get("tabs.acquisition.save_dir", "acquisitions")))
+            self.edit_base_name.setText(str(c.get("tabs.acquisition.base_name", "picam_data")))
+            self.check_inc_date.setChecked(bool(c.get("tabs.acquisition.inc_date", True)))
+            self.check_inc_time.setChecked(bool(c.get("tabs.acquisition.inc_time", True)))
+            self.check_inc_num.setChecked(bool(c.get("tabs.acquisition.inc_num", True)))
+            self.spin_exposure.setValue(float(c.get("tabs.acquisition.exposure", 100.0)))
+            self.spin_frames.setValue(int(c.get("tabs.acquisition.frames", 10)))
+            self.spin_timeout.setValue(float(c.get("tabs.acquisition.timeout", 30.0)))
+            self.check_auto_open.setChecked(bool(c.get("tabs.acquisition.auto_open", True)))
+            self._update_file_preview()
+        finally:
+            self._is_loading = False
 
     def cleanup(self):
         """카메라는 LiveTab 소유이므로 여기서 해제하지 않는다."""

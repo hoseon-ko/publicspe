@@ -420,6 +420,8 @@ class KIMMZPanel(QWidget):
     # ── 설정 저장/복원 ─────────────────────────────────────────────────
 
     def _save_settings(self):
+        if getattr(self, "_is_loading", False):
+            return
         c = self._cfg
         c.set(_CFG_IP,    self.edit_ip.text().strip())
         c.set(_CFG_PORT,  self.edit_port.text().strip())
@@ -433,18 +435,22 @@ class KIMMZPanel(QWidget):
         c.save()
 
     def _load_settings(self):
-        c = self._cfg
-        self.edit_ip.setText(str(c.get(_CFG_IP,   "192.168.1.100")))
-        self.edit_port.setText(str(c.get(_CFG_PORT, "5000")))
-        self.spin_limit.setValue(float(c.get(_CFG_LIMIT, 10000.0)))
-        self.spin_vel.setValue(float(c.get(_CFG_VEL, 10.0)))
-        self.check_dry.setChecked(bool(c.get(_CFG_DRY, False)))
+        self._is_loading = True
+        try:
+            c = self._cfg
+            self.edit_ip.setText(str(c.get(_CFG_IP,   "192.168.1.100")))
+            self.edit_port.setText(str(c.get(_CFG_PORT, "5000")))
+            self.spin_limit.setValue(float(c.get(_CFG_LIMIT, 10000.0)))
+            self.spin_vel.setValue(float(c.get(_CFG_VEL, 10.0)))
+            self.check_dry.setChecked(bool(c.get(_CFG_DRY, False)))
 
-        for sec in self._sections:
-            name = f"kimm_{sec._title_lbl.text().replace(' ', '_').lower()}"
-            val = c.get(f"ui.sections_collapsed.{name}", None)
-            if val is not None:
-                sec.set_collapsed(bool(val))
+            for sec in self._sections:
+                name = f"kimm_{sec._title_lbl.text().replace(' ', '_').lower()}"
+                val = c.get(f"ui.sections_collapsed.{name}", None)
+                if val is not None:
+                    sec.set_collapsed(bool(val))
+        finally:
+            self._is_loading = False
 
     # ── 로그 헬퍼 ─────────────────────────────────────────────────────
 

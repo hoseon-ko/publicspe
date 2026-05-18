@@ -1008,6 +1008,8 @@ class CameraControlPanel(QWidget):
             self.camera_list.setCurrentRow(0)
 
     def _save_settings(self):
+        if getattr(self, "_is_loading", False):
+            return
         c = self._cfg
         for sec in self._sections:
             name = sec._title_lbl.text().replace(' ', '_').lower()
@@ -1016,16 +1018,20 @@ class CameraControlPanel(QWidget):
         c.save()
 
     def _load_settings(self):
-        c = self._cfg
-        for sec in self._sections:
-            name = sec._title_lbl.text().replace(' ', '_').lower()
-            val = c.get(f"ui.sections_collapsed.{name}", None)
-            if val is not None:
-                sec.set_collapsed(bool(val))
+        self._is_loading = True
+        try:
+            c = self._cfg
+            for sec in self._sections:
+                name = sec._title_lbl.text().replace(' ', '_').lower()
+                val = c.get(f"ui.sections_collapsed.{name}", None)
+                if val is not None:
+                    sec.set_collapsed(bool(val))
 
-        saved_type = c.get_camera_setting("type", "SIMULATED")
-        idx = self.combo_cam_type.findText(str(saved_type))
-        if idx < 0:
-            idx = self.combo_cam_type.findText("SIMULATED")
-        if idx >= 0:
-            self.combo_cam_type.setCurrentIndex(idx)
+            saved_type = c.get_camera_setting("type", "SIMULATED")
+            idx = self.combo_cam_type.findText(str(saved_type))
+            if idx < 0:
+                idx = self.combo_cam_type.findText("SIMULATED")
+            if idx >= 0:
+                self.combo_cam_type.setCurrentIndex(idx)
+        finally:
+            self._is_loading = False

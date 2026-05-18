@@ -3,7 +3,7 @@ import numpy as np
 import traceback
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, 
-    QLabel, QToolButton, QComboBox
+    QLabel, QToolButton, QComboBox, QToolBar, QSizePolicy, QFrame
 )
 from PyQt6.QtCore import Qt, QTimer, QRectF, pyqtSignal
 from PyQt6.QtGui import QPixmap
@@ -56,13 +56,21 @@ class SpeImageViewerV2(QWidget):
         self.main_layout.setContentsMargins(0, 0, 0, 0)
         self.main_layout.setSpacing(0)
 
-        # 1. 상단 툴바
-        self.toolbar = QWidget()
-        self.toolbar.setFixedHeight(35)
+        # 1. 상단 툴바 (2줄 레이아웃으로 구성하여 모든 버튼을 항상 보이게 유지하며 가로폭 대폭 축소)
+        self.toolbar = QFrame()
         self.toolbar.setStyleSheet("background: #0d1a2e; border-bottom: 1px solid #1a3a60;")
-        tool_layout = QHBoxLayout(self.toolbar)
-        tool_layout.setContentsMargins(10, 0, 10, 0)
-        tool_layout.setSpacing(10)
+        
+        tb_layout = QVBoxLayout(self.toolbar)
+        tb_layout.setContentsMargins(6, 6, 6, 6)
+        tb_layout.setSpacing(6)
+        
+        row1 = QHBoxLayout()
+        row1.setContentsMargins(0, 0, 0, 0)
+        row1.setSpacing(6)
+        
+        row2 = QHBoxLayout()
+        row2.setContentsMargins(0, 0, 0, 0)
+        row2.setSpacing(6)
 
         btn_style = """
             QToolButton { color: #a0b0c0; border: 1px solid #1a3a60; border-radius: 4px; padding: 3px 8px; font-weight: bold; }
@@ -125,29 +133,48 @@ class SpeImageViewerV2(QWidget):
         """)
         self.combo_cmap.currentTextChanged.connect(self._on_cmap_changed)
 
-        tool_layout.addWidget(self.btn_select)
-        tool_layout.addWidget(self.btn_range)
-        tool_layout.addWidget(self.btn_roi_range)
-        tool_layout.addWidget(self.btn_1to1)
-        tool_layout.addWidget(self.btn_fit)
-        tool_layout.addSpacing(10)
-        tool_layout.addWidget(self.btn_roi_line)
-        tool_layout.addWidget(self.btn_roi_box)
-        tool_layout.addWidget(self.btn_roi_hist)
-        tool_layout.addWidget(self.btn_roi_list)
-        tool_layout.addSpacing(10)
-        tool_layout.addWidget(self.btn_toggle_profile)
-        tool_layout.addWidget(self.btn_toggle_histogram)
-        tool_layout.addWidget(self.btn_toggle_proc)
-        tool_layout.addSpacing(10)
-        tool_layout.addWidget(self.btn_save_spe)
+        # 첫 번째 줄에 뷰어 및 이미지 기본 컨트롤 배치
+        row1.addWidget(self.btn_select)
+        row1.addWidget(self.btn_range)
+        row1.addWidget(self.btn_roi_range)
+        row1.addWidget(self.btn_1to1)
+        row1.addWidget(self.btn_fit)
+        
+        row1.addStretch()
+        
+        lbl_cmap = QLabel("🎨 Colormap: ")
+        lbl_cmap.setStyleSheet("color: #a0b0c0; font-weight: bold;")
+        row1.addWidget(lbl_cmap)
+        row1.addWidget(self.combo_cmap)
+
+        # 두 번째 줄에 ROI 드로잉 툴 및 하단 독 토글 버튼들 배치
+        row2.addWidget(self.btn_roi_line)
+        row2.addWidget(self.btn_roi_box)
+        row2.addWidget(self.btn_roi_hist)
+        row2.addWidget(self.btn_roi_list)
+        
+        # 가벼운 구분선
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.VLine)
+        sep.setStyleSheet("color: #1a3a60; background: #1a3a60;")
+        sep.setFixedWidth(1)
+        sep.setFixedHeight(14)
+        row2.addWidget(sep)
+        
+        row2.addWidget(self.btn_toggle_profile)
+        row2.addWidget(self.btn_toggle_histogram)
+        row2.addWidget(self.btn_toggle_proc)
+        
+        row2.addStretch()
+        row2.addWidget(self.btn_save_spe)
 
         self.btn_toggle_profile.clicked.connect(lambda: self.toggle_analysis_requested.emit("profile"))
         self.btn_toggle_histogram.clicked.connect(lambda: self.toggle_analysis_requested.emit("histogram"))
         self.btn_toggle_proc.clicked.connect(lambda: self.toggle_analysis_requested.emit("proc"))
-        tool_layout.addStretch()
-        tool_layout.addWidget(QLabel("🎨 Colormap:"))
-        tool_layout.addWidget(self.combo_cmap)
+        
+        tb_layout.addLayout(row1)
+        tb_layout.addLayout(row2)
+        
         self.main_layout.addWidget(self.toolbar)
 
         # 2. 중앙 레이아웃 (Grid)
@@ -174,7 +201,7 @@ class SpeImageViewerV2(QWidget):
         # 3. 우측 ROI 패널 (Dock 형태)
         self.roi_panel = RoiPanel()
         center_layout.addWidget(self.roi_panel, 0, 2, 2, 1)
-        center_layout.setColumnMinimumWidth(2, 220)
+        center_layout.setColumnMinimumWidth(2, 150)
 
         self.main_layout.addWidget(center_widget)
 

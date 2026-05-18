@@ -991,6 +991,8 @@ class AcsStagePanel(QWidget):
         self._save_settings()
 
     def _save_settings(self):
+        if getattr(self, "_is_loading", False):
+            return
         c = self._cfg
         c.set(_CFG_IP,   self.edit_ip.text().strip())
         c.set(_CFG_PORT, self.edit_port.text().strip())
@@ -1007,22 +1009,26 @@ class AcsStagePanel(QWidget):
         c.save()
 
     def _load_settings(self):
-        c = self._cfg
-        self.edit_ip.setText(str(c.get(_CFG_IP,   "10.0.0.100")))
-        self.edit_port.setText(str(c.get(_CFG_PORT, DEFAULT_PORT)))
+        self._is_loading = True
+        try:
+            c = self._cfg
+            self.edit_ip.setText(str(c.get(_CFG_IP,   "10.0.0.100")))
+            self.edit_port.setText(str(c.get(_CFG_PORT, DEFAULT_PORT)))
 
-        self.sec_conn.set_collapsed(bool(c.get(_CFG_SEC_CONN,   False)))
-        self.sec_axis.set_collapsed(bool(c.get(_CFG_SEC_AXIS,   False)))
-        self.sec_global.set_collapsed(bool(c.get(_CFG_SEC_GLOBAL, False)))
-        self.sec_kin.set_collapsed(bool(c.get(_CFG_SEC_KIN,    False)))
+            self.sec_conn.set_collapsed(bool(c.get(_CFG_SEC_CONN,   False)))
+            self.sec_axis.set_collapsed(bool(c.get(_CFG_SEC_AXIS,   False)))
+            self.sec_global.set_collapsed(bool(c.get(_CFG_SEC_GLOBAL, False)))
+            self.sec_kin.set_collapsed(bool(c.get(_CFG_SEC_KIN,    False)))
 
-        self.check_dry.setChecked(bool(c.get(_CFG_DRY, False)))
-        self.spin_settle.setValue(int(c.get(_CFG_SETTLE, 500)))
+            self.check_dry.setChecked(bool(c.get(_CFG_DRY, False)))
+            self.spin_settle.setValue(int(c.get(_CFG_SETTLE, 500)))
 
-        steps = c.get(_CFG_KIN_STEPS, [0.1] * len(self._dof_step_spins))
-        for i, spin in enumerate(self._dof_step_spins):
-            val = float(steps[i]) if i < len(steps) else 0.1
-            spin.setValue(val)
+            steps = c.get(_CFG_KIN_STEPS, [0.1] * len(self._dof_step_spins))
+            for i, spin in enumerate(self._dof_step_spins):
+                val = float(steps[i]) if i < len(steps) else 0.1
+                spin.setValue(val)
+        finally:
+            self._is_loading = False
 
     # ── 로그 ─────────────────────────────────────────────────────────
 
