@@ -587,6 +587,82 @@ def t_save_last_signal():
     assert w.btn_save_last.isEnabled() is False
 
 
+@case("AutoFocusPanel: 간소화된 set_result + GO 버튼 동작")
+def t_autofocus_panel_stripped():
+    """B 옵션 — Z SCAN RANGE / SHARPNESS METRIC / RUN-STOP / CURVE 모두 제거.
+    KimmZCard + RESULT (Best Z + GO) 만 남아야 함."""
+    import sys
+    from unittest.mock import MagicMock
+    from PyQt6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication(sys.argv)
+
+    from ui.deepalign.autofocus_panel import AutoFocusPanel
+    p = AutoFocusPanel()
+
+    # 제거된 옛 위젯들 확인 (남아 있으면 안 됨)
+    for attr in ("spin_center", "spin_range", "spin_step", "combo_metric",
+                 "btn_run", "btn_stop", "progress", "lbl_current", "_plot"):
+        assert not hasattr(p, attr), f"제거되어야 할 위젯 잔존: {attr}"
+
+    # 남아야 할 것
+    assert hasattr(p, "kimm_card")
+    assert hasattr(p, "lbl_best_z")
+    assert hasattr(p, "btn_goto")
+    assert p.btn_goto.isEnabled() is False
+    assert p.best_z is None
+
+    # set_result 동작
+    p.set_result(12.34)
+    assert p.best_z == 12.34
+    assert "12.34" in p.lbl_best_z.text()
+    assert p.btn_goto.isEnabled() is True
+
+    # reset
+    p.reset()
+    assert p.best_z is None
+    assert p.btn_goto.isEnabled() is False
+    assert "—" in p.lbl_best_z.text()
+
+
+@case("AutoFocusPanel: GO 버튼 → hub.kimm_move_to_z 호출")
+def t_autofocus_panel_go_button():
+    import sys
+    from unittest.mock import MagicMock
+    from PyQt6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication(sys.argv)
+
+    from ui.deepalign.autofocus_panel import AutoFocusPanel
+    p = AutoFocusPanel()
+    hub = MagicMock()
+    p.bind_session_hub(hub)
+    p.set_result(-42.5)
+    p.btn_goto.click()
+    hub.kimm_move_to_z.assert_called_once_with(-42.5)
+
+    # best_z 없으면 GO 무시 (no-op, no crash)
+    p.reset()
+    hub.reset_mock()
+    # 강제로 enable 후 클릭해도 best_z None 이라 호출 안 됨
+    p.btn_goto.setEnabled(True)
+    p.btn_goto.click()
+    hub.kimm_move_to_z.assert_not_called()
+
+
+@case("AutoFocusPanel: 옛 마스터바 메서드 (run_af/abort_af/set_z_base) no-op stub")
+def t_autofocus_panel_backward_stubs():
+    import sys
+    from PyQt6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication(sys.argv)
+
+    from ui.deepalign.autofocus_panel import AutoFocusPanel
+    p = AutoFocusPanel()
+    # 호출해도 예외 없음 (deprecated stub)
+    p.run_af()
+    p.abort_af()
+    p.set_z_base()
+    p.update_progress(1, 10, 0.0, 0.0)
+
+
 @case("KimmScanWidget: Center/±Range/Step → Steps 산출 + z_positions emit")
 def t_kimm_widget_center_range_step():
     """Center=0, Range=50, Step=5 → Steps=21, z_positions = linspace(-50, 50, 21)."""

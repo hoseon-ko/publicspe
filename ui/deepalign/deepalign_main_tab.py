@@ -450,11 +450,10 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self.btn_mirror_stop.clicked.connect(self.mirror_panel.stop_all)
 
         # ── Master bar — AutoFocus 탭 ─────────────────────────────────
-        self.btn_af_run.clicked.connect(self.af_panel.run_af)
-        self.btn_af_abort.clicked.connect(self.af_panel.abort_af)
-        self.btn_af_set_z.clicked.connect(self.af_panel.set_z_base)
-        self.af_panel.run_requested.connect(self._on_af_run_requested)
-        self.af_panel.stop_requested.connect(self._on_af_stop_requested)
+        # KimmScanWidget 가 스캔 트리거를 담당하므로 AF 전용 RUN/ABORT/SET-Z
+        # 버튼은 숨김. AutoFocusPanel 의 stub 메서드는 deprecated 로 남음.
+        for _b in (self.btn_af_run, self.btn_af_abort, self.btn_af_set_z):
+            _b.setVisible(False)
 
         # ── SCAN — 3 hardware (mirror/af/acs), 위젯은 패널과 분리됨 ──
         self.mirror_scan.scan_requested.connect(self._on_mirror_scan_requested)
@@ -1235,6 +1234,10 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
             # manual 모드 (또는 auto 후 재저장 가능): Save Last 버튼 활성
             if has_buf and hasattr(scan_widget, "set_save_last_enabled"):
                 scan_widget.set_save_last_enabled(True)
+            # KIMM 스캔 종료 시 — sharpness 시계열의 argmax 를 Best-Z 로 산출해
+            # AutoFocusPanel 의 RESULT 섹션에 표시.
+            if scan_widget is getattr(self, "kimm_scan", None):
+                self._update_best_z_from_kimm_scan()
             _run_extra()
             self._scan_thread.quit()
 
@@ -1259,6 +1262,25 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self._scan_acs_mover = None
         # buffer 는 의도적으로 보존 — Save Last 로 수동 저장 가능.
         # 다음 스캔이 시작될 때 _scan_start 가 비움.
+
+    def _update_best_z_from_kimm_scan(self) -> None:
+        """KIMM 스캔 종료 시 sharpness 시계열의 argmax 를 Best-Z 로 산출해
+        AutoFocusPanel.set_result 에 전달."""
+        zs = getattr(self, "_af_z_series", [])
+        sh = getattr(self, "_af_sh_series", [])
+        if not zs or not sh or len(zs) != len(sh):
+            return
+        try:
+            best_idx = int(np.argmax(sh))
+            best_z = float(zs[best_idx])
+            if hasattr(self, "af_panel") and hasattr(self.af_panel, "set_result"):
+                self.af_panel.set_result(best_z)
+            if hasattr(self, "af_log"):
+                self.af_log.append(
+                    f"🏆 Best Z = {best_z:+.3f} µm  (sharpness = {sh[best_idx]:.2f})"
+                )
+        except Exception as e:
+            dev_logger.warning(f"[Scan] Best-Z 산출 실패: {e}")
 
     def _save_scan_spe_dialog(self, scan_widget) -> None:
         """Save Last 버튼 → file dialog 로 경로 선택해서 저장 (수동 모드)."""
