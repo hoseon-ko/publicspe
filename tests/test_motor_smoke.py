@@ -587,6 +587,56 @@ def t_save_last_signal():
     assert w.btn_save_last.isEnabled() is False
 
 
+@case("Focus 탭 진입: KimmScanWidget Center 가 현재 KIMM Z 위치로 자동 설정")
+def t_focus_tab_sync_center():
+    import sys
+    from unittest.mock import MagicMock
+    from PyQt6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication(sys.argv)
+    from ui.deepalign.scan.scan_widgets.kimm_scan_widget import KimmScanWidget
+    from ui.deepalign.deepalign_layout import LayoutBuilderMixin
+
+    host = MagicMock()
+    host.kimm_scan = KimmScanWidget()
+    # 초기값
+    host.kimm_scan.spin_center.setValue(0.0)
+    # hub mock
+    host._session_hub = MagicMock()
+    host._session_hub.is_kimm_connected.return_value = True
+    host._session_hub.kimm_get_z.return_value = 123.45
+
+    # scan_requested emit 되지 않아야 함
+    fired = []
+    host.kimm_scan.scan_requested.connect(lambda *a: fired.append(True))
+
+    LayoutBuilderMixin._sync_kimm_scan_center_to_current_z(host)
+    assert abs(host.kimm_scan.spin_center.value() - 123.45) < 1e-6
+    assert fired == []  # blockSignals 로 emit 차단됨
+
+
+@case("Focus 탭 진입: hub 미연결이면 silent (Center 유지)")
+def t_focus_tab_sync_no_hub():
+    import sys
+    from unittest.mock import MagicMock
+    from PyQt6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication(sys.argv)
+    from ui.deepalign.scan.scan_widgets.kimm_scan_widget import KimmScanWidget
+    from ui.deepalign.deepalign_layout import LayoutBuilderMixin
+
+    host = MagicMock()
+    host.kimm_scan = KimmScanWidget()
+    host.kimm_scan.spin_center.setValue(77.0)
+    host._session_hub = None
+    LayoutBuilderMixin._sync_kimm_scan_center_to_current_z(host)
+    assert host.kimm_scan.spin_center.value() == 77.0
+
+    # hub 있어도 is_kimm_connected=False 면 유지
+    host._session_hub = MagicMock()
+    host._session_hub.is_kimm_connected.return_value = False
+    LayoutBuilderMixin._sync_kimm_scan_center_to_current_z(host)
+    assert host.kimm_scan.spin_center.value() == 77.0
+
+
 @case("AutoFocusPanel: 간소화된 set_result + GO 버튼 동작")
 def t_autofocus_panel_stripped():
     """B 옵션 — Z SCAN RANGE / SHARPNESS METRIC / RUN-STOP / CURVE 모두 제거.

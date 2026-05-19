@@ -109,6 +109,34 @@ class LayoutBuilderMixin:
         self.central_stack.setCurrentIndex(idx)
         if hasattr(self, "master_btn_stack"):
             self.master_btn_stack.setCurrentIndex(min(idx, self.master_btn_stack.count() - 1))
+        # Focus 탭(idx=2) 진입 시 KimmScanWidget 의 Center 를 현재 KIMM Z 위치로 설정
+        if idx == 2:
+            self._sync_kimm_scan_center_to_current_z()
+
+    def _sync_kimm_scan_center_to_current_z(self) -> None:
+        """Focus 탭 진입 시 자동 호출 — hub.kimm_get_z 의 현재값을 Center 에 반영.
+
+        scan_requested 트리거를 피하기 위해 blockSignals 로 감쌈.
+        hub 미연결 / 조회 실패 시 silent (기존 값 유지).
+        """
+        if not hasattr(self, "kimm_scan") or not hasattr(self.kimm_scan, "spin_center"):
+            return
+        hub = getattr(self, "_session_hub", None)
+        if hub is None or not getattr(hub, "is_kimm_connected", lambda: False)():
+            return
+        try:
+            z = float(hub.kimm_get_z())
+        except Exception:
+            return
+        sp = self.kimm_scan.spin_center
+        sp.blockSignals(True)
+        try:
+            sp.setValue(z)
+        finally:
+            sp.blockSignals(False)
+        # Steps 표시 갱신
+        if hasattr(self.kimm_scan, "_update_steps_count"):
+            self.kimm_scan._update_steps_count()
 
     def _wrap_panel(self, panel: QWidget, extras: list[QWidget] | None = None) -> QWidget:
         """패널을 스크롤 영역에 감싼다. extras가 있으면 패널 아래에 순서대로 추가."""
