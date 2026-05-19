@@ -48,6 +48,9 @@ from ui.deepalign.scan import (
 from ui.deepalign.scan.scan_widgets import (
     MirrorScanWidget, KimmScanWidget, AcsScanWidget,
 )
+from ui.deepalign.scan.scan_analysis import (
+    mirror_centroid_process_fn, kimm_sharpness_process_fn, make_thumbnail_rgb,
+)
 from ui.autofocus.af_worker import AutoFocusWorker
 from theme.styles import C_BG_DARK, C_TEXT, C_TEXT_DIM, C_TEXT_DEAD
 from core.logger import dev_logger
@@ -1136,11 +1139,17 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         # set_scan_status 는 phase 의 detail 라인 (snap 1/3 같은 짧은 텍스트) 으로 사용.
         worker.error.connect(lambda msg: scan_widget.set_scan_status(msg, "err"))
 
-        # log 메시지를 dev_logger + scan_widget 상태 라벨 양쪽에 표시 (user-visible).
-        # 단계별 한국어 이모지 메시지가 위에 보이고, dev_logger 는 디버깅용.
+        # log 메시지를 dev_logger + scan_widget 상태 라벨 + 분석 dock 의 log 창에
+        # 함께 표시. dev_logger 는 디버깅용, 라벨은 짧은 현 상태, dock log 는 히스토리.
         def _on_worker_log(msg: str):
             dev_logger.info(f"[Scan] {msg}")
             scan_widget.set_scan_status(msg, "info")
+            if scan_widget is getattr(self, "mirror_scan", None):
+                if hasattr(self, "da_log"):
+                    self.da_log.append(msg)
+            elif scan_widget is getattr(self, "kimm_scan", None):
+                if hasattr(self, "af_log"):
+                    self.af_log.append(msg)
         worker.log.connect(_on_worker_log)
 
         # phase 시그널 → scan_widget 의 PhaseIndicator 갱신 (MOVE/SETTLE/SNAP/COMPUTE)
@@ -1150,10 +1159,8 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         worker.phase.connect(_on_phase)
 
         # 스캔 포인트마다 캡쳐된 frame 을 image viewer + processing 파이프라인에
-        # 흘려보냄. _push_frame 이 background subtraction / proc image /
-        # proc_stats 시계열 / cam_viewer 디스플레이를 모두 처리. 스냅 버튼과
-        # 동일한 경로라 source="snap" 으로 분류.
-        def _on_point_done(idx, total, _point, frame, _result):
+        # 흘려보냄. + 분석 dock (da_* / af_*) 채움 (위젯 종류로 라우팅).
+        def _on_point_done(idx, total, point, frame, result):
             if frame is None:
                 return
             try:
@@ -1164,6 +1171,17 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
                 )
             except Exception as e:
                 dev_logger.warning(f"[Scan] _push_frame 실패 idx={idx}: {e}")
+
+            try:
+                if scan_widget is getattr(self, "mirror_scan", None):
+                    self._append_da_dock(idx, point, frame, result)
+                elif scan_widget is getattr(self, "kimm_scan", None):
+                    self._append_af_dock(idx, point, frame, result)
+                elif scan_widget is getattr(self, "acs_scan", None):
+                    # ACS 는 별도 dock 없음 — 추후 6축 결과 dock 추가 시 라우팅
+                    pass
+            except Exception as e:
+                dev_logger.warning(f"[Scan] dock 갱신 실패 idx={idx}: {e}")
 
         worker.point_done.connect(_on_point_done)
 
@@ -1206,6 +1224,145 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self._scan_thread = None
         self._scan_acs_mover = None
 
+    # ── 분석 dock (da_*: Mirror, af_*: KIMM) 갱신 ──────────────────────
+
+    def _clear_da_dock(self) -> None:
+        if hasattr(self, "da_frame_list"):
+            self.da_frame_list.clear()
+        if hasattr(self, "da_table"):
+            self.da_table.setRowCount(0)
+        if hasattr(self, "da_log"):
+            self.da_log.clear()
+        if hasattr(self, "da_plot_panel"):
+            pw = getattr(self.da_plot_panel, "plot_widget", None)
+            if pw is not None:
+                try: pw.clear()
+                except Exception: pass
+        self._da_cent_x_series: list[float] = []
+        self._da_cent_y_series: list[float] = []
+
+    def _clear_af_dock(self) -> None:
+        if hasattr(self, "af_frame_list"):
+            self.af_frame_list.clear()
+        if hasattr(self, "af_table"):
+            self.af_table.setRowCount(0)
+        if hasattr(self, "af_log"):
+            self.af_log.clear()
+        if hasattr(self, "af_plot_panel"):
+            pw = getattr(self.af_plot_panel, "plot_widget", None)
+            if pw is not None:
+                try: pw.clear()
+                except Exception: pass
+        self._af_z_series: list[float] = []
+        self._af_sh_series: list[float] = []
+
+    def _append_thumbnail(self, list_widget, frame, label: str) -> None:
+        from PyQt6.QtWidgets import QListWidgetItem
+        from PyQt6.QtGui import QImage, QIcon, QPixmap
+        from PyQt6.QtCore import Qt
+        try:
+            rgb = make_thumbnail_rgb(frame, w=80, h=60)
+            qimg = QImage(rgb.tobytes(), 80, 60, 80 * 3, QImage.Format.Format_RGB888)
+            item = QListWidgetItem(QIcon(QPixmap.fromImage(qimg)), label)
+            item.setTextAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom)
+            list_widget.addItem(item)
+            list_widget.scrollToItem(item)
+        except Exception as e:
+            dev_logger.warning(f"[Scan] thumbnail 생성 실패: {e}")
+
+    def _append_da_dock(self, idx: int, point, frame, result) -> None:
+        """Mirror scan 결과 dock 갱신. point=(motor, target_steps), result=centroid stats."""
+        from PyQt6.QtWidgets import QTableWidgetItem
+        from PyQt6.QtCore import Qt
+
+        # 썸네일
+        if hasattr(self, "da_frame_list"):
+            self._append_thumbnail(self.da_frame_list, frame, f"#{idx}")
+
+        # M1-M4 위치는 hub 에서 일괄 조회 (이동 안 한 축도 표시)
+        m_positions = [None, None, None, None]
+        if self._session_hub is not None and self._session_hub.is_pico_connected():
+            for axis in range(1, 5):
+                try:
+                    m_positions[axis - 1] = int(self._session_hub.pico_get_position(axis))
+                except Exception:
+                    pass
+
+        cx = cy = sx = sy = snr = 0.0
+        if isinstance(result, dict):
+            cx  = float(result.get("cent_x",  0.0))
+            cy  = float(result.get("cent_y",  0.0))
+            sx  = float(result.get("sigma_x", 0.0))
+            sy  = float(result.get("sigma_y", 0.0))
+            snr = float(result.get("snr",     0.0))
+
+        # 테이블 행 추가: Step | M1 | M2 | M3 | M4 | CentX | CentY | σX | σY | SNR
+        if hasattr(self, "da_table"):
+            row = self.da_table.rowCount()
+            self.da_table.insertRow(row)
+            vals = [
+                str(idx),
+                *[("—" if p is None else str(p)) for p in m_positions],
+                f"{cx:.2f}", f"{cy:.2f}",
+                f"{sx:.2f}", f"{sy:.2f}",
+                f"{snr:.1f}",
+            ]
+            for col, v in enumerate(vals):
+                it = QTableWidgetItem(v)
+                it.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.da_table.setItem(row, col, it)
+            self.da_table.scrollToBottom()
+
+        # Centroid 플롯 (X, Y 시계열) — 이동 모터 step 을 x 축으로 사용해도 되지만
+        # 단순화를 위해 idx 를 x 축으로 사용.
+        self._da_cent_x_series.append(cx)
+        self._da_cent_y_series.append(cy)
+        if hasattr(self, "da_plot_panel"):
+            pw = getattr(self.da_plot_panel, "plot_widget", None)
+            if pw is not None:
+                try:
+                    pw.clear()
+                    xs = list(range(1, len(self._da_cent_x_series) + 1))
+                    pw.plot(xs, self._da_cent_x_series, pen="#4ecdc4", name="CentX")
+                    pw.plot(xs, self._da_cent_y_series, pen="#f59e0b", name="CentY")
+                except Exception:
+                    pass
+
+    def _append_af_dock(self, idx: int, point, frame, result) -> None:
+        """KIMM Z 스캔 결과 dock 갱신. point=z(µm), result={sharpness, z}."""
+        from PyQt6.QtWidgets import QTableWidgetItem
+        from PyQt6.QtCore import Qt
+
+        z = float(point) if not isinstance(point, dict) else float(point.get("z", 0.0))
+        sh = 0.0
+        if isinstance(result, dict):
+            sh = float(result.get("sharpness", 0.0))
+            z  = float(result.get("z", z))
+
+        if hasattr(self, "af_frame_list"):
+            self._append_thumbnail(self.af_frame_list, frame, f"#{idx}")
+
+        if hasattr(self, "af_table"):
+            row = self.af_table.rowCount()
+            self.af_table.insertRow(row)
+            for col, v in enumerate([str(idx), f"{z:+.2f}", f"{sh:.1f}"]):
+                it = QTableWidgetItem(v)
+                it.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.af_table.setItem(row, col, it)
+            self.af_table.scrollToBottom()
+
+        self._af_z_series.append(z)
+        self._af_sh_series.append(sh)
+        if hasattr(self, "af_plot_panel"):
+            pw = getattr(self.af_plot_panel, "plot_widget", None)
+            if pw is not None:
+                try:
+                    pw.clear()
+                    pw.plot(self._af_z_series, self._af_sh_series,
+                            pen="#4ecdc4", symbol="o", symbolSize=6)
+                except Exception:
+                    pass
+
     def _on_scan_stop_requested(self) -> None:
         if self._scan_worker is not None and hasattr(self._scan_worker, "stop"):
             self._scan_worker.stop()
@@ -1223,9 +1380,12 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
             self._session_hub,
             move_timeout_ms=self.mirror_scan.get_move_timeout_ms(),
         )
+        # process_fn 으로 centroid stats 계산 → _on_point_done 에서 da_* dock 채움
+        self._clear_da_dock()
         worker = _MirrorScanWorker(
             mover, self._scan_snap_fn, points,
-            process_fn=None, settle_ms=settle_ms, avg_frames=avg_frames,
+            process_fn=mirror_centroid_process_fn,
+            settle_ms=settle_ms, avg_frames=avg_frames,
         )
         self._scan_start(self.mirror_scan, worker)
 
@@ -1240,9 +1400,12 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
             self._session_hub,
             move_timeout_ms=self.kimm_scan.get_move_timeout_ms(),
         )
+        # process_fn 으로 sharpness 계산 → _on_point_done 에서 af_* dock 채움
+        self._clear_af_dock()
         worker = _KimmScanWorker(
             mover, self._scan_snap_fn, z_positions,
-            process_fn=None, settle_ms=settle_ms, avg_frames=avg_frames,
+            process_fn=kimm_sharpness_process_fn,
+            settle_ms=settle_ms, avg_frames=avg_frames,
         )
         self._scan_start(self.kimm_scan, worker)
 

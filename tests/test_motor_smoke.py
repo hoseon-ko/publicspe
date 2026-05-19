@@ -341,6 +341,99 @@ def t_acs_last_states_independent():
             f"axis {i} 가 axis 2 와 dict 공유됨"
 
 
+@case("Analysis: compute_centroid_stats 가 알려진 가우시안 중심을 정확히 찾음")
+def t_compute_centroid_known():
+    import numpy as np
+    from ui.deepalign.scan.scan_analysis import compute_centroid_stats
+
+    # 64x64 에 (40, 25) 중심의 가우시안 (sigma=3)
+    H, W = 64, 64
+    cx0, cy0, sig = 40.0, 25.0, 3.0
+    yy, xx = np.mgrid[0:H, 0:W]
+    img = 100 * np.exp(-((xx - cx0) ** 2 + (yy - cy0) ** 2) / (2 * sig ** 2))
+    img += 5  # background
+
+    r = compute_centroid_stats(img)
+    assert abs(r["cent_x"] - cx0) < 0.5, f"cent_x off: {r['cent_x']}"
+    assert abs(r["cent_y"] - cy0) < 0.5, f"cent_y off: {r['cent_y']}"
+    # sigma 는 background-subtracted 분포의 2차모먼트라 입력 sigma 와 유사
+    assert 2.0 < r["sigma_x"] < 5.0
+    assert 2.0 < r["sigma_y"] < 5.0
+    assert r["snr"] > 1.0
+
+
+@case("Analysis: compute_centroid_stats 전부 0 인 frame 도 안전 (NaN/div0 회피)")
+def t_compute_centroid_zero():
+    import numpy as np
+    from ui.deepalign.scan.scan_analysis import compute_centroid_stats
+    r = compute_centroid_stats(np.zeros((16, 16), dtype=np.uint16))
+    for key in ("cent_x", "cent_y", "sigma_x", "sigma_y", "snr"):
+        assert r[key] == 0.0, f"{key} 비정상: {r[key]}"
+
+
+@case("Analysis: compute_sharpness 가 흐린 vs 선명 영상을 구분")
+def t_compute_sharpness_contrast():
+    import numpy as np
+    from ui.deepalign.scan.scan_analysis import compute_sharpness
+
+    # 균질 (sharpness 거의 0)
+    flat = np.full((32, 32), 128, dtype=np.uint16)
+    # 격자 (sharpness 큼)
+    sharp = np.zeros((32, 32), dtype=np.uint16)
+    sharp[::2, ::2] = 255
+
+    sh_flat = compute_sharpness(flat)
+    sh_sharp = compute_sharpness(sharp)
+    assert sh_sharp > sh_flat * 100, f"sharp({sh_sharp}) vs flat({sh_flat}) 비교 실패"
+
+
+@case("Analysis: make_thumbnail_rgb 가 (H,W,3) uint8 출력")
+def t_make_thumbnail():
+    import numpy as np
+    from ui.deepalign.scan.scan_analysis import make_thumbnail_rgb
+    img = np.random.randint(0, 1000, size=(200, 300), dtype=np.uint16)
+    thumb = make_thumbnail_rgb(img, w=80, h=60)
+    assert thumb.shape == (60, 80, 3) and thumb.dtype == np.uint8
+
+
+@case("Analysis: process_fn 들이 worker 결과로 dict 를 흘림")
+def t_process_fn_returns_dict():
+    """Mirror/KIMM process_fn 이 _ScanWorkerBase 의 result 인자에 dict 가 들어가서
+    point_done(.., result=...) 으로 emit 되는지.
+    """
+    import numpy as np
+    from unittest.mock import MagicMock
+    from ui.deepalign.scan._scan_base import _ScanWorkerBase
+    from ui.deepalign.scan.scan_analysis import (
+        mirror_centroid_process_fn, kimm_sharpness_process_fn,
+    )
+
+    H, W = 32, 32
+    yy, xx = np.mgrid[0:H, 0:W]
+    frame = (100 * np.exp(-((xx - 16) ** 2 + (yy - 16) ** 2) / 18)).astype(np.float32)
+    snap_fn = MagicMock(return_value=frame)
+    mover = MagicMock()
+
+    # Mirror
+    w = _ScanWorkerBase(mover, snap_fn, points=[(1, 100)],
+                        process_fn=mirror_centroid_process_fn,
+                        settle_ms=0, avg_frames=1)
+    captured = []
+    w.point_done.connect(lambda i, t, p, f, r: captured.append(r))
+    w.run()
+    assert isinstance(captured[0], dict) and "cent_x" in captured[0]
+
+    # KIMM
+    w2 = _ScanWorkerBase(mover, snap_fn, points=[12.5],
+                         process_fn=kimm_sharpness_process_fn,
+                         settle_ms=0, avg_frames=1)
+    captured2 = []
+    w2.point_done.connect(lambda i, t, p, f, r: captured2.append(r))
+    w2.run()
+    assert isinstance(captured2[0], dict)
+    assert "sharpness" in captured2[0] and captured2[0]["z"] == 12.5
+
+
 @case("Scan: phase 시그널이 move→settle→snap→done 순으로 emit (UI 인디케이터용)")
 def t_scan_phase_sequence():
     """PhaseIndicator 가 단계별 갱신될 수 있도록 worker 가 phase 시그널을
