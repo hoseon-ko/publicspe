@@ -1735,7 +1735,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         base64_credentials = base64.b64encode(credentials_bytes).decode("utf-8")
         self._current_session_token = f"Basic {base64_credentials}"
         
-        self._query_user_access_level()
+        #self._query_user_access_level()
         success_callback()
 
     def _query_user_access_level(self) -> None:

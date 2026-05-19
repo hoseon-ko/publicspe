@@ -1135,6 +1135,135 @@ class LayoutBuilderMixin:
         self._update_save_preview()
         p_lay.addWidget(save_grp)
 
+        # ── LASER HTTP CONTROL ────────────────────────────────────────────────
+        laser_grp = self._make_section("LASER HTTP CONTROL", "#eab308")
+        ll = QVBoxLayout(laser_grp.content_widget)
+        ll.setSpacing(8)
+        ll.setContentsMargins(10, 10, 10, 10)
+
+        # IP & Port Row
+        laser_ip_row = QHBoxLayout()
+        lbl_lip = QLabel("IP:")
+        lbl_lip.setStyleSheet(f"color: {C_TEXT_DIM}; font-size: 12px; font-weight: bold;")
+        self.edit_laser_ip = QLineEdit("127.0.0.1")
+        self.edit_laser_ip.setStyleSheet(editor_line_style)
+        
+        lbl_lport = QLabel("Port:")
+        lbl_lport.setStyleSheet(f"color: {C_TEXT_DIM}; font-size: 12px; font-weight: bold; margin-left: 5px;")
+        self.edit_laser_port = QLineEdit("5643")
+        self.edit_laser_port.setFixedWidth(60)
+        self.edit_laser_port.setStyleSheet(editor_line_style)
+        
+        laser_ip_row.addWidget(lbl_lip)
+        laser_ip_row.addWidget(self.edit_laser_ip, 1)
+        laser_ip_row.addWidget(lbl_lport)
+        laser_ip_row.addWidget(self.edit_laser_port)
+        ll.addLayout(laser_ip_row)
+
+        # Auth Mode Selection Row
+        laser_auth_mode_row = QHBoxLayout()
+        lbl_lmode = QLabel("Auth Mode:")
+        lbl_lmode.setStyleSheet(f"color: {C_TEXT_DIM}; font-size: 12px; font-weight: bold;")
+        self.combo_laser_auth_type = QComboBox()
+        self.combo_laser_auth_type.addItems(["ID / PW", "Bearer Token"])
+        self.combo_laser_auth_type.setStyleSheet(f"""
+            QComboBox {{
+                background: {C_BG_MED}; color: {C_TEXT}; border: 1px solid #334155;
+                border-radius: 4px; padding: 2px 4px; font-weight: bold;
+            }}
+            QComboBox::drop-down {{ border: none; }}
+        """)
+        laser_auth_mode_row.addWidget(lbl_lmode)
+        laser_auth_mode_row.addWidget(self.combo_laser_auth_type, 1)
+        ll.addLayout(laser_auth_mode_row)
+
+        # ID / PW Row Container
+        self.laser_idpw_widget = QWidget()
+        idpw_lay = QHBoxLayout(self.laser_idpw_widget)
+        idpw_lay.setContentsMargins(0, 0, 0, 0)
+        
+        lbl_lid = QLabel("ID:")
+        lbl_lid.setStyleSheet(f"color: {C_TEXT_DIM}; font-size: 12px; font-weight: bold;")
+        self.edit_laser_id = QLineEdit("viewer")
+        self.edit_laser_id.setStyleSheet(editor_line_style)
+        
+        lbl_lpw = QLabel("PW:")
+        lbl_lpw.setStyleSheet(f"color: {C_TEXT_DIM}; font-size: 12px; font-weight: bold; margin-left: 5px;")
+        self.edit_laser_pw = QLineEdit()
+        self.edit_laser_pw.setEchoMode(QLineEdit.EchoMode.Password)
+        self.edit_laser_pw.setPlaceholderText("Password (비어있음)")
+        self.edit_laser_pw.setStyleSheet(editor_line_style)
+        
+        idpw_lay.addWidget(lbl_lid)
+        idpw_lay.addWidget(self.edit_laser_id, 1)
+        idpw_lay.addWidget(lbl_lpw)
+        idpw_lay.addWidget(self.edit_laser_pw, 1)
+        ll.addWidget(self.laser_idpw_widget)
+
+        # Static Token Row Container
+        self.laser_token_widget = QWidget()
+        tok_lay = QHBoxLayout(self.laser_token_widget)
+        tok_lay.setContentsMargins(0, 0, 0, 0)
+        
+        lbl_ltok = QLabel("Token:")
+        lbl_ltok.setStyleSheet(f"color: {C_TEXT_DIM}; font-size: 12px; font-weight: bold;")
+        self.edit_laser_token = QLineEdit()
+        self.edit_laser_token.setPlaceholderText("Plain string or JSON file path (.json)")
+        self.edit_laser_token.setStyleSheet(editor_line_style)
+        
+        self.btn_laser_token_browse = QPushButton("📁")
+        self.btn_laser_token_browse.setFixedWidth(30)
+        self.btn_laser_token_browse.setToolTip("토큰 JSON 파일 선택")
+        self.btn_laser_token_browse.setStyleSheet(f"""
+            QPushButton {{
+                background: {C_BG_MED}; color: {C_TEXT};
+                border: 1px solid #334155; border-radius: 4px; font-weight: 900;
+            }}
+            QPushButton:hover {{ border-color: #eab308; color: #eab308; }}
+        """)
+        
+        tok_lay.addWidget(lbl_ltok)
+        tok_lay.addWidget(self.edit_laser_token, 1)
+        tok_lay.addWidget(self.btn_laser_token_browse)
+        ll.addWidget(self.laser_token_widget)
+
+        # Controls Row
+        laser_btn_row = QHBoxLayout()
+        self.btn_laser_toggle = self._style_btn("🔴 LASER OFF", "#ef4444")
+        self.btn_laser_toggle.setCheckable(True)
+        self.btn_laser_toggle.setStyleSheet("""
+            QPushButton {
+                background: #1e1e2f; color: #ef4444; border: 1px solid #ef4444;
+                border-radius: 4px; font-weight: bold; font-size: 12px; padding: 4px;
+            }
+            QPushButton:hover {
+                background: #ef444422;
+            }
+        """)
+        
+        self.btn_laser_poll = self._style_btn("START POLL", "#eab308")
+        self.btn_laser_poll.setCheckable(True)
+        self.btn_laser_poll.setStyleSheet("""
+            QPushButton {
+                background: #1e1e2f; color: #eab308; border: 1px solid #eab308;
+                border-radius: 4px; font-weight: bold; font-size: 12px; padding: 4px;
+            }
+            QPushButton:hover {
+                background: #eab30822;
+            }
+        """)
+        laser_btn_row.addWidget(self.btn_laser_toggle, 1)
+        laser_btn_row.addWidget(self.btn_laser_poll, 1)
+        ll.addLayout(laser_btn_row)
+
+        # Status Row
+        self.lbl_laser_info = QLabel("Status: Idle")
+        self.lbl_laser_info.setStyleSheet(f"color: {C_TEXT_DEAD}; font-size: 11px; font-weight: bold; font-family: monospace;")
+        ll.addWidget(self.lbl_laser_info)
+
+        p_lay.addWidget(laser_grp)
+        # ─────────────────────────────────────────────────────────────────────
+
         p_lay.addStretch()
         scroll.setWidget(container)
         lay.addWidget(scroll)
