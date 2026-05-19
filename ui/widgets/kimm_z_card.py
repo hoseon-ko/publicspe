@@ -97,6 +97,17 @@ class KimmZCard(QFrame):
         btn_row.addWidget(self.btn_connect)
         btn_row.addWidget(self.btn_disconnect)
         conn_l.addLayout(btn_row)
+
+        servo_row = QHBoxLayout()
+        self.btn_servo_on = QPushButton("SERVO ON")
+        self.btn_servo_off = QPushButton("SERVO OFF")
+        self.btn_servo_on.setStyleSheet(BTN_SMALL.replace(C_ACCENT, C_WARN))
+        self.btn_servo_off.setStyleSheet(BTN_SMALL.replace(C_ACCENT, C_TEXT_DIM))
+        self.btn_servo_on.clicked.connect(self._on_servo_on_clicked)
+        self.btn_servo_off.clicked.connect(self._on_servo_off_clicked)
+        servo_row.addWidget(self.btn_servo_on)
+        servo_row.addWidget(self.btn_servo_off)
+        conn_l.addLayout(servo_row)
         
         self.lbl_status = QLabel("● DISCONNECTED")
         self.lbl_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -232,16 +243,28 @@ class KimmZCard(QFrame):
         # 6축 데이터 표시
         if connected and self._session_hub:
             ctrl = self._session_hub.kimm_controller
-            if ctrl and hasattr(ctrl, '_positions'):
-                p = ctrl._positions
-                self.lbl_axes.setText(
-                    f"X(1): {p[0]:+.2f} | Y(2): {p[1]:+.2f} | Z(3): {p[2]:+.2f}\n"
-                    f"Tx(4): {p[3]:+.2f} | Ty(5): {p[4]:+.2f} | Tz(6): {p[5]:+.2f}"
-                )
+            if ctrl:
+                # 서보 상태 반영
+                servo_state = "ON" if getattr(ctrl, "servo_on", False) else "OFF"
+                self.lbl_servo.setText(f"SERVO: {servo_state}")
+                self.lbl_servo.setStyleSheet(lbl(C_ACCENT if servo_state == "ON" else C_TEXT_DIM, mono=True))
+                
+                if hasattr(ctrl, '_positions'):
+                    p = ctrl._positions
+                    self.lbl_axes.setText(
+                        f"X(1): {p[0]:+.2f} | Y(2): {p[1]:+.2f} | Z(3): {p[2]:+.2f}\n"
+                        f"Tx(4): {p[3]:+.2f} | Ty(5): {p[4]:+.2f} | Tz(6): {p[5]:+.2f}"
+                    )
+                else:
+                    self.lbl_axes.setText("All Axes: N/A")
             else:
                 self.lbl_axes.setText("All Axes: N/A")
+                self.lbl_servo.setText("SERVO: OFF")
+                self.lbl_servo.setStyleSheet(lbl(C_TEXT_DIM, mono=True))
         else:
             self.lbl_axes.setText("All Axes: ---")
+            self.lbl_servo.setText("SERVO: OFF")
+            self.lbl_servo.setStyleSheet(lbl(C_TEXT_DIM, mono=True))
         
         # 버튼 활성화 제어
         active = bool(connected or sim_mode)
@@ -249,6 +272,10 @@ class KimmZCard(QFrame):
         self.btn_disconnect.setEnabled(active)
         self.edit_ip.setEnabled(not active)
         self.edit_port.setEnabled(not active)
+        
+        # 서보 제어 버튼 활성화
+        self.btn_servo_on.setEnabled(active)
+        self.btn_servo_off.setEnabled(active)
         
         for btn in self._jog_btns:
             btn.setEnabled(active)
@@ -278,6 +305,28 @@ class KimmZCard(QFrame):
             except Exception as e:
                 self.log_message.emit(f"KIMM Fine Stage: Disconnect failed: {e}")
                 self.update_status(False, None, False)
+
+    def _on_servo_on_clicked(self):
+        if self._session_hub:
+            try:
+                ctrl = self._session_hub.kimm_controller
+                if ctrl:
+                    self.log_message.emit("KIMM Fine Stage: Sending START() to turn Servo ON...")
+                    ctrl.servo_on_stage()
+                    self.log_message.emit("KIMM Fine Stage: Servo turn ON command sent.")
+            except Exception as e:
+                self.log_message.emit(f"KIMM Fine Stage: Servo ON failed: {e}")
+
+    def _on_servo_off_clicked(self):
+        if self._session_hub:
+            try:
+                ctrl = self._session_hub.kimm_controller
+                if ctrl:
+                    self.log_message.emit("KIMM Fine Stage: Sending STOP() to turn Servo OFF...")
+                    ctrl.servo_off_stage()
+                    self.log_message.emit("KIMM Fine Stage: Servo turn OFF command sent.")
+            except Exception as e:
+                self.log_message.emit(f"KIMM Fine Stage: Servo OFF failed: {e}")
 
     def _on_jog_clicked(self, delta: float):
         if self._session_hub:

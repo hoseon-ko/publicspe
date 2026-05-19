@@ -56,6 +56,7 @@ class KIMMZController:
         # 이동 관련 이벤트
         self._ack_received = threading.Event()
         self._done_received = threading.Event()
+        self._last_error: Optional[str] = None
 
         # 설정값 (UI에서 업데이트 예정)
         self.z_safety_limit = 10000.0  # um (상한 기본값)
@@ -85,7 +86,7 @@ class KIMMZController:
     # ── 연결 / 해제 ─────────────────────────────────────────────────
 
     def connect(self) -> None:
-        """TCP 연결. 실패 시 예외 발생."""
+        """TCP 연결. 실패 시 예외 발생 및 Servo ON/AF OFF 자동 설정."""
         if self._connected:
             return
         try:
@@ -102,10 +103,35 @@ class KIMMZController:
             )
             self._recv_thread.start()
             dev_logger.info(f"KIMM Connected: {self.ip}:{self.port}")
+            
+            # Servo On 및 AF Off 명령 전송 (C# DLL Initialize 시퀸스 반영)
+            self._send("START()\r\n")
+            # self._send("AF(0,1)\r\n")  # AF 관련 명령 주석 처리
+            
         except Exception as e:
             self._connected = False
             dev_logger.error(f"KIMM Connection Failed: {e}")
             raise ConnectionError(f"KIMM 연결 실패: {e}")
+
+    def servo_on_stage(self) -> None:
+        """START() 명령을 보내 서보를 켭니다."""
+        if not self._connected:
+            raise ConnectionError("KIMM Not connected")
+        self._send("START()\r\n")
+
+    def servo_off_stage(self) -> None:
+        """STOP() 명령을 보내 서보를 끕니다."""
+        if not self._connected:
+            raise ConnectionError("KIMM Not connected")
+        self._send("STOP()\r\n")
+
+    def autofocus_disable(self) -> None:
+        """AF(0,1) 명령을 보내 자동초점을 비활성화합니다."""
+        # AF 관련 명령 주석 처리
+        # if not self._connected:
+        #     raise ConnectionError("KIMM Not connected")
+        # self._send("AF(0,1)\r\n")
+        pass
 
     def disconnect(self):
         """연결 종료."""
@@ -142,6 +168,7 @@ class KIMMZController:
             raise RuntimeError("Motion already in progress. Ignoring command.")
 
         try:
+            self._last_error = None
             cmd = f"Move({AXIS_Z},Abs,{target_um:.3f},{vel:.0f})\r\n"
 
             if self.dry_run:
@@ -155,10 +182,15 @@ class KIMMZController:
             # Ack 대기 (5초)
             if not self._ack_received.wait(timeout=5.0):
                 raise TimeoutError("Move Ack timeout")
+            if self._last_error:
+                raise RuntimeError(f"KIMM Move error: {self._last_error}")
+
             # Done 대기 (기본 30초, 호출자가 override 가능)
             done_to = 30.0 if done_timeout_s is None else float(done_timeout_s)
             if not self._done_received.wait(timeout=done_to):
                 raise TimeoutError(f"Move Done timeout after {done_to:.1f}s")
+            if self._last_error:
+                raise RuntimeError(f"KIMM Move error: {self._last_error}")
 
             log.info(f"[KIMM] Move_to {target_um:.2f} 완료")
         finally:
@@ -175,6 +207,7 @@ class KIMMZController:
         self._is_moving = True
         self._ack_received.clear()
         self._done_received.clear()
+        self._last_error = None
         self._send(f"Move({AXIS_Z},Abs,{target_um:.3f},{vel:.0f})\r\n")
 
     def move_by_z(self, delta_um: float, velocity: Optional[float] = None) -> None:
@@ -192,6 +225,7 @@ class KIMMZController:
             raise RuntimeError("Motion already in progress. Ignoring command.")
 
         try:
+            self._last_error = None
             cmd = f"Move({AXIS_Z},Rel,{delta_um:.3f},{vel:.0f})\r\n"
 
             if self.dry_run:
@@ -204,8 +238,13 @@ class KIMMZController:
             self._send(cmd)
             if not self._ack_received.wait(timeout=5.0):
                 raise TimeoutError("Move Ack timeout")
+            if self._last_error:
+                raise RuntimeError(f"KIMM Move error: {self._last_error}")
+
             if not self._done_received.wait(timeout=30.0):
                 raise TimeoutError("Move Done timeout")
+            if self._last_error:
+                raise RuntimeError(f"KIMM Move error: {self._last_error}")
                 
             log.info(f"[KIMM] Move_by {delta_um:+.2f} 완료")
         finally:
@@ -270,6 +309,9 @@ class KIMMZController:
             self._done_received.set()
         elif msg.startswith("Error"):
             log.error(f"[KIMM] {msg}")
+            self._last_error = msg
+            self._ack_received.set()   # 대기 중단용
+            self._done_received.set()  # 대기 중단용
         elif msg.startswith("Notification"):
             log.warning("[KIMM] Warning notification received")
         else:
