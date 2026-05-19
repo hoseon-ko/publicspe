@@ -341,6 +341,113 @@ def t_acs_last_states_independent():
             f"axis {i} 가 axis 2 와 dict 공유됨"
 
 
+@case("Scan record: _MirrorScanWorker 가 M1-M4 + centroid 를 record 로 emit")
+def t_mirror_record():
+    import numpy as np
+    from unittest.mock import MagicMock
+    from ui.deepalign.scan.mirror_scan_worker import _MirrorScanWorker
+    from ui.deepalign.scan.scan_analysis import mirror_centroid_process_fn
+
+    hub = MagicMock()
+    hub.pico_get_position.side_effect = lambda ax: 100 * ax  # M1=100, M2=200, ...
+
+    H, W = 16, 16
+    yy, xx = np.mgrid[0:H, 0:W]
+    frame = (100 * np.exp(-((xx - 8) ** 2 + (yy - 8) ** 2) / 8)).astype(np.float32)
+    snap_fn = MagicMock(return_value=frame)
+    mover = MagicMock()
+
+    w = _MirrorScanWorker(mover, snap_fn, points=[(2, 350)],
+                          session_hub=hub,
+                          process_fn=mirror_centroid_process_fn,
+                          settle_ms=0, avg_frames=1)
+    recs = []
+    w.point_done.connect(lambda i, t, p, f, r, rec: recs.append(rec))
+    w.run()
+
+    assert len(recs) == 1
+    rec = recs[0]
+    assert rec["scan_type"] == "mirror"
+    assert rec["moved_motor"] == 2 and rec["target_steps"] == 350
+    assert rec["M1"] == 100 and rec["M2"] == 200
+    assert rec["M3"] == 300 and rec["M4"] == 400
+    assert "cent_x" in rec and "cent_y" in rec
+    assert "sigma_x" in rec and "snr" in rec
+
+
+@case("Scan record: _KimmScanWorker 가 z + sharpness 를 record 로 emit")
+def t_kimm_record():
+    import numpy as np
+    from unittest.mock import MagicMock
+    from ui.deepalign.scan.kimm_scan_worker import _KimmScanWorker
+    from ui.deepalign.scan.scan_analysis import kimm_sharpness_process_fn
+
+    snap_fn = MagicMock(return_value=np.zeros((8, 8), dtype=np.uint16))
+    w = _KimmScanWorker(MagicMock(), snap_fn, points=[12.5],
+                        process_fn=kimm_sharpness_process_fn,
+                        settle_ms=0, avg_frames=1)
+    recs = []
+    w.point_done.connect(lambda i, t, p, f, r, rec: recs.append(rec))
+    w.run()
+
+    assert recs[0]["scan_type"] == "kimm_z"
+    assert recs[0]["z_um"] == 12.5
+    assert "sharpness" in recs[0]
+
+
+@case("Scan record: _AcsScanWorker 가 6축 위치를 record 로 emit (Y1/Z1/X1/Z2/Y2/Z3)")
+def t_acs_record():
+    import numpy as np
+    from unittest.mock import MagicMock
+    from ui.deepalign.scan.acs_scan_worker import _AcsScanWorker
+
+    snap_fn = MagicMock(return_value=np.zeros((4, 4), dtype=np.uint16))
+    pt = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=float)
+    w = _AcsScanWorker(MagicMock(), snap_fn, points=[pt],
+                       process_fn=None, settle_ms=0, avg_frames=1)
+    recs = []
+    w.point_done.connect(lambda i, t, p, f, r, rec: recs.append(rec))
+    w.run()
+
+    rec = recs[0]
+    assert rec["scan_type"] == "acs_6axis"
+    for i, name in enumerate(["Y1", "Z1", "X1", "Z2", "Y2", "Z3"]):
+        assert abs(rec[name] - (0.1 + i * 0.1)) < 1e-9
+
+
+@case("Scan record: base class _make_step_record 기본은 빈 dict")
+def t_base_record_default():
+    import numpy as np
+    from unittest.mock import MagicMock
+    from ui.deepalign.scan._scan_base import _ScanWorkerBase
+
+    snap_fn = MagicMock(return_value=np.zeros((4, 4), dtype=np.uint16))
+    w = _ScanWorkerBase(MagicMock(), snap_fn, points=[1],
+                        settle_ms=0, avg_frames=1)
+    recs = []
+    w.point_done.connect(lambda i, t, p, f, r, rec: recs.append(rec))
+    w.run()
+    assert recs[0] == {}
+
+
+@case("Scan SPE: scan widget 의 is_save_spe_enabled 토글 동작")
+def t_save_spe_toggle():
+    import sys
+    from PyQt6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication(sys.argv)
+
+    from ui.deepalign.scan.scan_widgets.mirror_scan_widget import MirrorScanWidget
+    from ui.deepalign.scan.scan_widgets.kimm_scan_widget import KimmScanWidget
+    from ui.deepalign.scan.scan_widgets.acs_scan_widget import AcsScanWidget
+
+    for cls in (MirrorScanWidget, KimmScanWidget, AcsScanWidget):
+        w = cls()
+        assert hasattr(w, "is_save_spe_enabled"), f"{cls.__name__} 에 getter 누락"
+        assert w.is_save_spe_enabled() is False  # 기본 OFF
+        w.chk_save_spe.setChecked(True)
+        assert w.is_save_spe_enabled() is True
+
+
 @case("Analysis: compute_centroid_stats 가 알려진 가우시안 중심을 정확히 찾음")
 def t_compute_centroid_known():
     import numpy as np
@@ -419,7 +526,7 @@ def t_process_fn_returns_dict():
                         process_fn=mirror_centroid_process_fn,
                         settle_ms=0, avg_frames=1)
     captured = []
-    w.point_done.connect(lambda i, t, p, f, r: captured.append(r))
+    w.point_done.connect(lambda i, t, p, f, r, _rec: captured.append(r))
     w.run()
     assert isinstance(captured[0], dict) and "cent_x" in captured[0]
 
@@ -428,7 +535,7 @@ def t_process_fn_returns_dict():
                          process_fn=kimm_sharpness_process_fn,
                          settle_ms=0, avg_frames=1)
     captured2 = []
-    w2.point_done.connect(lambda i, t, p, f, r: captured2.append(r))
+    w2.point_done.connect(lambda i, t, p, f, r, _rec: captured2.append(r))
     w2.run()
     assert isinstance(captured2[0], dict)
     assert "sharpness" in captured2[0] and captured2[0]["z"] == 12.5
@@ -547,7 +654,7 @@ def t_scan_worker_emits_point_done_with_frame():
                              settle_ms=0, avg_frames=1)
 
     captured = []
-    def _on_point_done(idx, total, point, frame, result):
+    def _on_point_done(idx, total, point, frame, result, _record):
         captured.append((idx, total, point, frame, result))
     worker.point_done.connect(_on_point_done)
 

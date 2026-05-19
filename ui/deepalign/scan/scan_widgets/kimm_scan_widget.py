@@ -10,7 +10,7 @@ import numpy as np
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QSpinBox, QDoubleSpinBox,
-    QPushButton, QLabel, QFrame,
+    QPushButton, QLabel, QFrame, QCheckBox,
 )
 
 from theme.styles import (
@@ -99,6 +99,14 @@ class KimmScanWidget(QWidget):
         params_l.addLayout(grid)
         lay.addWidget(sec_params)
 
+        self.chk_save_spe = QCheckBox("💾 Save SPE (스캔 종료 시 단일 multi-frame 파일)")
+        self.chk_save_spe.setChecked(False)
+        self.chk_save_spe.setStyleSheet(
+            f"color: {C_TEXT_DIM}; font-family: '{Fonts.MONO}';"
+            f" font-size: 11px; background: transparent; border: none;"
+        )
+        lay.addWidget(self.chk_save_spe)
+
         # Action buttons — PicoCard와 동일한 BTN_SMALL
         btn_row = QHBoxLayout()
         self.btn_start = QPushButton("SCAN START")
@@ -139,3 +147,6 @@ class KimmScanWidget(QWidget):
 
     def get_move_timeout_ms(self) -> int:
         return int(round(float(self.spin_timeout.value()) * 1000.0))
+
+    def is_save_spe_enabled(self) -> bool:
+        return bool(self.chk_save_spe.isChecked())

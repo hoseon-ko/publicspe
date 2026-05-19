@@ -27,7 +27,8 @@ class _ScanWorkerBase(QObject):
     """Signals
     -------
     point_started(idx, total, point)
-    point_done(idx, total, point, frame, result)
+    point_done(idx, total, point, frame, result, record)
+        record: subclass 가 만든 step별 메타데이터 dict (SPE/CSV 저장용).
     progress(idx, total)
     phase(idx, total, phase_name, detail)   # phase_name ∈ PHASE_*
     finished(results)
@@ -36,7 +37,7 @@ class _ScanWorkerBase(QObject):
     """
 
     point_started = pyqtSignal(int, int, object)
-    point_done    = pyqtSignal(int, int, object, object, object)
+    point_done    = pyqtSignal(int, int, object, object, object, object)
     progress      = pyqtSignal(int, int)
     phase         = pyqtSignal(int, int, str, str)
     finished      = pyqtSignal(list)
@@ -44,6 +45,16 @@ class _ScanWorkerBase(QObject):
     log           = pyqtSignal(str)
 
     _TAG = "SCAN"
+
+    # ── 오버라이드 포인트 ────────────────────────────────────────────────
+    def _make_step_record(self, point, result) -> dict:
+        """각 step의 메타데이터를 dict로 반환. 기본은 빈 dict.
+
+        하드웨어별 subclass(_MirrorScanWorker 등) 가 모터 위치, 분석 결과 등을
+        담아 반환. 이 dict 는 point_done 의 record 인자로 전달되어 main_tab 이
+        SPE/CSV 저장 시 사용. 워커는 저장 mechanics 를 모름.
+        """
+        return {}
 
     def __init__(self, mover, snap_fn, points: list,
                  process_fn=None, settle_ms: int = 200, avg_frames: int = 1):
@@ -150,8 +161,17 @@ class _ScanWorkerBase(QObject):
                             f"⚠ [{self._TAG}] process_fn 예외 (idx={idx}): {e}"
                         )
 
+                # subclass 의 step 메타데이터 (모터 위치, 분석 결과 등)
+                try:
+                    record = self._make_step_record(point, result)
+                except Exception as e:
+                    self.log.emit(
+                        f"⚠ [{self._TAG}] _make_step_record 예외 (idx={idx}): {e}"
+                    )
+                    record = {}
+
                 results.append(result)
-                self.point_done.emit(idx, total, point, frame, result)
+                self.point_done.emit(idx, total, point, frame, result, record)
                 self.progress.emit(idx, total)
                 self.phase.emit(idx, total, PHASE_DONE, "")
                 self.log.emit(f"✨ [{self._TAG}] {idx}/{total} 완료")

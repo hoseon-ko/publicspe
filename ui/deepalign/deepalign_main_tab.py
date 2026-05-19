@@ -1158,9 +1158,13 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
                 scan_widget.set_phase(idx, total, phase)
         worker.phase.connect(_on_phase)
 
+        # 스캔 SPE 저장용 buffer (frame + record dict 누적)
+        self._scan_frames_buf: list = []
+        self._scan_records_buf: list[dict] = []
+
         # 스캔 포인트마다 캡쳐된 frame 을 image viewer + processing 파이프라인에
-        # 흘려보냄. + 분석 dock (da_* / af_*) 채움 (위젯 종류로 라우팅).
-        def _on_point_done(idx, total, point, frame, result):
+        # 흘려보냄. + 분석 dock (da_* / af_*) 채움 + SPE 저장 buffer 누적.
+        def _on_point_done(idx, total, point, frame, result, record):
             if frame is None:
                 return
             try:
@@ -1183,6 +1187,13 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
             except Exception as e:
                 dev_logger.warning(f"[Scan] dock 갱신 실패 idx={idx}: {e}")
 
+            # SPE 저장 옵션이 켜져 있을 때만 buffer 에 누적 (메모리 절약)
+            if getattr(scan_widget, "is_save_spe_enabled", lambda: False)():
+                rec = dict(record) if isinstance(record, dict) else {}
+                rec["step"] = idx
+                self._scan_frames_buf.append(frame)
+                self._scan_records_buf.append(rec)
+
         worker.point_done.connect(_on_point_done)
 
         # 중복 실행 방지 플래그 (finished/error 한쪽만 실행되도록)
@@ -1201,6 +1212,15 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
             stopped = getattr(worker, "_stop", False)
             scan_widget.set_scan_status("stopped" if stopped else "done",
                                         "warn" if stopped else "ok")
+            # SPE 저장 옵션이 켜져 있고 buffer 에 frame 이 있으면 단일 multi-frame
+            # SPE 로 저장. 메타데이터에 records (step 별 모터 위치/분석값) 포함.
+            try:
+                if (self._scan_frames_buf
+                        and getattr(scan_widget, "is_save_spe_enabled", lambda: False)()):
+                    self._save_scan_spe(scan_widget)
+            except Exception as e:
+                dev_logger.exception(f"[Scan] SPE 저장 실패: {e}")
+                scan_widget.set_scan_status(f"SPE 저장 실패: {e}", "warn")
             _run_extra()
             self._scan_thread.quit()
 
@@ -1223,6 +1243,72 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self._scan_worker = None
         self._scan_thread = None
         self._scan_acs_mover = None
+        # 다음 스캔 위해 buffer 비움
+        self._scan_frames_buf = []
+        self._scan_records_buf = []
+
+    def _save_scan_spe(self, scan_widget) -> None:
+        """스캔 종료 시 단일 multi-frame SPE 로 저장.
+
+        프레임은 self._scan_frames_buf, step별 메타데이터(모터 위치 + 분석값)는
+        self._scan_records_buf 에서 가져옴. extra_metadata 에 records 전체를
+        담아 후처리 시 step → motor/centroid 매핑 가능.
+        """
+        if not self._scan_frames_buf:
+            return
+
+        # scan_type 식별 — records 첫 행에서 가져옴
+        first_rec = self._scan_records_buf[0] if self._scan_records_buf else {}
+        scan_type = str(first_rec.get("scan_type", "scan"))
+
+        folder = Path(self.edit_folder.text().strip() or "Live_Captures")
+        folder.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        fname = f"Scan_{scan_type}_{ts}.spe"
+        fpath = folder / fname
+
+        vendor = self.cb_vendor.currentText().strip() or "DeepAlign"
+        camera_name = vendor
+        camera_model = vendor
+        if self._session_hub is not None:
+            try:
+                state = self._session_hub.get_camera_state()
+                camera_name = getattr(state, "vendor", "") or camera_name
+                camera_model = getattr(state, "device_id", "") or camera_model
+            except Exception:
+                pass
+
+        # records 를 SPE extra_metadata 친화 형식으로 변환 (str 만 허용)
+        records_str = []
+        for r in self._scan_records_buf:
+            row = {}
+            for k, v in r.items():
+                row[str(k)] = "" if v is None else str(v)
+            records_str.append(row)
+
+        try:
+            save_spe(
+                fpath,
+                self._scan_frames_buf,
+                exposure_ms=float(self.spin_exposure.value()),
+                camera_name=camera_name,
+                camera_model=camera_model,
+                creator="DeepAlign",
+                software="SpeAnalyze-DeepAlign",
+                extra_metadata={
+                    "Scan": {
+                        "Type":   scan_type,
+                        "Steps":  str(len(self._scan_frames_buf)),
+                        "Vendor": vendor,
+                    },
+                    "ScanRecords": {f"step_{r.get('step','?')}": r for r in records_str},
+                },
+            )
+            scan_widget.set_scan_status(f"💾 SPE 저장: {fname}", "ok")
+            dev_logger.info(f"[Scan] SPE 저장 완료: {fpath} ({len(self._scan_frames_buf)} frames)")
+        except Exception as e:
+            dev_logger.exception(f"[Scan] SPE 저장 실패: {e}")
+            raise
 
     # ── 분석 dock (da_*: Mirror, af_*: KIMM) 갱신 ──────────────────────
 
@@ -1381,9 +1467,11 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
             move_timeout_ms=self.mirror_scan.get_move_timeout_ms(),
         )
         # process_fn 으로 centroid stats 계산 → _on_point_done 에서 da_* dock 채움
+        # session_hub 를 worker 에 주입 — _make_step_record 에서 M1-M4 위치 조회용
         self._clear_da_dock()
         worker = _MirrorScanWorker(
             mover, self._scan_snap_fn, points,
+            session_hub=self._session_hub,
             process_fn=mirror_centroid_process_fn,
             settle_ms=settle_ms, avg_frames=avg_frames,
         )

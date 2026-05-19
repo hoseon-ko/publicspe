@@ -14,7 +14,7 @@ import numpy as np
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QComboBox, QSpinBox,
-    QDoubleSpinBox, QPushButton, QTextEdit, QLabel, QFrame,
+    QDoubleSpinBox, QPushButton, QTextEdit, QLabel, QFrame, QCheckBox,
 )
 
 from theme.styles import (
@@ -159,6 +159,14 @@ class AcsScanWidget(QWidget):
         base_l.addWidget(self.btn_sync_baseline)
         lay.addWidget(sec_base)
 
+        self.chk_save_spe = QCheckBox("💾 Save SPE (스캔 종료 시 단일 multi-frame 파일)")
+        self.chk_save_spe.setChecked(False)
+        self.chk_save_spe.setStyleSheet(
+            f"color: {C_TEXT_DIM}; font-family: '{Fonts.MONO}';"
+            f" font-size: 11px; background: transparent; border: none;"
+        )
+        lay.addWidget(self.chk_save_spe)
+
         # ─ Start/Stop — BTN_SMALL ─
         btn_row = QHBoxLayout()
         self.btn_start = QPushButton("SCAN START")
@@ -295,3 +303,6 @@ class AcsScanWidget(QWidget):
 
     def get_move_timeout_ms(self) -> int:
         return int(round(float(self.spin_timeout.value()) * 1000.0))
+
+    def is_save_spe_enabled(self) -> bool:
+        return bool(self.chk_save_spe.isChecked())
