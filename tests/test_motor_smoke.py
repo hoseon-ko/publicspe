@@ -341,6 +341,42 @@ def t_acs_last_states_independent():
             f"axis {i} 가 axis 2 와 dict 공유됨"
 
 
+@case("Scan: _ScanWorkerBase 가 포인트마다 point_done(frame=...) emit (viewer 전달용)")
+def t_scan_worker_emits_point_done_with_frame():
+    """main_tab._scan_start 가 point_done 을 _push_frame 으로 라우팅하므로,
+    워커가 frame 을 포함해 emit 하지 않으면 viewer / processing 파이프라인이
+    전혀 동작하지 않는다.
+    """
+    import numpy as np
+    from unittest.mock import MagicMock
+    from ui.deepalign.scan._scan_base import _ScanWorkerBase
+
+    mover = MagicMock()
+    fake_frame = np.zeros((4, 4), dtype=np.uint16)
+    snap_fn = MagicMock(return_value=fake_frame)
+
+    worker = _ScanWorkerBase(mover, snap_fn, points=[1, 2, 3],
+                             settle_ms=0, avg_frames=1)
+
+    captured = []
+    def _on_point_done(idx, total, point, frame, result):
+        captured.append((idx, total, point, frame, result))
+    worker.point_done.connect(_on_point_done)
+
+    finished_results = []
+    worker.finished.connect(lambda r: finished_results.append(r))
+
+    worker.run()
+
+    assert len(captured) == 3, f"point_done 횟수 비정상: {len(captured)}"
+    for idx, (i, total, point, frame, _) in enumerate(captured, 1):
+        assert i == idx and total == 3
+        assert frame is not None and frame.shape == (4, 4)
+    assert mover.move.call_count == 3
+    assert snap_fn.call_count == 3
+    assert finished_results == [[None, None, None]]   # process_fn 없으면 result=None
+
+
 @case("Camera restore: _push_saved_camera_settings 가 exposure/temp/ADC/fps 전부 전송")
 def t_push_saved_camera_settings_full():
     """수동/자동 connect 양쪽에서 호출되는 공용 helper. config 의 저장값을

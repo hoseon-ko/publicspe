@@ -1138,6 +1138,24 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         worker.error.connect(lambda msg: scan_widget.set_scan_status(msg, "err"))
         worker.log.connect(lambda msg: dev_logger.info(f"[Scan] {msg}"))
 
+        # 스캔 포인트마다 캡쳐된 frame 을 image viewer + processing 파이프라인에
+        # 흘려보냄. _push_frame 이 background subtraction / proc image /
+        # proc_stats 시계열 / cam_viewer 디스플레이를 모두 처리. 스냅 버튼과
+        # 동일한 경로라 source="snap" 으로 분류.
+        def _on_point_done(idx, total, _point, frame, _result):
+            if frame is None:
+                return
+            try:
+                self._push_frame(
+                    frame,
+                    gallery_label=f"Scan_{idx:03d}",
+                    source="snap",
+                )
+            except Exception as e:
+                dev_logger.warning(f"[Scan] _push_frame 실패 idx={idx}: {e}")
+
+        worker.point_done.connect(_on_point_done)
+
         # 중복 실행 방지 플래그 (finished/error 한쪽만 실행되도록)
         self._scan_cleanup_called = False
 
