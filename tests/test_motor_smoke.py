@@ -341,6 +341,120 @@ def t_acs_last_states_independent():
             f"axis {i} 가 axis 2 와 dict 공유됨"
 
 
+@case("Camera restore: _push_saved_camera_settings 가 exposure/temp/ADC/fps 전부 전송")
+def t_push_saved_camera_settings_full():
+    """수동/자동 connect 양쪽에서 호출되는 공용 helper. config 의 저장값을
+    빠짐없이 hub.camera_set_* 로 전달하는지 검증.
+    """
+    from unittest.mock import MagicMock
+    from ui.deepalign.deepalign_camera_hub_mixin import CameraHubMixin
+
+    host = MagicMock()
+    host._session_hub = MagicMock()
+    cfg = MagicMock()
+    host._cfg = cfg
+
+    # vendor 별 저장값 시뮬레이션
+    def _get(key, default=None, vendor=None):
+        return {
+            "exposure_ms": 12.5,
+            "fps":         15.0,
+            "fps_lock":    True,
+            "temp_c":      -72.0,
+            "adc.quality": "Low Noise",
+            "adc.speed":   "100kHz",
+            "adc.gain":    "Low",
+            "adc.bit":     "16bit",
+        }.get(key, default)
+    cfg.get_camera_setting.side_effect = _get
+
+    caps = MagicMock()
+    caps.has_fps_control = True
+    caps.has_temperature = True
+    caps.has_adc = True
+
+    CameraHubMixin._push_saved_camera_settings(host, caps, "Picam")
+
+    h = host._session_hub
+    h.camera_set_exposure_ms.assert_called_once()
+    assert h.camera_set_exposure_ms.call_args[0][1] == 12.5
+    h.camera_set_fps.assert_called_once()
+    assert h.camera_set_fps.call_args[0][1] == 15.0
+    h.camera_set_temperature.assert_called_once()
+    assert h.camera_set_temperature.call_args[0][1] == -72.0
+    h.camera_set_adc_settings.assert_called_once()
+    kw = h.camera_set_adc_settings.call_args.kwargs
+    assert kw == {
+        "adc_quality": "Low Noise",
+        "adc_speed":   "100kHz",
+        "adc_analog_gain": "Low",
+        "bit_depth":   "16bit",
+    }
+
+
+@case("Camera restore: fps_lock=False 면 disable_fps_lock 호출")
+def t_push_saved_fps_unlock():
+    from unittest.mock import MagicMock
+    from ui.deepalign.deepalign_camera_hub_mixin import CameraHubMixin
+
+    host = MagicMock()
+    host._session_hub = MagicMock()
+    cfg = MagicMock()
+    host._cfg = cfg
+    cfg.get_camera_setting.side_effect = lambda key, default=None, vendor=None: {
+        "exposure_ms": 20.0, "fps_lock": False, "temp_c": -70.0,
+    }.get(key, default)
+
+    caps = MagicMock(); caps.has_fps_control = True; caps.has_temperature = False; caps.has_adc = False
+    CameraHubMixin._push_saved_camera_settings(host, caps, "Picam")
+
+    host._session_hub.camera_set_fps.assert_not_called()
+    host._session_hub.camera_disable_fps_lock.assert_called_once()
+
+
+@case("Camera restore: caps.has_adc=False 면 ADC push 생략")
+def t_push_saved_skip_no_adc():
+    from unittest.mock import MagicMock
+    from ui.deepalign.deepalign_camera_hub_mixin import CameraHubMixin
+
+    host = MagicMock()
+    host._session_hub = MagicMock()
+    cfg = MagicMock()
+    host._cfg = cfg
+    cfg.get_camera_setting.side_effect = lambda key, default=None, vendor=None: {
+        "exposure_ms": 20.0,
+    }.get(key, default)
+
+    caps = MagicMock(); caps.has_fps_control = False; caps.has_temperature = False; caps.has_adc = False
+    CameraHubMixin._push_saved_camera_settings(host, caps, "Picam")
+
+    host._session_hub.camera_set_adc_settings.assert_not_called()
+    host._session_hub.camera_set_temperature.assert_not_called()
+    host._session_hub.camera_set_fps.assert_not_called()
+    host._session_hub.camera_set_exposure_ms.assert_called_once()  # exposure 는 caps 무관
+
+
+@case("Camera restore: 한 항목 실패해도 다른 항목 push 계속")
+def t_push_saved_isolation():
+    from unittest.mock import MagicMock
+    from ui.deepalign.deepalign_camera_hub_mixin import CameraHubMixin
+
+    host = MagicMock()
+    host._session_hub = MagicMock()
+    host._session_hub.camera_set_exposure_ms.side_effect = RuntimeError("boom")
+    cfg = MagicMock()
+    host._cfg = cfg
+    cfg.get_camera_setting.side_effect = lambda key, default=None, vendor=None: {
+        "exposure_ms": 20.0, "temp_c": -70.0,
+    }.get(key, default)
+
+    caps = MagicMock(); caps.has_fps_control = False; caps.has_temperature = True; caps.has_adc = False
+    CameraHubMixin._push_saved_camera_settings(host, caps, "Picam")
+
+    # exposure 가 실패해도 temp 는 호출돼야 함
+    host._session_hub.camera_set_temperature.assert_called_once()
+
+
 @case("ADC combo populate: clear/addItems 가 _save_settings 트리거 안 함 (blockSignals)")
 def t_adc_combo_no_save_trigger():
     """LayoutBuilderMixin._apply_camera_capabilities 가 ADC 콤보를

@@ -51,6 +51,62 @@ class CameraHubMixin:
                 return
         dev_logger.debug("[DeepAlign] scan skipped (session hub is not bound)")
 
+    def _push_saved_camera_settings(self, caps, vendor_cfg: str) -> None:
+        """저장된 카메라 설정(exposure/fps/temp/ADC) 을 카메라에 다시 적용.
+
+        카메라는 펌웨어 기본값으로 부팅하므로 직전 세션에서 쓰던 값을 명시적으로
+        push 해야 한다. 수동 연결 / 자동 연결 양쪽에서 동일하게 호출되도록 분리.
+        readback 전에 호출 — push → readback 순서가 중요.
+
+        실패는 개별 try 로 격리해 다른 항목 push 를 막지 않는다.
+        """
+        cfg = self._cfg
+        try:
+            saved_exp = cfg.get_camera_setting("exposure_ms", None, vendor=vendor_cfg)
+            if saved_exp is not None:
+                self._session_hub.camera_set_exposure_ms(OWNER_DEEPALIGN, float(saved_exp))
+        except Exception:
+            dev_logger.exception("[DeepAlign] push exposure failed")
+
+        if caps and getattr(caps, "has_fps_control", False):
+            try:
+                saved_fps_lock = bool(cfg.get_camera_setting("fps_lock", False, vendor=vendor_cfg))
+                if saved_fps_lock:
+                    saved_fps = cfg.get_camera_setting("fps", None, vendor=vendor_cfg)
+                    if saved_fps is not None:
+                        self._session_hub.camera_set_fps(OWNER_DEEPALIGN, float(saved_fps))
+                else:
+                    self._session_hub.camera_disable_fps_lock(OWNER_DEEPALIGN)
+            except Exception:
+                dev_logger.exception("[DeepAlign] push fps failed")
+
+        if caps and getattr(caps, "has_temperature", False):
+            try:
+                saved_temp = cfg.get_camera_setting("temp_c", None, vendor=vendor_cfg)
+                if saved_temp is not None:
+                    self._session_hub.camera_set_temperature(OWNER_DEEPALIGN, float(saved_temp))
+            except Exception:
+                dev_logger.exception("[DeepAlign] push temperature failed")
+
+        if caps and getattr(caps, "has_adc", False):
+            # config: adc.quality/speed/gain/bit → hub: adc_quality/adc_speed/adc_analog_gain/bit_depth
+            adc_map = {
+                "adc.quality": "adc_quality",
+                "adc.speed":   "adc_speed",
+                "adc.gain":    "adc_analog_gain",
+                "adc.bit":     "bit_depth",
+            }
+            adc_kwargs = {}
+            for cfg_key, hub_key in adc_map.items():
+                v = cfg.get_camera_setting(cfg_key, "", vendor=vendor_cfg)
+                if v:
+                    adc_kwargs[hub_key] = v
+            if adc_kwargs:
+                try:
+                    self._session_hub.camera_set_adc_settings(OWNER_DEEPALIGN, **adc_kwargs)
+                except Exception:
+                    dev_logger.exception("[DeepAlign] push adc failed")
+
     def _on_connect_clicked(self):
         if self._session_hub is not None:
             cached_vendor = getattr(self._scanned_devices[0], "vendor", None) if self._scanned_devices else None
@@ -72,55 +128,8 @@ class CameraHubMixin:
                 self._apply_camera_capabilities(caps)
 
                 # ── [PUSH] config 의 이전 설정 → 카메라 (read-back 직전) ──
-                # 카메라는 펌웨어 기본값으로 부팅되므로, 사용자가 직전 세션에서
-                # 쓰던 값을 명시적으로 다시 밀어넣는다. vendor 별 분리 저장.
                 vendor_cfg = self.cb_vendor.currentText().strip()
-                cfg = self._cfg
-                try:
-                    saved_exp = cfg.get_camera_setting("exposure_ms", None, vendor=vendor_cfg)
-                    if saved_exp is not None:
-                        self._session_hub.camera_set_exposure_ms(OWNER_DEEPALIGN, float(saved_exp))
-                except Exception:
-                    dev_logger.exception("[DeepAlign] restore exposure failed")
-
-                if caps and getattr(caps, "has_fps_control", False):
-                    try:
-                        saved_fps_lock = bool(cfg.get_camera_setting("fps_lock", False, vendor=vendor_cfg))
-                        if saved_fps_lock:
-                            saved_fps = cfg.get_camera_setting("fps", None, vendor=vendor_cfg)
-                            if saved_fps is not None:
-                                self._session_hub.camera_set_fps(OWNER_DEEPALIGN, float(saved_fps))
-                        else:
-                            self._session_hub.camera_disable_fps_lock(OWNER_DEEPALIGN)
-                    except Exception:
-                        dev_logger.exception("[DeepAlign] restore fps failed")
-
-                if caps and getattr(caps, "has_temperature", False):
-                    try:
-                        saved_temp = cfg.get_camera_setting("temp_c", None, vendor=vendor_cfg)
-                        if saved_temp is not None:
-                            self._session_hub.camera_set_temperature(OWNER_DEEPALIGN, float(saved_temp))
-                    except Exception:
-                        dev_logger.exception("[DeepAlign] restore temperature failed")
-
-                if caps and getattr(caps, "has_adc", False):
-                    # config: adc.quality/speed/gain/bit → hub: adc_quality/adc_speed/adc_analog_gain/bit_depth
-                    adc_map = {
-                        "adc.quality": "adc_quality",
-                        "adc.speed":   "adc_speed",
-                        "adc.gain":    "adc_analog_gain",
-                        "adc.bit":     "bit_depth",
-                    }
-                    adc_kwargs = {}
-                    for cfg_key, hub_key in adc_map.items():
-                        v = cfg.get_camera_setting(cfg_key, "", vendor=vendor_cfg)
-                        if v:
-                            adc_kwargs[hub_key] = v
-                    if adc_kwargs:
-                        try:
-                            self._session_hub.camera_set_adc_settings(OWNER_DEEPALIGN, **adc_kwargs)
-                        except Exception:
-                            dev_logger.exception("[DeepAlign] restore adc failed")
+                self._push_saved_camera_settings(caps, vendor_cfg)
 
                 # ── [READ-BACK] 카메라가 실제 적용한 값 ← UI ──
                 try:

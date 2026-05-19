@@ -882,7 +882,16 @@ class MainWindow(QMainWindow):
                 except Exception:
                     caps = None
                 self.deep_align_tab._apply_camera_capabilities(caps)
-                
+
+                # ── [PUSH] config 의 이전 설정 → 카메라 (read-back 직전) ──
+                # 수동 connect 와 동일하게 exposure/fps/temp/ADC 를 카메라에 다시
+                # 밀어넣는다. 빠뜨리면 카메라가 펌웨어 default 로 동작하여
+                # 사용자의 직전 세션 값이 적용되지 않음.
+                try:
+                    self.deep_align_tab._push_saved_camera_settings(caps, vendor)
+                except Exception:
+                    app_logger.exception("[Auto-Connect] push saved camera settings failed")
+
                 from core.session.ownership import OWNER_DEEPALIGN
                 try:
                     ms = float(self.session_hub.camera_get_exposure_ms(OWNER_DEEPALIGN))
