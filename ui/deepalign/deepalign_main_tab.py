@@ -1613,7 +1613,9 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
     def _on_kimm_scan_requested(self, z_positions: list, settle_ms: int, avg_frames: int) -> None:
         if self._scan_is_running():
             self.kimm_scan.set_scan_status("다른 스캔 실행중", "warn"); return
-        if self._session_hub is None or not self._is_hub_camera_connected():
+        if self._session_hub is None or not self._session_hub.is_kimm_connected():
+            self.kimm_scan.set_scan_status("KIMM 미연결", "err"); return
+        if not self._is_hub_camera_connected():
             self.kimm_scan.set_scan_status("카메라 미연결", "err"); return
 
         mover = KimmMover(

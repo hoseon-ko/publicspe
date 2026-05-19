@@ -21,7 +21,7 @@ from core.logger import dev_logger
 
 log = logging.getLogger(__name__)
 
-AXIS_Z = 3  # ENUM_FINE_STAGE_AXIS_NUM.AXIS_Z (KIMMCtrl.cs 기준)
+AXIS_Z = 4  # ENUM_FINE_STAGE_AXIS_NUM.AXIS_Z (실제 연결 축에 맞춤)
 AXIS_TX = 4
 AXIS_TY = 5
 
@@ -72,7 +72,7 @@ class KIMMZController:
     @property
     def current_z(self) -> float:
         """마지막으로 수신된 Z 위치 (um)."""
-        return self._positions[AXIS_Z]
+        return self._positions[AXIS_Z - 1]
 
     @property
     def is_moving(self) -> bool:

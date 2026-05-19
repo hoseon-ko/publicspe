@@ -117,6 +117,12 @@ class KimmZCard(QFrame):
         self.lbl_z.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_z.setStyleSheet(f"color:#d8e8ff; font-family:'{Fonts.MONO}'; font-size:24px; font-weight:bold; border:none;")
         disp_v.addWidget(self.lbl_z)
+        
+        self.lbl_axes = QLabel("All Axes: ---")
+        self.lbl_axes.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_axes.setStyleSheet(f"color:{C_TEXT_DIM}; font-family:'{Fonts.MONO}'; font-size:10px; border:none;")
+        disp_v.addWidget(self.lbl_axes)
+        
         stat_l.addWidget(disp_frame)
         
         # 상태 레이블
@@ -222,6 +228,20 @@ class KimmZCard(QFrame):
             self.lbl_status.setStyleSheet(lbl(C_DANGER, mono=True, bold=True))
 
         self.lbl_z.setText(f"{z:+.3f} um" if z is not None else "--- um")
+        
+        # 6축 데이터 표시
+        if connected and self._session_hub:
+            ctrl = self._session_hub.kimm_controller
+            if ctrl and hasattr(ctrl, '_positions'):
+                p = ctrl._positions
+                self.lbl_axes.setText(
+                    f"X(1): {p[0]:+.2f} | Y(2): {p[1]:+.2f} | Z(3): {p[2]:+.2f}\n"
+                    f"Tx(4): {p[3]:+.2f} | Ty(5): {p[4]:+.2f} | Tz(6): {p[5]:+.2f}"
+                )
+            else:
+                self.lbl_axes.setText("All Axes: N/A")
+        else:
+            self.lbl_axes.setText("All Axes: ---")
         
         # 버튼 활성화 제어
         active = bool(connected or sim_mode)
