@@ -587,6 +587,58 @@ def t_save_last_signal():
     assert w.btn_save_last.isEnabled() is False
 
 
+@case("KimmScanWidget: Center/±Range/Step → Steps 산출 + z_positions emit")
+def t_kimm_widget_center_range_step():
+    """Center=0, Range=50, Step=5 → Steps=21, z_positions = linspace(-50, 50, 21)."""
+    import sys
+    from PyQt6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication(sys.argv)
+
+    from ui.deepalign.scan.scan_widgets.kimm_scan_widget import KimmScanWidget
+    w = KimmScanWidget()
+
+    # 기본값 검증 (Center=0, Range=50, Step=5)
+    assert w.spin_center.value() == 0.0
+    assert w.spin_range.value() == 50.0
+    assert w.spin_step.value() == 5.0
+    assert w._compute_steps() == 21
+    assert w.lbl_steps_count.text() == "Steps: 21"
+
+    # 값 변경 시 자동 갱신
+    w.spin_step.setValue(10.0)
+    assert w._compute_steps() == 11
+    assert w.lbl_steps_count.text() == "Steps: 11"
+
+    # scan_requested emit 시 정확한 z_positions
+    received = []
+    w.scan_requested.connect(lambda pts, s, a: received.append((list(pts), s, a)))
+    w.spin_center.setValue(100.0)
+    w.spin_range.setValue(20.0)
+    w.spin_step.setValue(10.0)   # Steps = 5 (양 끝 포함 20*2/10 + 1)
+    w._on_start()
+    assert len(received) == 1
+    pts, _, _ = received[0]
+    assert len(pts) == 5
+    assert abs(pts[0] - 80.0) < 1e-9   # center - range
+    assert abs(pts[-1] - 120.0) < 1e-9  # center + range
+
+
+@case("KimmScanWidget: Step <= 0 이면 emit 안 함 + 에러 표시")
+def t_kimm_widget_invalid_step():
+    import sys
+    from PyQt6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication(sys.argv)
+
+    from ui.deepalign.scan.scan_widgets.kimm_scan_widget import KimmScanWidget
+    w = KimmScanWidget()
+    w.spin_step.setMinimum(-10.0)   # range 우회
+    w.spin_step.setValue(-1.0)
+    received = []
+    w.scan_requested.connect(lambda pts, s, a: received.append(True))
+    w._on_start()
+    assert received == [], "step <= 0 인데 emit 됨"
+
+
 @case("Analysis: compute_centroid_stats 가 알려진 가우시안 중심을 정확히 찾음")
 def t_compute_centroid_known():
     import numpy as np

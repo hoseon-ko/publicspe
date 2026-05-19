@@ -7,7 +7,7 @@ scan_requested(points, settle_ms, avg_frames)에서
 from __future__ import annotations
 import numpy as np
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QSpinBox, QDoubleSpinBox,
     QPushButton, QLabel, QFrame, QCheckBox, QComboBox,
@@ -84,20 +84,55 @@ class KimmScanWidget(QWidget):
             l.setStyleSheet(lbl(C_TEXT_DIM, mono=True) + " background: transparent; border: none;")
             return l
 
-        self.spin_z_start  = _dspin(-100000.0, 100000.0, 0.0)
-        self.spin_z_end    = _dspin(-100000.0, 100000.0, 10.0)
-        self.spin_n        = _ispin(2, 9999, 5)
+        # Center / ±Range / Step 폼 (AutoFocusPanel 와 동일한 직관적 입력)
+        # — 사용자가 의도하는 표현 그대로. 워커에는 linspace(center-range, center+range, N) 으로 변환.
+        self.spin_center   = _dspin(-1e6, 1e6, 0.0)
+        self.spin_range    = _dspin(0.1, 1e5, 50.0)
+        self.spin_step     = _dspin(0.1, 1e4, 5.0)
         self.spin_settle   = _ispin(0, 10000, 200)
         self.spin_avg      = _ispin(1, 32, 1)
         self.spin_timeout  = _dspin(1.0, 120.0, 30.0, decs=1, step=1.0, suffix=" s")
 
-        grid.addWidget(_lbl("Z start"),       0, 0); grid.addWidget(self.spin_z_start, 0, 1)
-        grid.addWidget(_lbl("Z end"),         0, 2); grid.addWidget(self.spin_z_end,   0, 3)
-        grid.addWidget(_lbl("N points"),      1, 0); grid.addWidget(self.spin_n,       1, 1)
+        grid.addWidget(_lbl("Center"),        0, 0); grid.addWidget(self.spin_center,  0, 1)
+        grid.addWidget(_lbl("± Range"),       0, 2); grid.addWidget(self.spin_range,   0, 3)
+        grid.addWidget(_lbl("Step"),          1, 0); grid.addWidget(self.spin_step,    1, 1)
         grid.addWidget(_lbl("Settle ms"),     1, 2); grid.addWidget(self.spin_settle,  1, 3)
         grid.addWidget(_lbl("Avg frames"),    2, 0); grid.addWidget(self.spin_avg,     2, 1)
         grid.addWidget(_lbl("Move Timeout"),  2, 2); grid.addWidget(self.spin_timeout, 2, 3)
         params_l.addLayout(grid)
+
+        # Steps:N 동적 표시
+        self.lbl_steps_count = QLabel("Steps: 21")
+        self.lbl_steps_count.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.lbl_steps_count.setStyleSheet(
+            f"color: #4a7a6a; font-family: '{Fonts.MONO}'; font-size: 11px;"
+            f" font-weight: bold; background: transparent; border: none;"
+            f" padding: 2px 4px;"
+        )
+        params_l.addWidget(self.lbl_steps_count)
+        for sp in (self.spin_range, self.spin_step):
+            sp.valueChanged.connect(self._update_steps_count)
+        self._update_steps_count()
+
+        # Sharpness Metric (AutoFocus 와 동일)
+        metric_row = QHBoxLayout(); metric_row.setSpacing(6)
+        metric_row.addWidget(_lbl("Sharpness"))
+        self.cb_metric = QComboBox()
+        self.cb_metric.addItems([
+            "Laplacian Variance",
+            "Contrast (Std Dev)",
+            "Tenengrad (Sobel²)",
+            "Brenner",
+        ])
+        self.cb_metric.setStyleSheet(
+            f"QComboBox {{ background:#080e1e; color:#c0d0ff; border:1px solid #0f3460;"
+            f" border-radius:3px; font-family:'{Fonts.MONO}'; font-size:11px; padding:2px 6px; }}"
+            f"QComboBox::drop-down {{ border:none; }}"
+            f"QComboBox QAbstractItemView {{ background:#0f1729; color:#c0d0ff; }}"
+        )
+        metric_row.addWidget(self.cb_metric, 1)
+        params_l.addLayout(metric_row)
+
         lay.addWidget(sec_params)
 
         spe_row = QHBoxLayout(); spe_row.setSpacing(6)
@@ -137,10 +172,28 @@ class KimmScanWidget(QWidget):
         self.lbl_status = status_label()
         lay.addWidget(self.lbl_status)
 
+    def _compute_steps(self) -> int:
+        """range / step 으로 step 수 산출 — 양 끝 포함이라 2*range/step + 1."""
+        r = float(self.spin_range.value())
+        s = float(self.spin_step.value())
+        if s <= 0:
+            return 0
+        return int(round(2 * r / s)) + 1
+
+    def _update_steps_count(self) -> None:
+        n = self._compute_steps()
+        self.lbl_steps_count.setText(f"Steps: {n}")
+
     def _on_start(self) -> None:
-        z0 = float(self.spin_z_start.value())
-        z1 = float(self.spin_z_end.value())
-        n  = int(self.spin_n.value())
+        c = float(self.spin_center.value())
+        r = float(self.spin_range.value())
+        s = float(self.spin_step.value())
+        if s <= 0:
+            apply_status(self.lbl_status, "Step 은 0보다 커야 함", "err")
+            return
+        n = max(2, self._compute_steps())
+        z0 = c - r
+        z1 = c + r
         z_positions = list(np.linspace(z0, z1, n))
         self.scan_requested.emit(z_positions, int(self.spin_settle.value()), int(self.spin_avg.value()))
 
