@@ -73,7 +73,7 @@ class KIMMZController:
     @property
     def current_z(self) -> float:
         """마지막으로 수신된 Z 위치 (um)."""
-        return self._positions[AXIS_Z]
+        return self._positions[AXIS_Z - 1]
 
     @property
     def is_moving(self) -> bool:
