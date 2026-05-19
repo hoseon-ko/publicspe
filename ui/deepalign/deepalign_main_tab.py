@@ -1578,7 +1578,8 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
             if pw is not None:
                 try:
                     pw.clear()
-                    pw.plot(self._af_z_series, self._af_sh_series,
+                    xs = list(range(1, len(self._af_sh_series) + 1))
+                    pw.plot(xs, self._af_sh_series,
                             pen="#4ecdc4", symbol="o", symbolSize=6)
                 except Exception:
                     pass

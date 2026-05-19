@@ -18,9 +18,10 @@ from PyQt6.QtWidgets import (
 
 
 class PlotPanel(QWidget):
-    def __init__(self, title: str = "Profile", parent=None):
+    def __init__(self, title: str = "Profile", enable_xmin_zero: bool = True, parent=None):
         super().__init__(parent)
         self._title = title
+        self._enable_xmin_zero = enable_xmin_zero
         self._plot_items = []
         self._colors = [
             '#e94560', '#4ecdc4', '#ffe66d', '#a8e6cf',
@@ -96,7 +97,8 @@ class PlotPanel(QWidget):
         self.plot_widget.setLabel('left',   'Y',
                                   **{'color': '#607090', 'font-size': '10pt'})
         # 확대/축소/패닝 시에도 X축이 0 아래로 내려가지 않도록 ViewBox에 하한선 고정
-        self.plot_widget.getPlotItem().getViewBox().setLimits(xMin=0)
+        if self._enable_xmin_zero:
+            self.plot_widget.getPlotItem().getViewBox().setLimits(xMin=0)
         layout.addWidget(self.plot_widget)
 
         # ── 마우스 호버 crosshair (수직선만) ──

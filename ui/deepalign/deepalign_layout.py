@@ -546,7 +546,7 @@ class LayoutBuilderMixin:
 
         # ── 패널 2: Sharpness vs Z 플롯 ──────────────────────────────
         self.af_plot_panel = PlotPanel("SHARPNESS vs Z")
-        self.af_plot_panel.plot_widget.setLabel("bottom", "Z position (µm)", color="#8899aa")
+        self.af_plot_panel.plot_widget.setLabel("bottom", "Step", color="#8899aa")
         self.af_plot_panel.plot_widget.setLabel("left", "Sharpness (a.u.)", color="#8899aa")
         self.af_plot_panel.setMinimumHeight(100)
         splitter.addWidget(self.af_plot_panel)
