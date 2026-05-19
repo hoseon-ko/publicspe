@@ -192,6 +192,27 @@ class KIMMZController:
             if self._last_error:
                 raise RuntimeError(f"KIMM Move error: {self._last_error}")
 
+            # ── 물리적 위치 안착(Settle) 검증 루프 ────────────────────────
+            # KIMM 컨트롤러가 Move(Done)을 물리적 안착 전에 조기 전송하는 문제를 방지하기 위해,
+            # 실제 피드백 위치(current_z)가 목표 위치와 오차 범위(예: 0.1 um) 내에 들어올 때까지
+            # 최대 1.5초간 Get(6)를 계속 쿼리하며 대기합니다.
+            import time
+            settle_start = time.perf_counter()
+            tolerance = 0.1  # um
+            settle_verified = False
+            
+            while time.perf_counter() - settle_start < 1.5:
+                self.request_position()
+                time.sleep(0.05)
+                diff = abs(self.current_z - target_um)
+                if diff <= tolerance:
+                    settle_verified = True
+                    log.info(f"[KIMM] Settle verified: Target={target_um:.3f}, Actual={self.current_z:.3f}, Diff={diff:.4f} um (took {(time.perf_counter() - settle_start)*1000:.0f} ms)")
+                    break
+            
+            if not settle_verified:
+                log.warning(f"[KIMM] Settle verification timeout. Target={target_um:.3f}, Actual={self.current_z:.3f}, Diff={abs(self.current_z - target_um):.4f} um. Proceeding anyway.")
+
             log.info(f"[KIMM] Move_to {target_um:.2f} 완료")
         finally:
             self._cmd_lock.release()
@@ -245,6 +266,24 @@ class KIMMZController:
                 raise TimeoutError("Move Done timeout")
             if self._last_error:
                 raise RuntimeError(f"KIMM Move error: {self._last_error}")
+
+            # ── 물리적 위치 안착(Settle) 검증 루프 ────────────────────────
+            import time
+            settle_start = time.perf_counter()
+            tolerance = 0.1  # um
+            settle_verified = False
+            
+            while time.perf_counter() - settle_start < 1.5:
+                self.request_position()
+                time.sleep(0.05)
+                diff = abs(self.current_z - target_um)
+                if diff <= tolerance:
+                    settle_verified = True
+                    log.info(f"[KIMM] Settle verified: Target={target_um:.3f}, Actual={self.current_z:.3f}, Diff={diff:.4f} um (took {(time.perf_counter() - settle_start)*1000:.0f} ms)")
+                    break
+            
+            if not settle_verified:
+                log.warning(f"[KIMM] Settle verification timeout. Target={target_um:.3f}, Actual={self.current_z:.3f}, Diff={abs(self.current_z - target_um):.4f} um. Proceeding anyway.")
                 
             log.info(f"[KIMM] Move_by {delta_um:+.2f} 완료")
         finally:
@@ -302,9 +341,9 @@ class KIMMZController:
         # 위치 응답은 디버그 레벨 (빈번해서 로그 노이즈 방지)
         if msg.startswith("Get"):
             self._parse_get(msg)
-        elif msg == "Move(ack)":
+        elif msg.startswith("Move(ack)"):
             self._ack_received.set()
-        elif msg == "Move(Done)":
+        elif msg.startswith("Move(Done)"):
             self._is_moving = False
             self._done_received.set()
         elif msg.startswith("Error"):

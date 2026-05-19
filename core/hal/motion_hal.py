@@ -44,6 +44,10 @@ class KimmHal(Protocol):
 
     def get_z(self) -> float: ...
 
+    def servo_on(self) -> None: ...
+
+    def servo_off(self) -> None: ...
+
 
 @runtime_checkable
 class PicoHal(Protocol):

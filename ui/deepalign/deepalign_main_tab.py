@@ -464,6 +464,8 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self.kimm_scan.scan_stop_requested.connect(self._on_scan_stop_requested)
         self.kimm_scan.save_last_requested.connect(
             lambda: self._save_scan_spe_dialog(self.kimm_scan))
+        self.kimm_scan.servo_on_requested.connect(self._on_kimm_servo_on_requested)
+        self.kimm_scan.servo_off_requested.connect(self._on_kimm_servo_off_requested)
         self.acs_scan.scan_requested.connect(self._on_acs_scan_requested)
         self.acs_scan.scan_stop_requested.connect(self._on_scan_stop_requested)
         self.acs_scan.save_last_requested.connect(
@@ -1630,6 +1632,26 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
             settle_ms=settle_ms, avg_frames=avg_frames,
         )
         self._scan_start(self.kimm_scan, worker)
+
+    def _on_kimm_servo_on_requested(self) -> None:
+        if self._session_hub is None or not self._session_hub.is_kimm_connected():
+            self.kimm_scan.set_scan_status("KIMM 미연결", "err"); return
+        try:
+            self._session_hub.kimm_servo_on()
+            self.kimm_scan.set_scan_status("Servo ON 완료", "ok")
+            dev_logger.info("[KIMM] Servo turned ON successfully")
+        except Exception as e:
+            self.kimm_scan.set_scan_status(f"Servo ON 실패: {e}", "err")
+
+    def _on_kimm_servo_off_requested(self) -> None:
+        if self._session_hub is None or not self._session_hub.is_kimm_connected():
+            self.kimm_scan.set_scan_status("KIMM 미연결", "err"); return
+        try:
+            self._session_hub.kimm_servo_off()
+            self.kimm_scan.set_scan_status("Servo OFF 완료", "ok")
+            dev_logger.info("[KIMM] Servo turned OFF successfully")
+        except Exception as e:
+            self.kimm_scan.set_scan_status(f"Servo OFF 실패: {e}", "err")
 
     # ── ACS 6축 ──────────────────────────────────────────────────────────
     def _on_acs_scan_requested(self, points: list, settle_ms: int, avg_frames: int) -> None:

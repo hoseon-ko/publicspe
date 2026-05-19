@@ -844,6 +844,24 @@ class DeviceSessionHub(QObject):
             self.publish_error("kimm", f"get_z failed: {exc}", source="hub")
             raise
 
+    def kimm_servo_on(self) -> None:
+        hal = self._require_kimm_hal()
+        try:
+            hal.servo_on()
+        except Exception as exc:
+            dev_logger.exception("[DeviceSessionHub] kimm_servo_on failed")
+            self.publish_error("kimm", f"servo_on failed: {exc}", source="hub")
+            raise
+
+    def kimm_servo_off(self) -> None:
+        hal = self._require_kimm_hal()
+        try:
+            hal.servo_off()
+        except Exception as exc:
+            dev_logger.exception("[DeviceSessionHub] kimm_servo_off failed")
+            self.publish_error("kimm", f"servo_off failed: {exc}", source="hub")
+            raise
+
     # ──────────────────────────────────────────────────────────
     # Picomotor
     # ──────────────────────────────────────────────────────────

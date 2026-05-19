@@ -64,6 +64,26 @@ class KimmMotionAdapter(KimmHal):
             dev_logger.exception("[KimmMotionAdapter] get_z failed")
             raise HalCommandError(f"KIMM get_z failed: {exc}", cause=exc) from exc
 
+    def servo_on(self) -> None:
+        dev_logger.debug("[KimmMotionAdapter] servo_on requested")
+        ctrl = self._require_connected()
+        try:
+            ctrl.servo_on_stage()
+            dev_logger.debug("[KimmMotionAdapter] servo_on succeeded")
+        except Exception as exc:
+            dev_logger.exception("[KimmMotionAdapter] servo_on failed")
+            raise HalCommandError(f"KIMM servo_on failed: {exc}", cause=exc) from exc
+
+    def servo_off(self) -> None:
+        dev_logger.debug("[KimmMotionAdapter] servo_off requested")
+        ctrl = self._require_connected()
+        try:
+            ctrl.servo_off_stage()
+            dev_logger.debug("[KimmMotionAdapter] servo_off succeeded")
+        except Exception as exc:
+            dev_logger.exception("[KimmMotionAdapter] servo_off failed")
+            raise HalCommandError(f"KIMM servo_off failed: {exc}", cause=exc) from exc
+
     def _require_connected(self) -> KIMMZController:
         if self._controller is None or not self._controller.is_connected:
             raise HalNotConnectedError("KIMM controller is not connected")

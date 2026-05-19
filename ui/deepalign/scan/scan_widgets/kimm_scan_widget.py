@@ -28,6 +28,8 @@ class KimmScanWidget(QWidget):
     scan_requested      = pyqtSignal(list, int, int)
     scan_stop_requested = pyqtSignal()
     save_last_requested = pyqtSignal()
+    servo_on_requested  = pyqtSignal()
+    servo_off_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -153,6 +155,18 @@ class KimmScanWidget(QWidget):
         spe_row.addWidget(self.btn_save_last)
         lay.addLayout(spe_row)
 
+        # Servo ON/OFF buttons
+        servo_row = QHBoxLayout()
+        self.btn_servo_on = QPushButton("SERVO ON")
+        self.btn_servo_off = QPushButton("SERVO OFF")
+        self.btn_servo_on.setStyleSheet(BTN_SMALL)
+        self.btn_servo_off.setStyleSheet(BTN_SMALL.replace(C_ACCENT, C_DANGER))
+        self.btn_servo_on.clicked.connect(self.servo_on_requested.emit)
+        self.btn_servo_off.clicked.connect(self.servo_off_requested.emit)
+        servo_row.addWidget(self.btn_servo_on)
+        servo_row.addWidget(self.btn_servo_off)
+        lay.addLayout(servo_row)
+
         # Action buttons — PicoCard와 동일한 BTN_SMALL
         btn_row = QHBoxLayout()
         self.btn_start = QPushButton("SCAN START")
@@ -203,6 +217,8 @@ class KimmScanWidget(QWidget):
     def set_scan_running(self, running: bool) -> None:
         self.btn_start.setEnabled(not running)
         self.btn_stop.setEnabled(running)
+        self.btn_servo_on.setEnabled(not running)
+        self.btn_servo_off.setEnabled(not running)
         if not running:
             self.phase_indicator.reset()
 
