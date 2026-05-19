@@ -117,8 +117,10 @@ class PicoCard(QFrame):
         btn_row_global.addWidget(self.btn_stop_all)
         btn_row_global.addWidget(self.btn_refresh)
         lay.addLayout(btn_row_global)
-        
-        lay.addStretch()
+        # 카드 자체에는 stretch 를 넣지 않음. 카드는 내용물 sizeHint 만큼만
+        # 차지하고, 빈 공간 분배는 부모 컨테이너(_wrap_panel 등) 가 담당.
+        # 카드 내부 stretch 는 sibling 위젯(예: MirrorScanWidget) 을 화면 끝으로
+        # 밀어내는 버그의 원인이었음.
 
     def bind_session_hub(self, hub):
         if self._session_hub:

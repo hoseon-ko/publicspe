@@ -271,7 +271,8 @@ class AcsCard(QFrame):
         row_dry.addWidget(self.check_dry); row_dry.addStretch(); row_dry.addWidget(QLabel("Settle(ms):")); row_dry.addWidget(self.spin_settle)
         kin_l.addLayout(row_dry)
         lay.addWidget(self.sec_kin)
-        lay.addStretch()
+        # 카드 내부 stretch 제거 — sibling 위젯(AcsScanWidget 등) 을 화면
+        # 끝으로 밀어내는 버그 회피. 빈 공간 분배는 부모 컨테이너 담당.
 
         # Connect
         # NOTE: edit_ip/edit_port 는 line 199-200 에서 이미 editingFinished 로 연결됨.

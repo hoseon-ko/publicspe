@@ -127,6 +127,9 @@ class LayoutBuilderMixin:
         if extras:
             for w in extras:
                 c_lay.addWidget(w)
+        # 위젯들을 상단 정렬 — 섹션이 접혔을 때 panel 과 extras 가
+        # 서로 붙어 있도록. 빈 공간은 하단에 몰아둠.
+        c_lay.addStretch(1)
 
         scroll.setWidget(container)
         lay.addWidget(scroll)
@@ -148,6 +151,8 @@ class LayoutBuilderMixin:
         c_lay.addWidget(self.align_panel)
         c_lay.addWidget(self.acs_scan)              # 분리된 스캔 위젯
         c_lay.addWidget(self._create_kinem_calc_section())
+        # 위젯 상단 정렬 — 카드들이 접혀도 서로 붙어있도록.
+        c_lay.addStretch(1)
 
         scroll.setWidget(container)
         lay.addWidget(scroll)
