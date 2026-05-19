@@ -21,7 +21,7 @@ from core.logger import dev_logger
 
 log = logging.getLogger(__name__)
 
-AXIS_Z = 4  # ENUM_FINE_STAGE_AXIS_NUM.AXIS_Z (실제 연결 축에 맞춤)
+AXIS_Z = 3  # ENUM_FINE_STAGE_AXIS_NUM.AXIS_Z (기본 Z축 매칭)
 AXIS_TX = 4
 AXIS_TY = 5
 
