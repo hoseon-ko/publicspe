@@ -459,10 +459,16 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         # ── SCAN — 3 hardware (mirror/af/acs), 위젯은 패널과 분리됨 ──
         self.mirror_scan.scan_requested.connect(self._on_mirror_scan_requested)
         self.mirror_scan.scan_stop_requested.connect(self._on_scan_stop_requested)
+        self.mirror_scan.save_last_requested.connect(
+            lambda: self._save_scan_spe_dialog(self.mirror_scan))
         self.kimm_scan.scan_requested.connect(self._on_kimm_scan_requested)
         self.kimm_scan.scan_stop_requested.connect(self._on_scan_stop_requested)
+        self.kimm_scan.save_last_requested.connect(
+            lambda: self._save_scan_spe_dialog(self.kimm_scan))
         self.acs_scan.scan_requested.connect(self._on_acs_scan_requested)
         self.acs_scan.scan_stop_requested.connect(self._on_scan_stop_requested)
+        self.acs_scan.save_last_requested.connect(
+            lambda: self._save_scan_spe_dialog(self.acs_scan))
         # baseline DOF 동기화: AcsScanWidget의 SYNC 버튼 → align_panel의 현재 DOF값
         self.acs_scan.set_baseline_provider(self.align_panel.get_baseline_dof)
         # current pos provider: MirrorScanWidget → session_hub 경유 Picomotor 위치 조회
@@ -1158,9 +1164,14 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
                 scan_widget.set_phase(idx, total, phase)
         worker.phase.connect(_on_phase)
 
-        # 스캔 SPE 저장용 buffer (frame + record dict 누적)
-        self._scan_frames_buf: list = []
-        self._scan_records_buf: list[dict] = []
+        # 스캔 SPE 저장용 buffer 초기화 (이전 스캔의 buffer 폐기).
+        # 새 스캔이 시작되는 시점이 buffer 를 비울 유일한 시점 — 종료 후에도
+        # manual save 가능하도록 buffer 는 보존된다.
+        self._scan_frames_buf = []
+        self._scan_records_buf = []
+        # 이전 buffer 가 있으면 Save Last 도 비활성화
+        if hasattr(scan_widget, "set_save_last_enabled"):
+            scan_widget.set_save_last_enabled(False)
 
         # 스캔 포인트마다 캡쳐된 frame 을 image viewer + processing 파이프라인에
         # 흘려보냄. + 분석 dock (da_* / af_*) 채움 + SPE 저장 buffer 누적.
@@ -1212,15 +1223,18 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
             stopped = getattr(worker, "_stop", False)
             scan_widget.set_scan_status("stopped" if stopped else "done",
                                         "warn" if stopped else "ok")
-            # SPE 저장 옵션이 켜져 있고 buffer 에 frame 이 있으면 단일 multi-frame
-            # SPE 로 저장. 메타데이터에 records (step 별 모터 위치/분석값) 포함.
-            try:
-                if (self._scan_frames_buf
-                        and getattr(scan_widget, "is_save_spe_enabled", lambda: False)()):
+            mode = getattr(scan_widget, "get_spe_save_mode", lambda: "off")()
+            has_buf = bool(self._scan_frames_buf)
+            # auto 모드: 종료 즉시 자동 저장
+            if has_buf and mode == "auto":
+                try:
                     self._save_scan_spe(scan_widget)
-            except Exception as e:
-                dev_logger.exception(f"[Scan] SPE 저장 실패: {e}")
-                scan_widget.set_scan_status(f"SPE 저장 실패: {e}", "warn")
+                except Exception as e:
+                    dev_logger.exception(f"[Scan] auto SPE 저장 실패: {e}")
+                    scan_widget.set_scan_status(f"SPE 저장 실패: {e}", "warn")
+            # manual 모드 (또는 auto 후 재저장 가능): Save Last 버튼 활성
+            if has_buf and hasattr(scan_widget, "set_save_last_enabled"):
+                scan_widget.set_save_last_enabled(True)
             _run_extra()
             self._scan_thread.quit()
 
@@ -1243,11 +1257,34 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self._scan_worker = None
         self._scan_thread = None
         self._scan_acs_mover = None
-        # 다음 스캔 위해 buffer 비움
-        self._scan_frames_buf = []
-        self._scan_records_buf = []
+        # buffer 는 의도적으로 보존 — Save Last 로 수동 저장 가능.
+        # 다음 스캔이 시작될 때 _scan_start 가 비움.
 
-    def _save_scan_spe(self, scan_widget) -> None:
+    def _save_scan_spe_dialog(self, scan_widget) -> None:
+        """Save Last 버튼 → file dialog 로 경로 선택해서 저장 (수동 모드)."""
+        if not self._scan_frames_buf:
+            scan_widget.set_scan_status("저장할 buffer 없음", "warn")
+            return
+        first_rec = self._scan_records_buf[0] if self._scan_records_buf else {}
+        scan_type = str(first_rec.get("scan_type", "scan"))
+        default_dir = self.edit_folder.text().strip() or "Live_Captures"
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_name = f"Scan_{scan_type}_{ts}.spe"
+        from PyQt6.QtWidgets import QFileDialog
+        fpath, _ = QFileDialog.getSaveFileName(
+            self, "Save Scan SPE",
+            str(Path(default_dir) / default_name),
+            "SPE Files (*.spe);;All Files (*)",
+        )
+        if not fpath:
+            return
+        try:
+            self._save_scan_spe(scan_widget, override_path=Path(fpath))
+        except Exception as e:
+            dev_logger.exception(f"[Scan] manual SPE 저장 실패: {e}")
+            scan_widget.set_scan_status(f"SPE 저장 실패: {e}", "err")
+
+    def _save_scan_spe(self, scan_widget, override_path: Optional[Path] = None) -> None:
         """스캔 종료 시 단일 multi-frame SPE 로 저장.
 
         프레임은 self._scan_frames_buf, step별 메타데이터(모터 위치 + 분석값)는
@@ -1261,11 +1298,16 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         first_rec = self._scan_records_buf[0] if self._scan_records_buf else {}
         scan_type = str(first_rec.get("scan_type", "scan"))
 
-        folder = Path(self.edit_folder.text().strip() or "Live_Captures")
-        folder.mkdir(parents=True, exist_ok=True)
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        fname = f"Scan_{scan_type}_{ts}.spe"
-        fpath = folder / fname
+        if override_path is not None:
+            fpath = Path(override_path)
+            fpath.parent.mkdir(parents=True, exist_ok=True)
+            fname = fpath.name
+        else:
+            folder = Path(self.edit_folder.text().strip() or "Live_Captures")
+            folder.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            fname = f"Scan_{scan_type}_{ts}.spe"
+            fpath = folder / fname
 
         vendor = self.cb_vendor.currentText().strip() or "DeepAlign"
         camera_name = vendor

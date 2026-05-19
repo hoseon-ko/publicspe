@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QComboBox, QSpinBox,
     QDoubleSpinBox, QPushButton, QTextEdit, QLabel, QFrame, QCheckBox,
 )
+# (QComboBox 는 위에서 import 됨)
 
 from theme.styles import (
     C_ACCENT, C_DANGER, C_TEXT_DIM, Fonts, BTN_SMALL, SPIN_STYLE, COMBO_STYLE, lbl,
@@ -38,6 +39,7 @@ class AcsScanWidget(QWidget):
 
     scan_requested      = pyqtSignal(list, int, int)
     scan_stop_requested = pyqtSignal()
+    save_last_requested = pyqtSignal()
 
     DOF_LABELS   = ["Tx", "Ty", "Tz", "Rx", "Ry", "Rz"]
     DOF_UNITS    = [" mm", " mm", " mm", " mrad", " mrad", " mrad"]
@@ -159,13 +161,23 @@ class AcsScanWidget(QWidget):
         base_l.addWidget(self.btn_sync_baseline)
         lay.addWidget(sec_base)
 
-        self.chk_save_spe = QCheckBox("💾 Save SPE (스캔 종료 시 단일 multi-frame 파일)")
-        self.chk_save_spe.setChecked(False)
-        self.chk_save_spe.setStyleSheet(
-            f"color: {C_TEXT_DIM}; font-family: '{Fonts.MONO}';"
-            f" font-size: 11px; background: transparent; border: none;"
+        spe_row = QHBoxLayout(); spe_row.setSpacing(6)
+        self.cb_spe_mode = QComboBox()
+        self.cb_spe_mode.addItems(["💾 SPE: Off", "💾 SPE: Auto-save", "💾 SPE: Manual"])
+        self.cb_spe_mode.setCurrentIndex(0)
+        self.cb_spe_mode.setStyleSheet(
+            f"QComboBox {{ background:#080e1e; color:#c0d0ff; border:1px solid {_ACS_ACCENT};"
+            f" border-radius:3px; font-family:'{Fonts.MONO}'; font-size:11px; padding:2px 6px; }}"
+            f"QComboBox::drop-down {{ border:none; }}"
+            f"QComboBox QAbstractItemView {{ background:#0f1729; color:#c0d0ff; }}"
         )
-        lay.addWidget(self.chk_save_spe)
+        self.btn_save_last = QPushButton("💾 Save Last")
+        self.btn_save_last.setEnabled(False)
+        self.btn_save_last.setStyleSheet(BTN_SMALL.replace(C_ACCENT, _ACS_ACCENT))
+        self.btn_save_last.clicked.connect(self.save_last_requested)
+        spe_row.addWidget(self.cb_spe_mode, 1)
+        spe_row.addWidget(self.btn_save_last)
+        lay.addLayout(spe_row)
 
         # ─ Start/Stop — BTN_SMALL ─
         btn_row = QHBoxLayout()
@@ -304,5 +316,11 @@ class AcsScanWidget(QWidget):
     def get_move_timeout_ms(self) -> int:
         return int(round(float(self.spin_timeout.value()) * 1000.0))
 
+    def get_spe_save_mode(self) -> str:
+        return ("off", "auto", "manual")[max(0, self.cb_spe_mode.currentIndex())]
+
     def is_save_spe_enabled(self) -> bool:
-        return bool(self.chk_save_spe.isChecked())
+        return self.get_spe_save_mode() != "off"
+
+    def set_save_last_enabled(self, enabled: bool) -> None:
+        self.btn_save_last.setEnabled(bool(enabled))

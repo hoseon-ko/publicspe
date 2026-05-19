@@ -430,8 +430,8 @@ def t_base_record_default():
     assert recs[0] == {}
 
 
-@case("Scan SPE: scan widget 의 is_save_spe_enabled 토글 동작")
-def t_save_spe_toggle():
+@case("Scan SPE: 3 mode (off/auto/manual) getter + is_save_spe_enabled 동작")
+def t_save_spe_modes():
     import sys
     from PyQt6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication(sys.argv)
@@ -442,10 +442,42 @@ def t_save_spe_toggle():
 
     for cls in (MirrorScanWidget, KimmScanWidget, AcsScanWidget):
         w = cls()
-        assert hasattr(w, "is_save_spe_enabled"), f"{cls.__name__} 에 getter 누락"
-        assert w.is_save_spe_enabled() is False  # 기본 OFF
-        w.chk_save_spe.setChecked(True)
+        # 기본 Off
+        assert w.get_spe_save_mode() == "off"
+        assert w.is_save_spe_enabled() is False
+        # Auto
+        w.cb_spe_mode.setCurrentIndex(1)
+        assert w.get_spe_save_mode() == "auto"
         assert w.is_save_spe_enabled() is True
+        # Manual
+        w.cb_spe_mode.setCurrentIndex(2)
+        assert w.get_spe_save_mode() == "manual"
+        assert w.is_save_spe_enabled() is True
+
+
+@case("Scan SPE: save_last_requested 시그널 + 버튼 enable/disable 동작")
+def t_save_last_signal():
+    import sys
+    from PyQt6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication(sys.argv)
+
+    from ui.deepalign.scan.scan_widgets.mirror_scan_widget import MirrorScanWidget
+    w = MirrorScanWidget()
+    # 초기엔 비활성
+    assert w.btn_save_last.isEnabled() is False
+    # buffer 채워졌다고 가정 → 활성화
+    w.set_save_last_enabled(True)
+    assert w.btn_save_last.isEnabled() is True
+
+    # 클릭 시 save_last_requested 시그널 emit
+    fired = []
+    w.save_last_requested.connect(lambda: fired.append(True))
+    w.btn_save_last.click()
+    assert fired == [True]
+
+    # 새 스캔 시작 등으로 비활성화
+    w.set_save_last_enabled(False)
+    assert w.btn_save_last.isEnabled() is False
 
 
 @case("Analysis: compute_centroid_stats 가 알려진 가우시안 중심을 정확히 찾음")

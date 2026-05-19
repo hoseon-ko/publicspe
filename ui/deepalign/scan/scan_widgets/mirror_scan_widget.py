@@ -10,7 +10,7 @@ from typing import Callable, Optional
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QSpinBox, QDoubleSpinBox,
-    QPushButton, QLabel, QFrame, QCheckBox,
+    QPushButton, QLabel, QFrame, QCheckBox, QComboBox,
 )
 
 from theme.styles import (
@@ -34,6 +34,7 @@ class MirrorScanWidget(QWidget):
 
     scan_requested      = pyqtSignal(list, int, int)
     scan_stop_requested = pyqtSignal()
+    save_last_requested = pyqtSignal()   # Save Last 버튼 클릭
 
     def __init__(self, current_pos_provider: Optional[Callable[[int], Optional[int]]] = None,
                  parent=None):
@@ -112,14 +113,25 @@ class MirrorScanWidget(QWidget):
         params_l.addLayout(grid)
         lay.addWidget(sec_params)
 
-        # Save SPE option
-        self.chk_save_spe = QCheckBox("💾 Save SPE (스캔 종료 시 단일 multi-frame 파일)")
-        self.chk_save_spe.setChecked(False)
-        self.chk_save_spe.setStyleSheet(
-            f"color: {C_TEXT_DIM}; font-family: '{Fonts.MONO}';"
-            f" font-size: 11px; background: transparent; border: none;"
+        # Save SPE 옵션 — Off / Auto-save / Manual + Save Last 버튼
+        spe_row = QHBoxLayout()
+        spe_row.setSpacing(6)
+        self.cb_spe_mode = QComboBox()
+        self.cb_spe_mode.addItems(["💾 SPE: Off", "💾 SPE: Auto-save", "💾 SPE: Manual"])
+        self.cb_spe_mode.setCurrentIndex(0)
+        self.cb_spe_mode.setStyleSheet(
+            f"QComboBox {{ background:#080e1e; color:#c0d0ff; border:1px solid #0f3460;"
+            f" border-radius:3px; font-family:'{Fonts.MONO}'; font-size:11px; padding:2px 6px; }}"
+            f"QComboBox::drop-down {{ border:none; }}"
+            f"QComboBox QAbstractItemView {{ background:#0f1729; color:#c0d0ff; }}"
         )
-        lay.addWidget(self.chk_save_spe)
+        self.btn_save_last = QPushButton("💾 Save Last")
+        self.btn_save_last.setEnabled(False)
+        self.btn_save_last.setStyleSheet(BTN_SMALL)
+        self.btn_save_last.clicked.connect(self.save_last_requested)
+        spe_row.addWidget(self.cb_spe_mode, 1)
+        spe_row.addWidget(self.btn_save_last)
+        lay.addLayout(spe_row)
 
         # Action buttons — PicoCard와 동일한 BTN_SMALL
         btn_row = QHBoxLayout()
@@ -172,5 +184,14 @@ class MirrorScanWidget(QWidget):
     def get_move_timeout_ms(self) -> int:
         return int(round(float(self.spin_timeout.value()) * 1000.0))
 
+    def get_spe_save_mode(self) -> str:
+        """'off' | 'auto' | 'manual'."""
+        return ("off", "auto", "manual")[max(0, self.cb_spe_mode.currentIndex())]
+
     def is_save_spe_enabled(self) -> bool:
-        return bool(self.chk_save_spe.isChecked())
+        """Off 가 아니면 buffer 채워야 함 (auto/manual 둘 다 buffer 필요)."""
+        return self.get_spe_save_mode() != "off"
+
+    def set_save_last_enabled(self, enabled: bool) -> None:
+        """스캔 종료 후 buffer 가 있으면 Save Last 버튼 활성, 없으면 비활성."""
+        self.btn_save_last.setEnabled(bool(enabled))
