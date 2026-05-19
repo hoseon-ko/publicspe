@@ -287,7 +287,7 @@ class KIMMZController:
                 return
             params = [p.strip() for p in params_str[1].split(",") if p.strip()]
             if len(params) >= 8:
-                for i in range(5):      # X Y Z Tx Ty
+                for i in range(6):      # X Y Z Tx Ty Tz
                     self._positions[i] = float(params[i])
                 self._servo_on = params[6] == "1"
             elif len(params) >= 2:
