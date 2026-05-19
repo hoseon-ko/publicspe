@@ -512,6 +512,56 @@ def t_save_spe_modes():
         assert w.is_save_spe_enabled() is True
 
 
+@case("Scan dock: 썸네일/테이블 row 선택 → _push_frame 호출 (viewer 동기화)")
+def t_dock_row_sync():
+    """_on_da_frame_row / _on_af_frame_row 가 _da_frames_view buffer 의 frame 을
+    _push_frame 으로 흘리는지 검증. main_tab 인스턴스 없이 메서드만 unbound 로
+    호출 — buffer / list_widget / table_widget 만 mock.
+    """
+    import numpy as np
+    from unittest.mock import MagicMock
+    from ui.deepalign.deepalign_main_tab import DeepAlignMainTab
+
+    host = MagicMock()
+    host._da_frames_view = [
+        np.full((4, 4), i, dtype=np.uint16) for i in range(3)
+    ]
+    host.da_frame_list = MagicMock()
+    host.da_table = MagicMock()
+    pushed = []
+    host._push_frame = lambda f, **kw: pushed.append((f.copy(), kw))
+
+    DeepAlignMainTab._on_da_frame_row(host, 1)
+    assert len(pushed) == 1
+    assert pushed[0][0][0, 0] == 1  # frame index 1 의 fill 값
+    # 양쪽 위젯 동기 선택
+    host.da_frame_list.setCurrentRow.assert_called_with(1)
+    host.da_table.selectRow.assert_called_with(1)
+    # 재진입 방지 blockSignals 호출
+    assert host.da_frame_list.blockSignals.call_count >= 2  # True + False
+    assert host.da_table.blockSignals.call_count >= 2
+
+
+@case("Scan dock: 범위 밖 row 면 no-op (안전)")
+def t_dock_row_out_of_range():
+    import numpy as np
+    from unittest.mock import MagicMock
+    from ui.deepalign.deepalign_main_tab import DeepAlignMainTab
+
+    host = MagicMock()
+    host._da_frames_view = [np.zeros((2, 2), dtype=np.uint16)]
+    host.da_frame_list = MagicMock()
+    host.da_table = MagicMock()
+    pushed = []
+    host._push_frame = lambda f, **kw: pushed.append(True)
+
+    # 음수 / 범위 초과 — 모두 무시
+    DeepAlignMainTab._on_da_frame_row(host, -1)
+    DeepAlignMainTab._on_da_frame_row(host, 99)
+    assert pushed == []
+    host.da_frame_list.setCurrentRow.assert_not_called()
+
+
 @case("Scan SPE: save_last_requested 시그널 + 버튼 enable/disable 동작")
 def t_save_last_signal():
     import sys

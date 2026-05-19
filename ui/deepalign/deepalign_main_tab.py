@@ -1357,8 +1357,16 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
     def _clear_da_dock(self) -> None:
         if hasattr(self, "da_frame_list"):
             self.da_frame_list.clear()
+            # 클릭 → viewer 동기화 시그널 (한 번만 연결, 재진입 방지)
+            if not getattr(self, "_da_list_signal_wired", False):
+                self.da_frame_list.currentRowChanged.connect(self._on_da_frame_row)
+                self._da_list_signal_wired = True
         if hasattr(self, "da_table"):
             self.da_table.setRowCount(0)
+            if not getattr(self, "_da_table_signal_wired", False):
+                self.da_table.currentCellChanged.connect(
+                    lambda r, c, pr, pc: self._on_da_frame_row(r))
+                self._da_table_signal_wired = True
         if hasattr(self, "da_log"):
             self.da_log.clear()
         if hasattr(self, "da_plot_panel"):
@@ -1368,12 +1376,21 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
                 except Exception: pass
         self._da_cent_x_series: list[float] = []
         self._da_cent_y_series: list[float] = []
+        # 썸네일 ↔ 원본 frame 매핑 buffer (선택 시 viewer 표시용, SPE 옵션과 무관)
+        self._da_frames_view: list = []
 
     def _clear_af_dock(self) -> None:
         if hasattr(self, "af_frame_list"):
             self.af_frame_list.clear()
+            if not getattr(self, "_af_list_signal_wired", False):
+                self.af_frame_list.currentRowChanged.connect(self._on_af_frame_row)
+                self._af_list_signal_wired = True
         if hasattr(self, "af_table"):
             self.af_table.setRowCount(0)
+            if not getattr(self, "_af_table_signal_wired", False):
+                self.af_table.currentCellChanged.connect(
+                    lambda r, c, pr, pc: self._on_af_frame_row(r))
+                self._af_table_signal_wired = True
         if hasattr(self, "af_log"):
             self.af_log.clear()
         if hasattr(self, "af_plot_panel"):
@@ -1383,6 +1400,51 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
                 except Exception: pass
         self._af_z_series: list[float] = []
         self._af_sh_series: list[float] = []
+        self._af_frames_view: list = []
+
+    # ── 썸네일/테이블 → viewer 동기화 ────────────────────────────────────
+
+    def _on_da_frame_row(self, row: int) -> None:
+        """Mirror dock — 썸네일/테이블 행 선택 시 viewer + table 동시 동기화."""
+        if row < 0 or row >= len(getattr(self, "_da_frames_view", [])):
+            return
+        # frame_list ↔ table 양쪽 선택 동기화 (재진입 방지: blockSignals)
+        try:
+            self.da_frame_list.blockSignals(True)
+            self.da_frame_list.setCurrentRow(row)
+        finally:
+            self.da_frame_list.blockSignals(False)
+        try:
+            self.da_table.blockSignals(True)
+            self.da_table.selectRow(row)
+        finally:
+            self.da_table.blockSignals(False)
+        # viewer 로 frame push
+        frame = self._da_frames_view[row]
+        try:
+            self._push_frame(frame, gallery_label=f"Scan_{row+1:03d}", source="snap")
+        except Exception as e:
+            dev_logger.warning(f"[Scan] da row {row} viewer 동기화 실패: {e}")
+
+    def _on_af_frame_row(self, row: int) -> None:
+        """KIMM dock — 동일 패턴."""
+        if row < 0 or row >= len(getattr(self, "_af_frames_view", [])):
+            return
+        try:
+            self.af_frame_list.blockSignals(True)
+            self.af_frame_list.setCurrentRow(row)
+        finally:
+            self.af_frame_list.blockSignals(False)
+        try:
+            self.af_table.blockSignals(True)
+            self.af_table.selectRow(row)
+        finally:
+            self.af_table.blockSignals(False)
+        frame = self._af_frames_view[row]
+        try:
+            self._push_frame(frame, gallery_label=f"Scan_{row+1:03d}", source="snap")
+        except Exception as e:
+            dev_logger.warning(f"[Scan] af row {row} viewer 동기화 실패: {e}")
 
     def _append_thumbnail(self, list_widget, frame, label: str) -> None:
         from PyQt6.QtWidgets import QListWidgetItem
@@ -1402,6 +1464,9 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         """Mirror scan 결과 dock 갱신. point=(motor, target_steps), result=centroid stats."""
         from PyQt6.QtWidgets import QTableWidgetItem
         from PyQt6.QtCore import Qt
+
+        # frame 을 view buffer 에 누적 (썸네일 선택 → viewer 동기화용)
+        self._da_frames_view.append(frame)
 
         # 썸네일
         if hasattr(self, "da_frame_list"):
@@ -1466,6 +1531,9 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         if isinstance(result, dict):
             sh = float(result.get("sharpness", 0.0))
             z  = float(result.get("z", z))
+
+        # frame 누적 (선택 → viewer 동기화용)
+        self._af_frames_view.append(frame)
 
         if hasattr(self, "af_frame_list"):
             self._append_thumbnail(self.af_frame_list, frame, f"#{idx}")
