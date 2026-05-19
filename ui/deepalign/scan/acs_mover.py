@@ -44,7 +44,10 @@ class AcsMover:
                 "ACS dry_run 모드: 실제 이동이 발생하지 않아 스캔을 진행하지 않음"
             )
 
-        targets = np.asarray(point, dtype=float).reshape(-1)
+        # AcsScanWidget 은 (cal_pos, dof_dict) 튜플로 emit. 옛 호출자가
+        # ndarray 만 넘기는 경우도 호환.
+        cal = point[0] if isinstance(point, tuple) and len(point) >= 1 else point
+        targets = np.asarray(cal, dtype=float).reshape(-1)
         if targets.size != 6:
             raise ValueError(f"ACS point는 6개 값이어야 함 (got {targets.size})")
 

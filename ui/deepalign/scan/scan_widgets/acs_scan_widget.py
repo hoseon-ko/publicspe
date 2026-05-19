@@ -251,7 +251,8 @@ class AcsScanWidget(QWidget):
         base_dof = [float(s.value()) for s in self.spin_baseline]
 
         sweep = np.linspace(start, end, n)
-        cal_pos_list: list[np.ndarray] = []
+        # point = (cal_pos, dof_dict) — worker 가 record 에 양쪽 모두 기록
+        points_payload: list[tuple] = []
         violations: list[tuple[int, float, list[str]]] = []
         for i, v in enumerate(sweep, 1):
             dof = base_dof.copy()
@@ -265,7 +266,8 @@ class AcsScanWidget(QWidget):
             if not ok:
                 violations.append((i, float(v), vio))
                 continue
-            cal_pos_list.append(cal)
+            dof_dict = {name: float(val) for name, val in zip(self.DOF_LABELS, dof)}
+            points_payload.append((cal, dof_dict))
 
         if violations:
             self.txt_preview.setPlainText(
@@ -284,18 +286,20 @@ class AcsScanWidget(QWidget):
         # 미리보기
         label = self.DOF_LABELS[dof_idx]
         unit  = self.DOF_UNITS[dof_idx].strip()
+        first_cal = points_payload[0][0]
+        last_cal  = points_payload[-1][0]
         lines = [
             f"✓ 키네마틱 스캔 준비: {label} {start:+.4f} → {end:+.4f} {unit}, N={n}",
             "  baseline DOF: " + ", ".join(f"{n_}={v:+.4f}" for n_, v in zip(self.DOF_LABELS, base_dof)),
             "  CalPos 첫/끝 점 (Y1 Z1 X1 Z2 Y2 Z3):",
-            "    [0]   " + " ".join(f"{x:+.4f}" for x in cal_pos_list[0]),
+            "    [0]   " + " ".join(f"{x:+.4f}" for x in first_cal),
         ]
-        if len(cal_pos_list) > 1:
-            lines.append(f"    [{len(cal_pos_list)-1}]   " + " ".join(f"{x:+.4f}" for x in cal_pos_list[-1]))
+        if len(points_payload) > 1:
+            lines.append(f"    [{len(points_payload)-1}]   " + " ".join(f"{x:+.4f}" for x in last_cal))
         self.txt_preview.setPlainText("\n".join(lines))
 
         self.scan_requested.emit(
-            cal_pos_list,
+            points_payload,
             int(self.spin_settle.value()),
             int(self.spin_avg.value()),
         )

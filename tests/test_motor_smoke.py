@@ -395,14 +395,19 @@ def t_kimm_record():
     assert "sharpness" in recs[0]
 
 
-@case("Scan record: _AcsScanWorker 가 6축 위치를 record 로 emit (Y1/Z1/X1/Z2/Y2/Z3)")
-def t_acs_record():
+@case("Scan record: _AcsScanWorker 가 (cal_pos, dof) 튜플에서 6모터 + 6DOF 모두 기록")
+def t_acs_record_full():
+    """point payload = (cal_pos ndarray, dof_dict) 일 때 record 에
+    Y1/Z1/X1/Z2/Y2/Z3 + Tx/Ty/Tz/Rx/Ry/Rz 모두 들어가야 함."""
     import numpy as np
     from unittest.mock import MagicMock
     from ui.deepalign.scan.acs_scan_worker import _AcsScanWorker
 
     snap_fn = MagicMock(return_value=np.zeros((4, 4), dtype=np.uint16))
-    pt = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=float)
+    cal_pos = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=float)
+    dof = {"Tx": 1.0, "Ty": 2.0, "Tz": 3.0, "Rx": 10.0, "Ry": 20.0, "Rz": 30.0}
+    pt = (cal_pos, dof)
+
     w = _AcsScanWorker(MagicMock(), snap_fn, points=[pt],
                        process_fn=None, settle_ms=0, avg_frames=1)
     recs = []
@@ -413,6 +418,58 @@ def t_acs_record():
     assert rec["scan_type"] == "acs_6axis"
     for i, name in enumerate(["Y1", "Z1", "X1", "Z2", "Y2", "Z3"]):
         assert abs(rec[name] - (0.1 + i * 0.1)) < 1e-9
+    for name in ["Tx", "Ty", "Tz", "Rx", "Ry", "Rz"]:
+        assert rec[name] == dof[name], f"{name} 누락/오류: {rec[name]} vs {dof[name]}"
+
+
+@case("Scan record: ACS — 옛 호환 ndarray-only point 도 처리 (DOF 는 None)")
+def t_acs_record_legacy_ndarray():
+    """tuple 아닌 ndarray 단독 point (옛 호출자) 도 안전 처리 — DOF 는 None."""
+    import numpy as np
+    from unittest.mock import MagicMock
+    from ui.deepalign.scan.acs_scan_worker import _AcsScanWorker
+
+    snap_fn = MagicMock(return_value=np.zeros((4, 4), dtype=np.uint16))
+    pt = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], dtype=float)
+    w = _AcsScanWorker(MagicMock(), snap_fn, points=[pt],
+                       process_fn=None, settle_ms=0, avg_frames=1)
+    recs = []
+    w.point_done.connect(lambda i, t, p, f, r, rec: recs.append(rec))
+    w.run()
+
+    rec = recs[0]
+    for i, name in enumerate(["Y1", "Z1", "X1", "Z2", "Y2", "Z3"]):
+        assert rec[name] == float(i + 1)
+    for name in ["Tx", "Ty", "Tz", "Rx", "Ry", "Rz"]:
+        assert rec[name] is None
+
+
+@case("Scan: AcsMover.move 가 (cal_pos, dof) 튜플 + ndarray 양쪽 처리")
+def t_acs_mover_accepts_tuple():
+    """widget 이 새 시그니처 (튜플) 로 emit 해도 mover 가 cal_pos 만 추출해
+    hub.acs_move_to 호출해야 함."""
+    import numpy as np
+    from unittest.mock import MagicMock
+    from ui.deepalign.scan.acs_mover import AcsMover
+
+    hub = MagicMock()
+    hub.acs_controller = None
+    m = AcsMover(hub, move_timeout_ms=10000)
+
+    cal = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=float)
+    dof = {"Tx": 1.0, "Ty": 2.0, "Tz": 3.0, "Rx": 0.0, "Ry": 0.0, "Rz": 0.0}
+    m.move((cal, dof))   # tuple
+    assert hub.acs_move_to.call_count == 6
+    for i in range(6):
+        args, _ = hub.acs_move_to.call_args_list[i]
+        assert args[0] == i
+        assert abs(args[1] - float(0.1 + i * 0.1)) < 1e-9
+
+    # ndarray 단독도 (옛 호환)
+    hub2 = MagicMock(); hub2.acs_controller = None
+    m2 = AcsMover(hub2, move_timeout_ms=10000)
+    m2.move(cal)
+    assert hub2.acs_move_to.call_count == 6
 
 
 @case("Scan record: base class _make_step_record 기본은 빈 dict")
