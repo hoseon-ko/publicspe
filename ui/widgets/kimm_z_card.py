@@ -281,11 +281,25 @@ class KimmZCard(QFrame):
 
     def _on_jog_clicked(self, delta: float):
         if self._session_hub:
-            cur = self._session_hub.kimm_get_z()
-            self._session_hub.kimm_move_to_z(cur + delta)
+            import threading
+            def run():
+                try:
+                    cur = self._session_hub.kimm_get_z()
+                    self._session_hub.kimm_move_to_z(cur + delta)
+                except Exception as e:
+                    self.log_message.emit(f"KIMM Jog failed: {e}")
+            threading.Thread(target=run, daemon=True).start()
 
     def _on_go_clicked(self):
-        if self._session_hub: self._session_hub.kimm_move_to_z(self.spin_abs.value())
+        if self._session_hub:
+            import threading
+            target_val = self.spin_abs.value()
+            def run():
+                try:
+                    self._session_hub.kimm_move_to_z(target_val)
+                except Exception as e:
+                    self.log_message.emit(f"KIMM Go failed: {e}")
+            threading.Thread(target=run, daemon=True).start()
 
     def _save_settings(self):
         c = self._cfg

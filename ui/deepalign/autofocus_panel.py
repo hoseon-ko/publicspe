@@ -140,14 +140,18 @@ class AutoFocusPanel(QWidget):
         return self._best_z
 
     def _on_goto_best(self):
-        """GO 버튼 — Best-Z 위치로 hub.kimm_move_to_z 호출."""
+        """GO 버튼 — Best-Z 위치로 hub.kimm_move_to_z 호출 (비차단)."""
         if self._best_z is None or self._session_hub is None:
             return
-        try:
-            self._session_hub.kimm_move_to_z(float(self._best_z))
-        except Exception as e:
-            from core.logger import dev_logger
-            dev_logger.warning(f"[AutoFocusPanel] GO 이동 실패: {e}")
+        import threading
+        target_val = float(self._best_z)
+        def run():
+            try:
+                self._session_hub.kimm_move_to_z(target_val)
+            except Exception as e:
+                from core.logger import dev_logger
+                dev_logger.warning(f"[AutoFocusPanel] GO 이동 실패: {e}")
+        threading.Thread(target=run, daemon=True).start()
 
     # ── 옛 마스터 바 호출 호환 stub (no-op) ────────────────────────────
 
