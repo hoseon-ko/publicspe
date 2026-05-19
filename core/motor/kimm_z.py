@@ -21,7 +21,7 @@ from core.logger import dev_logger
 
 log = logging.getLogger(__name__)
 
-AXIS_Z = 4  # Z-stage physically wired to Slot 4 (Tx)
+AXIS_Z = 3  # Motion control axis (0-indexed for Slot 4)
 AXIS_TX = 4
 AXIS_TY = 5
 
@@ -72,7 +72,7 @@ class KIMMZController:
     @property
     def current_z(self) -> float:
         """마지막으로 수신된 Z 위치 (um)."""
-        return self._positions[AXIS_Z - 1]
+        return self._positions[AXIS_Z]
 
     @property
     def is_moving(self) -> bool:
