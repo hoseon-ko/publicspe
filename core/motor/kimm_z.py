@@ -142,7 +142,12 @@ class KIMMZController:
             raise RuntimeError("Motion already in progress. Ignoring command.")
 
         try:
-            cmd = f"Move({AXIS_Z},Abs,{target_um:.3f},{vel:.0f})\r\n"
+            # AXIS_Z가 4(Tx) 또는 5(Ty) 이면 패킷 전송 시 position / 1000 처리 (C# KIMMCtrl.cs 규격)
+            target_val = target_um
+            if AXIS_Z in (4, 5):
+                target_val = target_um / 1000.0
+
+            cmd = f"Move({AXIS_Z},Abs,{target_val:.6f},{vel:.0f})\r\n"
 
             if self.dry_run:
                 log.info(f"[KIMM DRY-RUN] {cmd.strip()} (Limit={self.z_safety_limit})")
@@ -175,7 +180,12 @@ class KIMMZController:
         self._is_moving = True
         self._ack_received.clear()
         self._done_received.clear()
-        self._send(f"Move({AXIS_Z},Abs,{target_um:.3f},{vel:.0f})\r\n")
+        
+        target_val = target_um
+        if AXIS_Z in (4, 5):
+            target_val = target_um / 1000.0
+            
+        self._send(f"Move({AXIS_Z},Abs,{target_val:.6f},{vel:.0f})\r\n")
 
     def move_by_z(self, delta_um: float, velocity: Optional[float] = None) -> None:
         """Z축 상대 이동."""
@@ -192,7 +202,11 @@ class KIMMZController:
             raise RuntimeError("Motion already in progress. Ignoring command.")
 
         try:
-            cmd = f"Move({AXIS_Z},Rel,{delta_um:.3f},{vel:.0f})\r\n"
+            delta_val = delta_um
+            if AXIS_Z in (4, 5):
+                delta_val = delta_um / 1000.0
+
+            cmd = f"Move({AXIS_Z},Rel,{delta_val:.6f},{vel:.0f})\r\n"
 
             if self.dry_run:
                 log.info(f"[KIMM DRY-RUN] {cmd.strip()} (Limit={self.z_safety_limit})")
