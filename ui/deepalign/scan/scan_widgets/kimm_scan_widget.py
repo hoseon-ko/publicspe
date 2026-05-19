@@ -17,7 +17,9 @@ from theme.styles import (
     C_ACCENT, C_DANGER, C_TEXT_DIM, Fonts, BTN_SMALL, SPIN_STYLE, lbl,
 )
 from ui.widgets.collapsible_section import CollapsibleSection
-from ui.deepalign.scan.scan_widgets._common import status_label, apply_status
+from ui.deepalign.scan.scan_widgets._common import (
+    status_label, apply_status, PhaseIndicator,
+)
 
 
 class KimmScanWidget(QWidget):
@@ -110,6 +112,9 @@ class KimmScanWidget(QWidget):
         btn_row.addWidget(self.btn_stop)
         lay.addLayout(btn_row)
 
+        self.phase_indicator = PhaseIndicator(accent=C_ACCENT)
+        lay.addWidget(self.phase_indicator)
+
         self.lbl_status = status_label()
         lay.addWidget(self.lbl_status)
 
@@ -126,6 +131,11 @@ class KimmScanWidget(QWidget):
     def set_scan_running(self, running: bool) -> None:
         self.btn_start.setEnabled(not running)
         self.btn_stop.setEnabled(running)
+        if not running:
+            self.phase_indicator.reset()
+
+    def set_phase(self, idx: int, total: int, phase: str) -> None:
+        self.phase_indicator.set_phase(idx, total, phase)
 
     def get_move_timeout_ms(self) -> int:
         return int(round(float(self.spin_timeout.value()) * 1000.0))

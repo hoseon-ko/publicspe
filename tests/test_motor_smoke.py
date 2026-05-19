@@ -341,6 +341,101 @@ def t_acs_last_states_independent():
             f"axis {i} 가 axis 2 와 dict 공유됨"
 
 
+@case("Scan: phase 시그널이 move→settle→snap→done 순으로 emit (UI 인디케이터용)")
+def t_scan_phase_sequence():
+    """PhaseIndicator 가 단계별 갱신될 수 있도록 worker 가 phase 시그널을
+    올바른 순서로 emit 하는지 검증.
+    """
+    import numpy as np
+    from unittest.mock import MagicMock
+    from ui.deepalign.scan._scan_base import (
+        _ScanWorkerBase, PHASE_MOVE, PHASE_SETTLE, PHASE_SNAP, PHASE_DONE,
+    )
+
+    mover = MagicMock()
+    snap_fn = MagicMock(return_value=np.zeros((2, 2), dtype=np.uint16))
+
+    worker = _ScanWorkerBase(mover, snap_fn, points=[10, 20],
+                             settle_ms=1, avg_frames=1)
+    phases = []
+    worker.phase.connect(lambda idx, total, ph, _d: phases.append((idx, ph)))
+    worker.run()
+
+    # 포인트당 move → settle → snap → done 의 4단계
+    expected = [
+        (1, PHASE_MOVE), (1, PHASE_SETTLE), (1, PHASE_SNAP), (1, PHASE_DONE),
+        (2, PHASE_MOVE), (2, PHASE_SETTLE), (2, PHASE_SNAP), (2, PHASE_DONE),
+    ]
+    assert phases == expected, f"phase 순서 비정상: {phases}"
+
+
+@case("Scan: process_fn 있으면 compute phase 도 emit")
+def t_scan_phase_compute():
+    import numpy as np
+    from unittest.mock import MagicMock
+    from ui.deepalign.scan._scan_base import _ScanWorkerBase, PHASE_COMPUTE
+
+    mover = MagicMock()
+    snap_fn = MagicMock(return_value=np.zeros((2, 2), dtype=np.uint16))
+    process_fn = MagicMock(return_value=42)
+
+    worker = _ScanWorkerBase(mover, snap_fn, points=[1],
+                             process_fn=process_fn, settle_ms=0, avg_frames=1)
+    phases = []
+    worker.phase.connect(lambda idx, total, ph, _d: phases.append(ph))
+    worker.run()
+
+    assert PHASE_COMPUTE in phases, f"compute phase 누락: {phases}"
+
+
+@case("Scan: settle_ms=0 이면 settle phase 생략")
+def t_scan_phase_skip_settle():
+    import numpy as np
+    from unittest.mock import MagicMock
+    from ui.deepalign.scan._scan_base import _ScanWorkerBase, PHASE_SETTLE
+
+    mover = MagicMock()
+    snap_fn = MagicMock(return_value=np.zeros((2, 2), dtype=np.uint16))
+    worker = _ScanWorkerBase(mover, snap_fn, points=[1],
+                             settle_ms=0, avg_frames=1)
+    phases = []
+    worker.phase.connect(lambda idx, total, ph, _d: phases.append(ph))
+    worker.run()
+
+    assert PHASE_SETTLE not in phases, f"settle phase 가 잘못 emit: {phases}"
+
+
+@case("PhaseIndicator: set_phase 갱신 + reset 동작")
+def t_phase_indicator_widget():
+    import sys
+    from PyQt6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication(sys.argv)
+
+    from ui.deepalign.scan.scan_widgets._common import PhaseIndicator
+    ind = PhaseIndicator(accent="#22d3ee")
+    # 초기 상태
+    assert ind.lbl_count.text() == "—/—"
+
+    ind.set_phase(3, 10, "snap")
+    assert ind.lbl_count.text() == "3/10"
+    snap_dot, snap_txt = ind._phase_widgets["snap"]
+    assert snap_dot.text() == "●"
+    # 다른 phase 는 off
+    move_dot, _ = ind._phase_widgets["move"]
+    assert move_dot.text() == "○"
+
+    # done 은 모두 on
+    ind.set_phase(10, 10, "done")
+    for k, (dot, _) in ind._phase_widgets.items():
+        assert dot.text() == "●", f"done 시 {k} dot off"
+
+    # reset
+    ind.reset()
+    assert ind.lbl_count.text() == "—/—"
+    for k, (dot, _) in ind._phase_widgets.items():
+        assert dot.text() == "○", f"reset 후 {k} dot still on"
+
+
 @case("Scan: _ScanWorkerBase 가 포인트마다 point_done(frame=...) emit (viewer 전달용)")
 def t_scan_worker_emits_point_done_with_frame():
     """main_tab._scan_start 가 point_done 을 _push_frame 으로 라우팅하므로,

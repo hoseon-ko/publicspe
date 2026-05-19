@@ -2,8 +2,19 @@
 
 from __future__ import annotations
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QLabel, QSpinBox, QDoubleSpinBox, QPushButton, QFrame
+from PyQt6.QtWidgets import (
+    QLabel, QSpinBox, QDoubleSpinBox, QPushButton, QFrame,
+    QWidget, QHBoxLayout,
+)
 from theme.styles import C_ACCENT, C_DANGER, C_TEXT_DIM, Fonts
+
+# Phase 식별자 — _scan_base.PHASE_* 와 동일 (의존성 분리 목적으로 여기 재선언)
+PHASE_LABELS = [
+    ("move",    "MOVE"),
+    ("settle",  "SETTLE"),
+    ("snap",    "SNAP"),
+    ("compute", "COMPUTE"),
+]
 
 
 SPIN_QSS = f"""
@@ -93,6 +104,111 @@ def status_label() -> QLabel:
 _STATUS_COLORS = {
     "info": "#a0b0d0", "ok": C_ACCENT, "warn": "#facc15", "err": C_DANGER,
 }
+
+
+class PhaseIndicator(QWidget):
+    """스캔 진행 단계 시각화 — MOVE → SETTLE → SNAP → COMPUTE.
+
+    현재 phase 만 accent 색으로 강조, 나머지는 dim. progress 카운터 (idx/total)
+    까지 한 줄에 함께 표시.
+
+    UI 사용:
+        ind = PhaseIndicator(accent=C_ACCENT)
+        ind.set_phase(idx=3, total=10, phase="snap")  # 도트 갱신
+        ind.reset()                                    # 모두 dim, "—/—"
+    """
+
+    _DOT_ON  = "●"
+    _DOT_OFF = "○"
+
+    def __init__(self, accent: str = C_ACCENT, parent=None):
+        super().__init__(parent)
+        self._accent = accent
+        self._dim    = "#3a4a64"
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 2, 0, 2)
+        root.setSpacing(8)
+
+        # 좌측: idx/total 카운터
+        self.lbl_count = QLabel("—/—")
+        self.lbl_count.setStyleSheet(
+            f"color: {C_TEXT_DIM}; font-family: '{Fonts.MONO}';"
+            f" font-size: 11px; font-weight: bold;"
+            f" background: transparent; border: none;"
+            f" min-width: 44px;"
+        )
+        root.addWidget(self.lbl_count)
+
+        # 우측: 4 phase 도트 + 라벨
+        self._phase_widgets: dict[str, tuple[QLabel, QLabel]] = {}
+        for key, label in PHASE_LABELS:
+            dot = QLabel(self._DOT_OFF)
+            dot.setStyleSheet(
+                f"color: {self._dim}; font-family: '{Fonts.MONO}';"
+                f" font-size: 12px;"
+                f" background: transparent; border: none;"
+            )
+            txt = QLabel(label)
+            txt.setStyleSheet(
+                f"color: {self._dim}; font-family: '{Fonts.MONO}';"
+                f" font-size: 10px; letter-spacing: 1px;"
+                f" background: transparent; border: none;"
+            )
+            root.addWidget(dot)
+            root.addWidget(txt)
+            self._phase_widgets[key] = (dot, txt)
+        root.addStretch(1)
+
+    # ── 외부 API ──────────────────────────────────────────────────────────
+
+    def set_phase(self, idx: int, total: int, phase: str) -> None:
+        """현재 phase 강조. phase ∈ {"move","settle","snap","compute","done"}."""
+        self.lbl_count.setText(f"{idx}/{total}")
+        # done 은 4단계 모두 ok 처리, 그 외엔 해당 phase 만 강조
+        for key, (dot, txt) in self._phase_widgets.items():
+            if phase == "done" or key == phase:
+                dot.setText(self._DOT_ON)
+                dot.setStyleSheet(
+                    f"color: {self._accent}; font-family: '{Fonts.MONO}';"
+                    f" font-size: 12px;"
+                    f" background: transparent; border: none;"
+                )
+                txt.setStyleSheet(
+                    f"color: {self._accent}; font-family: '{Fonts.MONO}';"
+                    f" font-size: 10px; letter-spacing: 1px; font-weight: bold;"
+                    f" background: transparent; border: none;"
+                )
+            else:
+                dot.setText(self._DOT_OFF)
+                dot.setStyleSheet(
+                    f"color: {self._dim}; font-family: '{Fonts.MONO}';"
+                    f" font-size: 12px;"
+                    f" background: transparent; border: none;"
+                )
+                txt.setStyleSheet(
+                    f"color: {self._dim}; font-family: '{Fonts.MONO}';"
+                    f" font-size: 10px; letter-spacing: 1px;"
+                    f" background: transparent; border: none;"
+                )
+
+    def reset(self) -> None:
+        """모든 도트를 idle 상태로."""
+        self.lbl_count.setText("—/—")
+        for _key, (dot, txt) in self._phase_widgets.items():
+            dot.setText(self._DOT_OFF)
+            dot.setStyleSheet(
+                f"color: {self._dim}; font-family: '{Fonts.MONO}';"
+                f" font-size: 12px;"
+                f" background: transparent; border: none;"
+            )
+            txt.setStyleSheet(
+                f"color: {self._dim}; font-family: '{Fonts.MONO}';"
+                f" font-size: 10px; letter-spacing: 1px;"
+                f" background: transparent; border: none;"
+            )
 
 def apply_status(label: QLabel, msg: str, kind: str = "info") -> None:
     color = _STATUS_COLORS.get(kind, _STATUS_COLORS["info"])

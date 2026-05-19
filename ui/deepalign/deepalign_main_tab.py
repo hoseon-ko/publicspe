@@ -1132,11 +1132,22 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         worker.moveToThread(self._scan_thread)
         self._scan_thread.started.connect(worker.run)
 
-        worker.progress.connect(
-            lambda idx, total: scan_widget.set_scan_status(f"{idx}/{total}", "info")
-        )
+        # progress 는 phase 시그널이 자체적으로 idx/total 을 갱신하므로 생략 가능.
+        # set_scan_status 는 phase 의 detail 라인 (snap 1/3 같은 짧은 텍스트) 으로 사용.
         worker.error.connect(lambda msg: scan_widget.set_scan_status(msg, "err"))
-        worker.log.connect(lambda msg: dev_logger.info(f"[Scan] {msg}"))
+
+        # log 메시지를 dev_logger + scan_widget 상태 라벨 양쪽에 표시 (user-visible).
+        # 단계별 한국어 이모지 메시지가 위에 보이고, dev_logger 는 디버깅용.
+        def _on_worker_log(msg: str):
+            dev_logger.info(f"[Scan] {msg}")
+            scan_widget.set_scan_status(msg, "info")
+        worker.log.connect(_on_worker_log)
+
+        # phase 시그널 → scan_widget 의 PhaseIndicator 갱신 (MOVE/SETTLE/SNAP/COMPUTE)
+        def _on_phase(idx: int, total: int, phase: str, _detail: str):
+            if hasattr(scan_widget, "set_phase"):
+                scan_widget.set_phase(idx, total, phase)
+        worker.phase.connect(_on_phase)
 
         # 스캔 포인트마다 캡쳐된 frame 을 image viewer + processing 파이프라인에
         # 흘려보냄. _push_frame 이 background subtraction / proc image /
