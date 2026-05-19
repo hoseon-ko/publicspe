@@ -341,6 +341,67 @@ def t_acs_last_states_independent():
             f"axis {i} 가 axis 2 와 dict 공유됨"
 
 
+@case("ADC combo populate: clear/addItems 가 _save_settings 트리거 안 함 (blockSignals)")
+def t_adc_combo_no_save_trigger():
+    """LayoutBuilderMixin._apply_camera_capabilities 가 ADC 콤보를
+    clear + addItems 로 채울 때 currentTextChanged → _save_settings 가
+    호출되지 않아야 함. 호출되면 사용자 저장값(특히 quality) 가
+    콤보 첫 항목으로 덮어 씌워지는 회귀.
+    """
+    import sys
+    from unittest.mock import MagicMock
+    from PyQt6.QtWidgets import QApplication, QComboBox
+    app = QApplication.instance() or QApplication(sys.argv)
+
+    save_mock = MagicMock()
+
+    class _FakeHost:
+        """LayoutBuilderMixin._apply_camera_capabilities 에 필요한 최소 속성만."""
+        def __init__(self, save):
+            self.cb_adc_quality = QComboBox()
+            self.cb_adc_speed   = QComboBox()
+            self.cb_adc_gain    = QComboBox()
+            self.cb_adc_bit     = QComboBox()
+            # 사용자 저장값 시뮬레이션
+            self.cb_adc_quality.addItem("Low Noise")
+            self.cb_adc_speed.addItem("100kHz")
+            self.cb_adc_gain.addItem("Low")
+            self.cb_adc_bit.addItem("16bit")
+            # 4개 모두 _save_settings 에 연결 (실제 코드와 동일)
+            for cb in (self.cb_adc_quality, self.cb_adc_speed,
+                       self.cb_adc_gain, self.cb_adc_bit):
+                cb.currentTextChanged.connect(save)
+            # 필요 부수 위젯 (가시성 toggle 만 호출)
+            from PyQt6.QtWidgets import QWidget
+            self.sec_fps = QWidget(); self.sec_adc = QWidget(); self.sec_temp = QWidget()
+            self.spin_temp = MagicMock()
+
+    class _Caps:
+        has_fps_control = False
+        has_adc = True
+        has_temperature = False
+        # 카메라 후보 순서가 사용자 저장값(첫 항목=Low Noise) 과 반대로 옴.
+        # 패치 전이면 addItems 후 cb 의 currentText 가 "High Capacity" 로 바뀌어
+        # _save_settings 호출 → 저장 손실.
+        adc_quality_options    = ["High Capacity", "Low Noise"]
+        adc_speed_options      = ["1MHz", "100kHz"]
+        adc_gain_options       = ["High", "Low"]
+        adc_bit_depth_options  = ["12bit", "16bit"]
+
+    from ui.deepalign.deepalign_layout import LayoutBuilderMixin
+    host = _FakeHost(save_mock)
+    LayoutBuilderMixin._apply_camera_capabilities(host, _Caps())
+
+    # _save_settings 가 한 번이라도 호출되면 회귀.
+    assert save_mock.call_count == 0, (
+        f"_save_settings 가 {save_mock.call_count}회 호출됨 — "
+        f"ADC 콤보 populate 중 신호 차단 누락. quality 가 덮어 씌워지는 버그 재발."
+    )
+    # 콤보는 정상적으로 채워져 있어야 함
+    assert host.cb_adc_quality.count() == 2
+    assert host.cb_adc_speed.count() == 2
+
+
 @case("Disconnect: AcsCard 이벤트 핸들러는 hub.acs_disconnect 재호출 안 함")
 def t_acs_card_event_no_reentry():
     """ACS_DISCONNECTED 이벤트 수신 시 UI cleanup 만 — hub 메서드 재호출 금지."""

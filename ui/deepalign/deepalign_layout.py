@@ -1337,27 +1337,25 @@ class LayoutBuilderMixin:
                 self.spin_temp.setMaximum(float(mx))
 
         if has_adc:
-            self.cb_adc_quality.clear()
-            self.cb_adc_speed.clear()
-            self.cb_adc_gain.clear()
-            self.cb_adc_bit.clear()
-
-            # Use capabilities options if available, otherwise use defaults
-            qual_opts = getattr(caps, "adc_quality_options", [])
-            if not qual_opts: qual_opts = ["High Capacity", "Low Noise"]
-            self.cb_adc_quality.addItems([str(x) for x in qual_opts])
-
-            speed_opts = getattr(caps, "adc_speed_options", [])
-            if not speed_opts: speed_opts = ["100kHz", "1MHz"]
-            self.cb_adc_speed.addItems([str(x) for x in speed_opts])
-
-            gain_opts = getattr(caps, "adc_gain_options", [])
-            if not gain_opts: gain_opts = ["1x", "2x"]
-            self.cb_adc_gain.addItems([str(x) for x in gain_opts])
-
-            bit_opts = getattr(caps, "adc_bit_depth_options", [])
-            if not bit_opts: bit_opts = ["16bit", "12bit"]
-            self.cb_adc_bit.addItems([str(x) for x in bit_opts])
+            # ⚠️ clear() + addItems() 는 currentTextChanged 를 발생시킨다.
+            # 이 시그널이 _save_settings 에 연결돼 있어, blockSignals 없이 호출하면
+            # 사용자의 저장된 ADC 값이 콤보 첫 항목(또는 빈 문자열) 으로 덮어
+            # 씌워진다. (특히 quality 가 자주 망가짐 — 카메라 후보 순서와
+            # 사용자 저장값이 다를 때.) 반드시 blockSignals 로 보호.
+            combo_opts = [
+                (self.cb_adc_quality, getattr(caps, "adc_quality_options",  []), ["High Capacity", "Low Noise"]),
+                (self.cb_adc_speed,   getattr(caps, "adc_speed_options",    []), ["100kHz", "1MHz"]),
+                (self.cb_adc_gain,    getattr(caps, "adc_gain_options",     []), ["1x", "2x"]),
+                (self.cb_adc_bit,     getattr(caps, "adc_bit_depth_options",[]), ["16bit", "12bit"]),
+            ]
+            for cb, opts, fallback in combo_opts:
+                items = opts if opts else fallback
+                cb.blockSignals(True)
+                try:
+                    cb.clear()
+                    cb.addItems([str(x) for x in items])
+                finally:
+                    cb.blockSignals(False)
 
     def _create_analysis_page(self):
         page = QWidget()
