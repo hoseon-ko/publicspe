@@ -351,7 +351,7 @@ class MotionTab(QWidget):
             self.acs_card, self.acs_settings_card
         ]
         self._relayout_cards()
-        lay.addLayout(grid, 1)
+        lay.addLayout(grid)
 
     def _relayout_cards(self):
         if not hasattr(self, "_cards_grid"):

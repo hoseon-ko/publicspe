@@ -13,10 +13,10 @@ import sys
 
 # Windows COM Threading Mode Fix (RPC_E_CHANGED_MODE 0x80010106)
 if sys.platform == 'win32':
-    # Qt가 자체적으로 OLE를 초기화하지 않도록 설정 (충돌 방지)
-    os.environ["QT_COM_INIT"] = "0"
-    if not hasattr(sys, 'coinit_flags'):
-        sys.coinit_flags = 2  # MTA (Multi-Threaded Apartment)
+    import ctypes
+    # clr(pythonnet) 및 Qt가 COM 아파트 모델(MTA vs STA)로 충돌하는 것을 방지하기 위해,
+    # 메인 스레드 시작 즉시 OLE를 STA(Single-Threaded Apartment)로 선제 초기화합니다.
+    ctypes.windll.ole32.OleInitialize(None)
 
 import signal
 import threading
@@ -96,7 +96,7 @@ threading.excepthook = _thread_exception_handler
 
 def main():
     # DirectWrite 폰트 관련 무해한 경고 로그 숨기기
-    os.environ["QT_LOGGING_RULES"] = "qt.qpa.fonts=false"
+    os.environ["QT_LOGGING_RULES"] = "qt.qpa.fonts=false;qt.qpa.windows=false"
     
     from core.logger import clear_ui_callbacks
     clear_ui_callbacks()

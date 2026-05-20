@@ -341,7 +341,8 @@ class DeviceSessionHub(QObject):
                     raise HalCommandError("FPS control is not supported")
                 actual = float(hal.set_fps(value))
                 self.publish_status(
-                    f"camera fps set: owner={normalized}, fps={actual:.3f}", source="hub"
+                    f"camera fps set: owner={normalized}, requested={value:.3f}, actual={actual:.3f}",
+                    source="hub",
                 )
                 return actual
             except Exception as exc:

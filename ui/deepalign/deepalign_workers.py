@@ -31,7 +31,7 @@ def _convert_raw_to_rgb(raw, cmap: str, vmin: float, vmax: float) -> np.ndarray:
             arr = np.zeros((32, 32), dtype=np.uint8)
 
     if cmap and str(cmap).lower() != "off":
-        from ui.image_viewer import apply_colormap
+        from ui.colormap_utils import apply_colormap
         rgba = apply_colormap(arr.astype(np.float32), str(cmap), vmin=vmin, vmax=vmax)
         return np.ascontiguousarray(rgba[:, :, :3]).astype(np.uint8)
 

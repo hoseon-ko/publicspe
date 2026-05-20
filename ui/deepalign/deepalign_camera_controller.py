@@ -602,10 +602,14 @@ class CameraControllerMixin(CameraHubMixin):
             try:
                 v = self.cb_vendor.currentText().strip()
                 if self.check_fps_lock.isChecked():
-                    actual = float(self._session_hub.camera_set_fps(OWNER_DEEPALIGN, float(self.spin_fps.value())))
+                    requested = float(self.spin_fps.value())
+                    actual = float(self._session_hub.camera_set_fps(OWNER_DEEPALIGN, requested))
                     self.spin_fps.blockSignals(True)
                     self.spin_fps.setValue(actual)
                     self.spin_fps.blockSignals(False)
+                    dev_logger.debug(
+                        f"[DeepAlign] fps applied via hub requested={requested:.3f}, actual={actual:.3f}"
+                    )
                     try:
                         self._cfg.set_camera_setting("fps", actual, vendor=v)
                         self._cfg.set_camera_setting("fps_lock", True, vendor=v)

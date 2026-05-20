@@ -17,7 +17,10 @@ class CameraCapabilities:
     has_fps_control: bool = False
     has_binarize: bool = False
     supports_range_control: bool = True
-    
+
+    exposure_range_ms: tuple[float, float] = (0.001, 1_000_000.0)
+    fps_range: tuple[float, float] = (0.1, 1000.0)
+
     # Picam / Hardware specific
     temperature_range_c: tuple[float | None, float | None] = (None, None)
     adc_quality_options: list[str] = field(default_factory=list)

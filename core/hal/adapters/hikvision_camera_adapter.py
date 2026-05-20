@@ -20,12 +20,20 @@ class HikvisionCameraAdapter(CameraHal):
         self._colormap: str = "gray"
 
     def capabilities(self) -> CameraCapabilities:
+        exp_range = (0.001, 1_000_000.0)
+        fps_range = (0.1, 1000.0)
+        if self._camera is not None:
+            base_caps = self._camera.capabilities
+            exp_range = base_caps.exposure_range_ms
+            fps_range = base_caps.fps_range
         return CameraCapabilities(
             has_exposure=True,
             has_live=True,
             has_fps_control=True,
             has_binarize=True,
             supports_range_control=True,
+            exposure_range_ms=exp_range,
+            fps_range=fps_range,
             metadata={"vendor": "hikvision"},
         )
 

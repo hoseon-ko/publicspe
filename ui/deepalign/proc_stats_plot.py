@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QCheckBox, QRadioButton,
     QButtonGroup, QPushButton, QLabel, QFrame, QSplitter,
     QTableWidget, QTableWidgetItem, QAbstractItemView, QHeaderView,
+    QFileDialog, QMessageBox
 )
 
 
@@ -34,11 +35,19 @@ SOURCE_SNAP = "snap"
 SOURCE_LIVE = "live"
 SOURCE_ACQ  = "acquire"
 
-# 라인 색 (라벨 색과 일치)
-_COL_MAX  = "#e94560"
-_COL_MEAN = "#4ecdc4"
-_COL_MIN  = "#ffe66d"
-
+# 동적 옵션 정의: (표시명, 키, 색상, 기본활성화여부)
+_OPTIONS = [
+    ("Opt 1", "opt1", "#4ecdc4", True),
+    ("Opt 2", "opt2", "#ffe66d", True),
+    ("Opt 3", "opt3", "#e94560", True),
+    ("Opt 4", "opt4", "#38bdf8", False),
+    ("Opt 5", "opt5", "#fbbf24", False),
+    ("Opt 6", "opt6", "#a78bfa", False),
+    ("Opt 7", "opt7", "#f472b6", False),
+    ("Opt 8", "opt8", "#34d399", False),
+    ("Opt 9", "opt9", "#fb923c", False),
+    ("Opt 10", "opt10", "#94a3b8", False),
+]
 
 class _IntAxis(pg.AxisItem):
     """Sample # 는 정수만 — 0.5, 1.5 같은 분수 tick 제거."""
@@ -59,13 +68,13 @@ class _IntAxis(pg.AxisItem):
 
 
 class ProcStatsPlot(QWidget):
-    """Mode 1/2/3 결과 통계 시계열 플롯."""
+    """Mode 1/2/3 결과 통계 시계열 플롯 (10가지 옵션 지원)."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._buf_mean = deque(maxlen=_MAX_POINTS)
-        self._buf_min  = deque(maxlen=_MAX_POINTS)
-        self._buf_max  = deque(maxlen=_MAX_POINTS)
+        self._buffers = {opt[1]: deque(maxlen=_MAX_POINTS) for opt in _OPTIONS}
+        self._curves = {}
+        self._checks = {}
         self._build_ui()
         self._install_hover()
 
@@ -75,14 +84,13 @@ class ProcStatsPlot(QWidget):
         v.setContentsMargins(6, 6, 6, 6)
         v.setSpacing(4)
 
-        # 컨트롤 줄
-        row = QHBoxLayout()
-        row.setSpacing(6)
+        # 컨트롤 줄 1
+        row1 = QHBoxLayout()
+        row1.setSpacing(6)
         self.chk_enable = QCheckBox("Enable")
         self.chk_enable.setChecked(False)
-        row.addWidget(self.chk_enable)
-
-        row.addWidget(self._vsep())
+        row1.addWidget(self.chk_enable)
+        row1.addWidget(self._vsep())
 
         self.radio_snap = QRadioButton("SNAP")
         self.radio_live = QRadioButton("LIVE")
@@ -93,24 +101,18 @@ class ProcStatsPlot(QWidget):
         self._grp.addButton(self.radio_live, 1)
         self._grp.addButton(self.radio_all,  2)
         for rb in (self.radio_snap, self.radio_live, self.radio_all):
-            row.addWidget(rb)
-
-        row.addWidget(self._vsep())
-
-        # 라인 가시성 토글 — mean/min/max
-        self.chk_mean = self._mk_color_check("mean", _COL_MEAN, True)
-        self.chk_min  = self._mk_color_check("min",  _COL_MIN,  True)
-        self.chk_max  = self._mk_color_check("max",  _COL_MAX,  True)
-        for c in (self.chk_mean, self.chk_min, self.chk_max):
-            row.addWidget(c)
-
-        row.addStretch()
+            row1.addWidget(rb)
+        row1.addWidget(self._vsep())
 
         self.btn_clear = QPushButton("Clear")
         self.btn_clear.clicked.connect(self.clear)
-        row.addWidget(self.btn_clear)
-
-        v.addLayout(row)
+        row1.addWidget(self.btn_clear)
+        
+        self.btn_save_csv = QPushButton("Save CSV")
+        self.btn_save_csv.clicked.connect(self._save_csv)
+        row1.addWidget(self.btn_save_csv)
+        row1.addStretch()
+        v.addLayout(row1)
 
         # pyqtgraph
         pg.setConfigOptions(antialias=True)
@@ -120,18 +122,42 @@ class ProcStatsPlot(QWidget):
         self.plot.setLabel("bottom", "Sample #")
         self.plot.setLabel("left", "Value")
 
-        self.curve_max  = self.plot.plot(pen=pg.mkPen(_COL_MAX,  width=2), name="max")
-        self.curve_mean = self.plot.plot(pen=pg.mkPen(_COL_MEAN, width=2), name="mean")
-        self.curve_min  = self.plot.plot(pen=pg.mkPen(_COL_MIN,  width=2), name="min")
+        # 라인 및 체크박스 생성 (별도의 위젯으로 분리하여 외부에서 가져다 쓸 수 있게 함)
+        self.options_widget = QWidget()
+        opt_layout = QVBoxLayout(self.options_widget)
+        opt_layout.setContentsMargins(0, 0, 0, 0)
+        
+        row2 = QHBoxLayout()
+        row2.setSpacing(6)
+        row3 = QHBoxLayout()
+        row3.setSpacing(6)
+        
+        for i, (label, key, color, default_on) in enumerate(_OPTIONS):
+            c = self.plot.plot(pen=pg.mkPen(color, width=2), name=key)
+            c.setVisible(default_on)
+            self._curves[key] = c
 
-        # 체크박스 ↔ 라인 visibility
-        self.chk_mean.toggled.connect(self.curve_mean.setVisible)
-        self.chk_min.toggled.connect(self.curve_min.setVisible)
-        self.chk_max.toggled.connect(self.curve_max.setVisible)
+            chk = self._mk_color_check(label, color, default_on)
+            chk.toggled.connect(c.setVisible)
+            self._checks[key] = chk
+            
+            if i < 5:
+                row2.addWidget(chk)
+            else:
+                row3.addWidget(chk)
+
+        row2.addStretch()
+        row3.addStretch()
+        opt_layout.addLayout(row2)
+        opt_layout.addLayout(row3)
+        
+        # v.addLayout(row2)  <- 메인 패널에는 더 이상 추가하지 않음
+        # v.addLayout(row3)
 
         # ── 표 (그래프와 동일한 데이터, 헤더 클릭으로 정렬 가능) ────────
-        self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["#", "max", "mean", "min"])
+        self.table = QTableWidget(0, 1 + len(_OPTIONS))
+        headers = ["#"] + [opt[0] for opt in _OPTIONS]
+        self.table.setHorizontalHeaderLabels(headers)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setAlternatingRowColors(True)
@@ -208,33 +234,38 @@ class ProcStatsPlot(QWidget):
             self._vline.hide()
             self._hover_label.setText("")
             return
-        if len(self._buf_mean) == 0:
+            
+        # 첫번째 옵션 버퍼의 길이를 기준으로 사용
+        ref_key = _OPTIONS[0][1]
+        if len(self._buffers[ref_key]) == 0:
             self._vline.hide()
             self._hover_label.setText("")
             return
+            
         mouse_pt = vb.mapSceneToView(pos)
-        n = len(self._buf_mean)
+        n = len(self._buffers[ref_key])
         idx = int(round(mouse_pt.x()))
         idx = max(0, min(n - 1, idx))
 
         self._vline.setPos(idx)
         self._vline.show()
 
-        mean_v = self._buf_mean[idx]
-        min_v  = self._buf_min[idx]
-        max_v  = self._buf_max[idx]
-        self._hover_label.setText(
-            f"<div style='background:#0d121d; padding:4px 8px;"
-            f" border:1px solid #1e293b; font-family:monospace; font-size:10pt;'>"
+        html = [
+            f"<div style='background:#0d121d; padding:4px 8px;",
+            f" border:1px solid #1e293b; font-family:monospace; font-size:10pt;'>",
             f"<b style='color:#94a3b8;'>Sample {idx}</b><br>"
-            f"<span style='color:{_COL_MAX};'>max  : {max_v:.4f}</span><br>"
-            f"<span style='color:{_COL_MEAN};'>mean : {mean_v:.4f}</span><br>"
-            f"<span style='color:{_COL_MIN};'>min  : {min_v:.4f}</span>"
-            f"</div>"
-        )
+        ]
+        
+        for label, key, color, _ in _OPTIONS:
+            if self._checks[key].isChecked():
+                val = self._buffers[key][idx]
+                html.append(f"<span style='color:{color};'>{label} : {val:.4f}</span><br>")
+                
+        html.append("</div>")
+        self._hover_label.setText("".join(html))
 
     # ── public API ───────────────────────────────────────────────
-    def add_point(self, source: str, mode: int, mean: float, mn: float, mx: float) -> None:
+    def add_point_dict(self, source: str, stats: dict) -> None:
         if not self.chk_enable.isChecked():
             return
         sel = self._grp.checkedId()
@@ -242,20 +273,21 @@ class ProcStatsPlot(QWidget):
             return
         if sel == 1 and source != SOURCE_LIVE:
             return
-        try:
-            mean_f = float(mean); min_f = float(mn); max_f = float(mx)
-        except (TypeError, ValueError):
-            return
-        self._buf_mean.append(mean_f)
-        self._buf_min.append(min_f)
-        self._buf_max.append(max_f)
+            
+        for _, key, _, _ in _OPTIONS:
+            val = stats.get(key, 0.0)
+            try:
+                val = float(val)
+            except (TypeError, ValueError):
+                val = 0.0
+            self._buffers[key].append(val)
+            
         self._redraw()
         self._sync_table()
 
     def clear(self) -> None:
-        self._buf_mean.clear()
-        self._buf_min.clear()
-        self._buf_max.clear()
+        for buf in self._buffers.values():
+            buf.clear()
         self._redraw()
         self._hover_label.setText("")
         self._vline.hide()
@@ -263,38 +295,67 @@ class ProcStatsPlot(QWidget):
         self.table.setRowCount(0)
         self.table.setSortingEnabled(True)
 
+    def _save_csv(self) -> None:
+        ref_key = _OPTIONS[0][1]
+        n = len(self._buffers[ref_key])
+        if n == 0:
+            QMessageBox.information(self, "No Data", "저장할 데이터가 없습니다.")
+            return
+
+        path, _ = QFileDialog.getSaveFileName(self, "Save CSV", "", "CSV Files (*.csv)")
+        if not path:
+            return
+
+        import csv
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            # 헤더
+            headers = ["Sample"] + [opt[0] for opt in _OPTIONS]
+            writer.writerow(headers)
+            # 데이터
+            for r in range(n):
+                row_data = [r]
+                for _, key, _, _ in _OPTIONS:
+                    row_data.append(self._buffers[key][r])
+                writer.writerow(row_data)
+
     # ── internal ────────────────────────────────────────────────
     def _sync_table(self) -> None:
         """ring buffer 를 표와 동기화. 헤더 정렬 보존."""
-        # 정렬 잠시 끄고 데이터 채운 뒤 재가동 (속도 + 정렬 안정성)
         was_sorted = self.table.isSortingEnabled()
         self.table.setSortingEnabled(False)
         try:
-            n = len(self._buf_mean)
+            ref_key = _OPTIONS[0][1]
+            n = len(self._buffers[ref_key])
             self.table.setRowCount(n)
             for r in range(n):
-                # ring buffer 의 r 번째 = sample # r
-                vals = (r, self._buf_max[r], self._buf_mean[r], self._buf_min[r])
-                for c, v in enumerate(vals):
+                # # 열
+                item = QTableWidgetItem()
+                item.setData(Qt.ItemDataRole.DisplayRole, int(r))
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter) 
+                self.table.setItem(r, 0, item)
+                
+                # 옵션 열들
+                for i, (_, key, _, _) in enumerate(_OPTIONS):
+                    col_idx = i + 1
+                    v = self._buffers[key][r]
                     item = QTableWidgetItem()
-                    if c == 0:
-                        item.setData(Qt.ItemDataRole.DisplayRole, int(v))
-                    else:
-                        item.setData(Qt.ItemDataRole.DisplayRole, float(v))
-                        item.setText(f"{float(v):.4f}")
+                    item.setData(Qt.ItemDataRole.DisplayRole, float(v))
+                    item.setText(f"{float(v):.4f}")
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter) 
-                    self.table.setItem(r, c, item)
+                    self.table.setItem(r, col_idx, item)
         finally:
             self.table.setSortingEnabled(was_sorted)
 
     def _redraw(self) -> None:
-        n = len(self._buf_mean)
+        ref_key = _OPTIONS[0][1]
+        n = len(self._buffers[ref_key])
         if n == 0:
-            self.curve_max.setData([], [])
-            self.curve_mean.setData([], [])
-            self.curve_min.setData([], [])
+            for c in self._curves.values():
+                c.setData([], [])
             return
         x = np.arange(n)
-        self.curve_max.setData(x, np.fromiter(self._buf_max, dtype=float))
-        self.curve_mean.setData(x, np.fromiter(self._buf_mean, dtype=float))
-        self.curve_min.setData(x, np.fromiter(self._buf_min, dtype=float))
+        for _, key, _, _ in _OPTIONS:
+            data = np.fromiter(self._buffers[key], dtype=float)
+            self._curves[key].setData(x, data)
+

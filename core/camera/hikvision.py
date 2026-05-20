@@ -22,12 +22,20 @@ from core.camera.base import BaseCamera, CameraCapabilities, NotSupportedError
 
 # MVS SDK는 선택적 의존성
 MVS_PATH = r"C:\Program Files (x86)\MVS\Development\Samples\Python\MvImport"
+MVS_DLL_PATH = r"C:\Program Files (x86)\Common Files\MVS\Runtime\Win64_x64"
 _MVS_OK = False
 _MVS_IMPORT_ERROR: Optional[str] = None
 
 try:
+    import os
     if MVS_PATH not in sys.path:
         sys.path.append(MVS_PATH)
+    # MVS SDK는 winmode=0(레거시) 방식으로 DLL을 로드하므로 PATH에 직접 추가해야 함
+    # (os.add_dll_directory는 winmode=0에서 무효)
+    if MVS_DLL_PATH not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = MVS_DLL_PATH + os.pathsep + os.environ.get("PATH", "")
+    if hasattr(os, "add_dll_directory"):
+        os.add_dll_directory(MVS_DLL_PATH)
     from MvCameraControl_class import (
         MvCamera, MV_CC_DEVICE_INFO_LIST, MV_CC_DEVICE_INFO,
         MV_GIGE_DEVICE, MV_USB_DEVICE, MV_FRAME_OUT, MVCC_FLOATVALUE
@@ -122,6 +130,8 @@ class HikvisionCamera(BaseCamera):
         self._model = "HIKVISION"
         self._serial = ""
         self._sdk_lock = threading.Lock()
+        self._fps_range: tuple[float, float] = (0.1, 1000.0)
+        self._exposure_range_ms: tuple[float, float] = (0.01, 1000.0)
 
     # ── BaseCamera 구현 ───────────────────────────────────────────────
 
@@ -129,9 +139,9 @@ class HikvisionCamera(BaseCamera):
     def capabilities(self) -> CameraCapabilities:
         return CameraCapabilities(
             has_roi=False,
-            exposure_range_ms=(0.01, 1000.0),
+            exposure_range_ms=self._exposure_range_ms,
             has_fps_control=True,
-            fps_range=(0.1, 1000.0),
+            fps_range=self._fps_range,
             has_binarize=True,
             has_log_scale=True,
             has_bg_subtraction=True,
@@ -186,6 +196,18 @@ class HikvisionCamera(BaseCamera):
                 if ret != 0:
                     dev_logger.warning(f"GigE 패킷 사이즈 설정 실패: {ret}")
 
+        # UserSetLoad(Default) — 일부 모델(GO-8105M 등)은 이 호출 없이는
+        # ExposureTime 등 파라미터 노드가 GenICam ACCESS 오류를 반환함
+        self._cam.MV_CC_SetEnumValue("UserSetSelector", 0)
+        self._cam.MV_CC_SetCommandValue("UserSetLoad")
+
+        # 카메라 실제 범위 읽기 (하드코딩 대신 GenICam 노드 기준)
+        fval = MVCC_FLOATVALUE()
+        if self._cam.MV_CC_GetFloatValue("ExposureTime", fval) == 0 and fval.fMax > fval.fMin:
+            self._exposure_range_ms = (fval.fMin / 1000.0, fval.fMax / 1000.0)
+        if self._cam.MV_CC_GetFloatValue("AcquisitionFrameRate", fval) == 0 and fval.fMax > fval.fMin:
+            self._fps_range = (max(0.1, fval.fMin), fval.fMax)
+
         self._connected = True
 
     def disconnect(self) -> None:
@@ -209,15 +231,18 @@ class HikvisionCamera(BaseCamera):
         if not self._connected or self._cam is None:
             raise RuntimeError("카메라가 연결되지 않았습니다")
         val = MVCC_FLOATVALUE()
-        if self._cam.MV_CC_GetFloatValue("ExposureTime", val) == 0:
+        with self._sdk_lock:
+            ret = self._cam.MV_CC_GetFloatValue("ExposureTime", val)
+        if ret == 0:
             return val.fCurValue / 1000.0  # us → ms
         raise RuntimeError("ExposureTime 읽기 실패")
 
     def set_exposure_ms(self, ms: float) -> float:
         if not self._connected or self._cam is None:
             raise RuntimeError("카메라가 연결되지 않았습니다")
-        self._cam.MV_CC_SetEnumValue("ExposureAuto", 0)
-        self._cam.MV_CC_SetFloatValue("ExposureTime", ms * 1000.0)
+        with self._sdk_lock:
+            self._cam.MV_CC_SetEnumValue("ExposureAuto", 0)
+            self._cam.MV_CC_SetFloatValue("ExposureTime", ms * 1000.0)
         return self.get_exposure_ms()
 
     def snap(self) -> np.ndarray:
@@ -322,20 +347,22 @@ class HikvisionCamera(BaseCamera):
     def set_fps(self, fps: float) -> float:
         if not self._connected or self._cam is None:
             raise RuntimeError("카메라가 연결되지 않았습니다")
-        was_grabbing = self._grabbing
-        if was_grabbing:
-            self.stop_live()
-        self._cam.MV_CC_SetBoolValue("AcquisitionFrameRateEnable", True)
-        self._cam.MV_CC_SetFloatValue("AcquisitionFrameRate", fps)
-        result = self.get_fps()
-        # 재시작은 호출자 책임 (was_grabbing 반환으로 알림)
-        return result
+        with self._sdk_lock:
+            self._cam.MV_CC_SetBoolValue("AcquisitionFrameRateEnable", True)
+            self._cam.MV_CC_SetFloatValue("AcquisitionFrameRate", fps)
+        return self.get_fps()
 
     def get_fps(self) -> float:
         if not self._connected or self._cam is None:
             raise RuntimeError("카메라가 연결되지 않았습니다")
         val = MVCC_FLOATVALUE()
-        if self._cam.MV_CC_GetFloatValue("AcquisitionFrameRate", val) == 0:
+        with self._sdk_lock:
+            # ResultingFrameRate: 노출 등 제약을 반영한 실제 달성 가능 FPS
+            # AcquisitionFrameRate: 사용자가 설정한 목표값 (제약 반영 안 됨)
+            ret = self._cam.MV_CC_GetFloatValue("ResultingFrameRate", val)
+            if ret != 0:
+                ret = self._cam.MV_CC_GetFloatValue("AcquisitionFrameRate", val)
+        if ret == 0:
             return val.fCurValue
         raise RuntimeError("AcquisitionFrameRate 읽기 실패")
 

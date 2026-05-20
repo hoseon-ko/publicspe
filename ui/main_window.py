@@ -1,13 +1,13 @@
 """
 ui/main_window.py
-통합 메인 윈도우 — LightField 스타일.
+DeepAlign 전용 메인 윈도우.
 
 레이아웃:
-  ┌─ 헤더 바 (28px) ─────────────────────────────────────────────┐
-  │  SpeAnalyze  │ Live │ Acquire │ Scan │ Analysis │     status │
+  ┌─ 헤더 바 ─────────────────────────────────────────────────────┐
+  │  SpeAnalyze  │ 🌌 DeepAlign │              AUTO CONNECT │
   ├──────────────────────────────────────────────────────────────┤
   │                                                              │
-  │   각 모드 콘텐츠 (QStackedWidget)                            │
+  │   DeepAlignMainTab                                           │
   │                                                              │
   └──────────────────────────────────────────────────────────────┘
 """
@@ -19,32 +19,24 @@ from PyQt6.QtWidgets import (
     QLabel, QFrame, QVBoxLayout, QHBoxLayout, QPushButton,
     QDockWidget, QTextEdit, QTabWidget, QApplication, QCheckBox,
 )
-from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSignal
-from core.config import get_config
-from PyQt6.QtGui import QFont, QShortcut, QKeySequence, QPixmap, QPainter
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QShortcut, QKeySequence
 
-from ui.live.live_tab import LiveTab
-from ui.acquisition.acquisition_tab import AcquisitionTab
-from ui.analysis.analysis_tab import AnalysisTab
-from ui.scan.scan_tab import ScanTab
-from ui.autofocus.autofocus_tab import AutoFocusTab
-from ui.kinematic.kinematic_tab import KinematicTab
-from ui.deepalign.deepalign_main_tab import DeepAlignMainTab
+from core.config import get_config
 from core.hal.adapters import HikvisionCameraAdapter, PicamCameraAdapter, SimulatedCameraAdapter
-from core.motor.acs_stage import AcsStageController
 from core.session.device_session_hub import DeviceSessionHub
-from theme.styles import Fonts, Sizes, C_ACCENT, C_TEXT_DIM, C_BG_MED, C_BORDER
 from core.logger import app_logger, register_ui_callback
+from theme.styles import Fonts, Sizes, C_ACCENT, C_TEXT_DIM, C_BG_MED, C_BORDER
+from ui.deepalign.deepalign_main_tab import DeepAlignMainTab
 from ui.bridge.hub_bindings import bind_status_to_main_window
 
 
-# ── 헤더 바 색상 (LightField 다크 헤더) ──────────────────────────
-_HDR_BG      = "#161b27"   # 헤더 배경
-_HDR_BORDER  = "#1e2a3e"   # 헤더 하단 구분선
-_TAB_NORMAL  = "#4a5a70"   # 비선택 탭 텍스트
-_TAB_HOVER   = "#8aa0bc"   # 호버
-_TAB_ACTIVE  = "#e0e8f0"   # 선택된 탭 텍스트
-_TAB_LINE    = C_ACCENT    # 선택 탭 하단 강조선 색
+# ── 헤더 바 색상 ──────────────────────────────────────────────────
+_HDR_BG      = "#161b27"
+_HDR_BORDER  = "#1e2a3e"
+_TAB_NORMAL  = "#4a5a70"
+_TAB_ACTIVE  = "#e0e8f0"
+_TAB_LINE    = C_ACCENT
 
 
 class StartupOverlay(QWidget):
@@ -55,19 +47,17 @@ class StartupOverlay(QWidget):
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        
-        # 화면 중앙 배치
+
         self.setFixedSize(540, 500)
         if QApplication.instance():
             screen = QApplication.primaryScreen().geometry()
             x = (screen.width() - self.width()) // 2
             y = (screen.height() - self.height()) // 2
             self.move(x, y)
-        
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
-        
-        # 중앙 모던 카드
+
         card = QFrame()
         card.setStyleSheet("""
             QFrame {
@@ -79,22 +69,19 @@ class StartupOverlay(QWidget):
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(40, 40, 40, 40)
         card_layout.setSpacing(18)
-        
-        # 네온 타이틀
+
         lbl_title = QLabel("SYSTEM INITIALIZATION")
         lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_title.setStyleSheet("color: #4ecdc4; font-family: 'Consolas', monospace; font-size: 20px; font-weight: bold; letter-spacing: 3px; border: none;")
         card_layout.addWidget(lbl_title)
-        
-        # 부제목
+
         lbl_sub = QLabel("Establishing Hardware Cockpit Connections")
         lbl_sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_sub.setStyleSheet("color: #64748b; font-family: 'Segoe UI'; font-size: 13px; border: none;")
         card_layout.addWidget(lbl_sub)
-        
+
         card_layout.addSpacing(15)
-        
-        # 디바이스별 상태 표시줄
+
         self.status_labels = {}
         devices = [
             ("pico", "Picomotor Controller"),
@@ -102,30 +89,29 @@ class StartupOverlay(QWidget):
             ("acs", "ACS Multi-Axis Stage"),
             ("camera", "High-Speed Camera System")
         ]
-        
+
         for dev_key, dev_name in devices:
             row = QFrame()
             row.setStyleSheet("border: none; background: transparent;")
             row_layout = QHBoxLayout(row)
             row_layout.setContentsMargins(10, 4, 10, 4)
-            
+
             lbl_name = QLabel(dev_name)
             lbl_name.setStyleSheet("color: #c0d0ff; font-family: 'Consolas', monospace; font-size: 14px; border: none;")
-            
+
             lbl_status = QLabel("● STANDBY")
             lbl_status.setStyleSheet("color: #475569; font-family: 'Consolas', monospace; font-size: 12px; font-weight: bold; border: none;")
             lbl_status.setFixedWidth(140)
             lbl_status.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            
+
             row_layout.addWidget(lbl_name)
             row_layout.addWidget(lbl_status)
             card_layout.addWidget(row)
-            
+
             self.status_labels[dev_key] = lbl_status
-            
+
         card_layout.addSpacing(20)
-        
-        # 스킵 버튼
+
         self.btn_skip = QPushButton("SKIP & START COCKPIT")
         self.btn_skip.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_skip.setStyleSheet("""
@@ -146,14 +132,14 @@ class StartupOverlay(QWidget):
         """)
         self.btn_skip.clicked.connect(self.hide_overlay)
         card_layout.addWidget(self.btn_skip)
-        
+
         layout.addWidget(card)
-        
+
     def set_status(self, dev_key: str, status: str):
         lbl = self.status_labels.get(dev_key)
         if not lbl:
             return
-            
+
         if status == "connecting":
             lbl.setText("● CONNECTING...")
             lbl.setStyleSheet("color: #eab308; font-family: 'Consolas', monospace; font-size: 12px; font-weight: bold; border: none;")
@@ -163,7 +149,7 @@ class StartupOverlay(QWidget):
         elif status == "skipped":
             lbl.setText("● SKIPPED")
             lbl.setStyleSheet("color: #f43f5e; font-family: 'Consolas', monospace; font-size: 12px; font-weight: bold; border: none;")
-            
+
     def hide_overlay(self):
         self.hide()
         self.finished.emit()
@@ -180,23 +166,21 @@ class MainWindow(QMainWindow):
         self.session_hub.register_camera_hal("picam", PicamCameraAdapter)
         self.session_hub.register_camera_hal("simulated", SimulatedCameraAdapter)
         self.session_hub.select_camera_vendor("simulated")
-        self.setWindowTitle("SpeAnalyze — Integrated Lab Control")
+        self.setWindowTitle("SpeAnalyze — DeepAlign")
         self.setMinimumSize(1300, 850)
         self.resize(1700, 1000)
         self._setup_log_dock()
         register_ui_callback(self._log)
         self._build_ui()
-        
-        # 오버레이 초기화 및 시그널 연결 (독립형 윈도우로 생성)
+
         self.startup_overlay = StartupOverlay(None)
         self.startup_overlay.finished.connect(self.show_main_window)
         self.auto_connect_status.connect(self.startup_overlay.set_status)
-        
+
         self._restore_settings()
         self._setup_shortcuts()
 
     def _setup_shortcuts(self):
-        # UI 디버깅용 스크린샷 덤프 (Ctrl+Alt+S)
         self.sc_dump = QShortcut(QKeySequence("Ctrl+Alt+S"), self)
         self.sc_dump.activated.connect(self.dump_ui_screenshots)
 
@@ -205,7 +189,6 @@ class MainWindow(QMainWindow):
     def _build_ui(self):
         _FC = Fonts.MONO
 
-        # ── 루트: VBox → [헤더 바, 콘텐츠 스택] ─────────────────────
         root = QWidget()
         root.setObjectName("root")
         root.setStyleSheet("QWidget#root { background: #080e1e; }")
@@ -214,7 +197,7 @@ class MainWindow(QMainWindow):
         root_v.setSpacing(0)
         self.setCentralWidget(root)
 
-        # ── 헤더 바 (LightField 스타일) ──────────────────────────────
+        # ── 헤더 바 ───────────────────────────────────────────────
         header = QWidget()
         header.setObjectName("header")
         header.setFixedHeight(46)
@@ -228,7 +211,6 @@ class MainWindow(QMainWindow):
         hdr_h.setContentsMargins(8, 0, 8, 0)
         hdr_h.setSpacing(0)
 
-        # 앱 이름 레이블
         lbl_app = QLabel("SpeAnalyze")
         lbl_app.setStyleSheet(
             f"color: #4ecdc4; font-family: '{_FC}', 'Segoe UI'; font-size: 15px;"
@@ -237,17 +219,15 @@ class MainWindow(QMainWindow):
             f" border-right: 1px solid {_HDR_BORDER};"
         )
         hdr_h.addWidget(lbl_app)
-
-        # 구분 간격
         hdr_h.addSpacing(8)
 
-        # ── 모드 탭 버튼 (LightField 상단 텍스트 탭 스타일) ──────────
+        # ── DeepAlign 단일 탭 라벨 (스타일 유지용) ─────────────────
         _tab_qss = f"""
             QPushButton {{
                 background: transparent;
-                color: {_TAB_NORMAL};
+                color: #ffffff;
                 border: none;
-                border-bottom: 3px solid transparent;
+                border-bottom: 3px solid {_TAB_LINE};
                 font-family: 'Segoe UI', '{_FC}';
                 font-size: 13px;
                 font-weight: bold;
@@ -255,79 +235,28 @@ class MainWindow(QMainWindow):
                 padding: 0 20px;
                 height: 46px;
             }}
-            QPushButton:hover {{
-                color: #ffffff;
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(255,255,255,0.06), stop:1 transparent);
-            }}
-            QPushButton:checked {{
-                color: #ffffff;
-                border-bottom: 3px solid {_TAB_LINE};
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(78, 205, 196, 0.15), stop:1 transparent);
-            }}
         """
+        btn_deepalign = QPushButton("🌌 DeepAlign")
+        btn_deepalign.setCheckable(True)
+        btn_deepalign.setChecked(True)
+        btn_deepalign.setFlat(True)
+        btn_deepalign.setFixedHeight(46)
+        btn_deepalign.setStyleSheet(_tab_qss)
+        hdr_h.addWidget(btn_deepalign)
 
-        self._nav_btns: list[QPushButton] = []
-
-        # ── 콘텐츠 스택 ──────────────────────────────────────────────
+        # ── 콘텐츠 스택 (단일 탭) ─────────────────────────────────
         self.stack = QStackedWidget()
         self.stack.setStyleSheet("background: #0a0f1e;")
 
-        # ── 모드별 탭 인스턴스 생성 ─────────────────────────────────
-        self.live_tab = LiveTab(session_hub=self.session_hub)
-        self.live_tab.status_message.connect(self._on_status)
-        self.live_tab.camera_connected.connect(self._on_camera_connected)
-        self.live_tab.camera_disconnected.connect(self._on_camera_disconnected)
-        self.live_tab.camera_panel.exposure_applied.connect(self._on_exposure_changed)
-        self.live_tab.frame_stats_updated.connect(self._on_frame_stats)
-        bind_status_to_main_window(self.session_hub, self)
-        self.acq_tab = AcquisitionTab()
-        self.acq_tab.spe_saved.connect(self._on_spe_saved)
-        self.acq_tab.log_message.connect(self._on_status)
-
-        self.scan_tab = ScanTab()
-        self.scan_tab.log_message.connect(self._on_status)
-
-        self.analysis_tab = AnalysisTab(spe_class=self._spe_class)
-        self.analysis_tab.status_message.connect(self._on_status)
-
-        self.af_tab = AutoFocusTab()
-        self.af_tab.log_message.connect(self._on_status)
-        self.af_tab.af_starting.connect(self.live_tab.stop_live)
-        self.af_tab.af_done.connect(self.live_tab.resume_live)
-
-        self.kin_tab = KinematicTab(session_hub=self.session_hub)
-        self.kin_tab.log_message.connect(self._on_status)
-        self.kin_tab.kin_starting.connect(self.live_tab.stop_live)
-        self.kin_tab.kin_done.connect(self.live_tab.resume_live)
-
         self.deep_align_tab = DeepAlignMainTab()
         self.deep_align_tab.bind_session_hub(self.session_hub)
-        # 탭 버튼 + 스택 등록
-        _modes = [
-            ("🌌 DeepAlign", self.deep_align_tab),
-            ("📥 Acquire",   self.acq_tab),
-            ("🔬 Scan",      self.scan_tab),
-            ("🎯 AutoFocus", self.af_tab),
-            ("📐 Kinematic", self.kin_tab),
-            ("📊 Analysis",  self.analysis_tab),
-        ]
-        for idx, (label, widget) in enumerate(_modes):
-            btn = QPushButton(label)
-            btn.setCheckable(True)
-            btn.setFlat(True)
-            btn.setFixedHeight(46)
-            btn.setStyleSheet(_tab_qss)
-            btn.clicked.connect(lambda checked, i=idx: self._switch_mode(i))
-            hdr_h.addWidget(btn)
-            self._nav_btns.append(btn)
-            self.stack.addWidget(widget)
+        self.stack.addWidget(self.deep_align_tab)
 
-        self._nav_btns[0].setChecked(True)   # DeepAlign 기본 선택
+        bind_status_to_main_window(self.session_hub, self)
 
-        # 헤더 오른쪽: 상태 위젯들 및 자동 연동 토글
+        # 헤더 오른쪽: AUTO CONNECT 토글
         hdr_h.addStretch(1)
 
-        # [Auto-Connect Toggle] 세련된 디자인의 자동 연결 체크 스위치
         self.check_auto_conn = QCheckBox("AUTO CONNECT")
         self.check_auto_conn.setStyleSheet(f"""
             QCheckBox {{
@@ -353,73 +282,14 @@ class MainWindow(QMainWindow):
                 border-color: {C_ACCENT};
             }}
         """)
-        # 영구 저장 상태 복원
         self.check_auto_conn.setChecked(bool(get_config().get("window.main.auto_connect", True)))
         self.check_auto_conn.stateChanged.connect(self._on_auto_connect_toggled)
         hdr_h.addWidget(self.check_auto_conn)
 
-        def _vsep():
-            f = QFrame()
-            f.setFrameShape(QFrame.Shape.VLine)
-            f.setFixedHeight(16)
-            f.setStyleSheet(f"color: {_HDR_BORDER}; margin: 0 4px;")
-            return f
-
-        _hdr_lbl_style = (
-            f"color: {_TAB_NORMAL}; font-family: '{_FC}';"
-            " font-size: 10px; padding: 0 6px;"
-        )
-        self._hdr_camera  = QLabel("—")
-        self._hdr_exp  = QLabel("—")
-        self._hdr_fps  = QLabel("—")
-        for lbl in (self._hdr_camera, self._hdr_exp, self._hdr_fps):
-            lbl.setStyleSheet(_hdr_lbl_style)
-
-        hdr_h.addWidget(_vsep())
-        hdr_h.addWidget(self._hdr_camera)
-        hdr_h.addWidget(_vsep())
-        hdr_h.addWidget(self._hdr_exp)
-        hdr_h.addWidget(_vsep())
-        hdr_h.addWidget(self._hdr_fps)
-        hdr_h.addSpacing(4)
-
         root_v.addWidget(header)
         root_v.addWidget(self.stack, 1)
 
-        # ── 인터탭 연결 ──────────────────────────────────────────────
-        self.live_tab.camera_connected.connect(self.acq_tab.set_shared_cameraera)
-        self.live_tab.camera_disconnected.connect(self.acq_tab.clear_shared_cameraera)
-        self.acq_tab.acquisition_starting.connect(self.live_tab.stop_live)
-        self.acq_tab.acquisition_done.connect(self.live_tab.resume_live)
-
-        self.live_tab.camera_connected.connect(self.scan_tab.set_shared_cameraera)
-        self.live_tab.camera_disconnected.connect(self.scan_tab.clear_shared_cameraera)
-        self.scan_tab.scan_starting.connect(self.live_tab.stop_live)
-        self.scan_tab.scan_done.connect(self.live_tab.resume_live)
-
-        # 카메라 공유: Live ↔ AutoFocus
-        self.live_tab.camera_connected.connect(self.af_tab.set_shared_cameraera)
-        self.live_tab.camera_disconnected.connect(self.af_tab.clear_shared_cameraera)
-
-        # KIMM 공유: Live ↔ AutoFocus
-        self.live_tab.kimm_z_panel.kimm_connected.connect(self.af_tab.set_kimm_ctrl)
-        self.live_tab.kimm_z_panel.kimm_disconnected.connect(self.af_tab.clear_kimm_ctrl)
-
-        # 카메라 공유: Live ↔ Kinematic
-        self.live_tab.camera_connected.connect(self.kin_tab.set_shared_cameraera)
-        self.live_tab.camera_disconnected.connect(self.kin_tab.clear_shared_cameraera)
-
-        # SessionHub ↔ ACS 연동 (Live 탭 / Kinematic 탭 / DeepAlign 탭)
-        # 이제 각 탭의 acs_stage_panel 또는 acs_panel이 bind_session_hub를 호출하도록 내부 수정됨.
-
-        self.scan_tab.set_motor_panel(self.live_tab.motor_panel)
-
-        self.live_tab.camera_panel.exposure_applied.connect(self.scan_tab.set_exposure_ui)
-        self.scan_tab.exposure_changed.connect(self.live_tab.sync_exposure_ui)
-        self.live_tab.camera_panel.exposure_applied.connect(self.acq_tab.set_exposure_ui)
-        self.acq_tab.exposure_changed.connect(self.live_tab.sync_exposure_ui)
-
-        # ── 상태바 (하단) ─────────────────────────────────────────────
+        # ── 상태바 ─────────────────────────────────────────────────
         self._status_bar = QStatusBar()
         self._status_bar.setSizeGripEnabled(False)
         self._status_bar.setStyleSheet(f"""
@@ -441,183 +311,52 @@ class MainWindow(QMainWindow):
         )
         self._status_bar.addWidget(self._status_label, 1)
 
-        def _sep():
-            f = QFrame()
-            f.setFrameShape(QFrame.Shape.VLine)
-            f.setStyleSheet(f"color: {C_BORDER}; margin: 3px 2px;")
-            return f
-
-        _perm = f"color: {C_TEXT_DIM}; font-family: '{Fonts.MONO}'; font-size: {Sizes.SMALL}; padding: 0 8px;"
-        self._sb_camera  = QLabel("📷 —")
-        self._sb_exp  = QLabel("⏱ —")
-        self._sb_size = QLabel("📐 —")
-        self._sb_fps  = QLabel("fps: —")
-        for lbl in (self._sb_camera, self._sb_exp, self._sb_size, self._sb_fps):
-            lbl.setStyleSheet(_perm)
-        self._sb_camera.setStyleSheet(
-            f"color: {C_ACCENT}; font-family: '{Fonts.MONO}'; font-size: {Sizes.SMALL}; padding: 0 8px;"
-        )
-
-        for w in (_sep(), self._sb_camera, _sep(), self._sb_exp,
-                  _sep(), self._sb_size, _sep(), self._sb_fps, _sep()):
-            self._status_bar.addPermanentWidget(w)
-
-    # ── 모드 전환 ────────────────────────────────────────────────────
-
-    def _switch_mode(self, idx: int):
-        # Hide range popups from all viewers when switching tabs
-        for i in range(self.stack.count()):
-            tab = self.stack.widget(i)
-            # Check common viewer attribute names across different tabs
-            for attr in ('image_viewer', 'viewer', 'preview_viewer'):
-                viewer = getattr(tab, attr, None)
-                if viewer and hasattr(viewer, 'hide_range_popup'):
-                    viewer.hide_range_popup()
-
-        self.stack.setCurrentIndex(idx)
-
-        # 활성화된 탭에 알림 (특수 동작 수행용)
-        active_tab = self.stack.widget(idx)
-
-        # #SYNC: 특정 탭 진입 시 Live 탭의 마지막 이미지를 가져와서 뷰어에 표시 (ROI 등 편의성)
-        if active_tab in (self.af_tab, getattr(self, 'kin_tab', None), self.acq_tab):
-            last_raw = self.live_tab.get_last_raw()
-            if last_raw is not None:
-                viewer = None
-                if active_tab == self.af_tab:
-                    viewer = getattr(self.af_tab, "image_viewer", None)
-                elif active_tab == getattr(self, "kin_tab", None):
-                    viewer = getattr(self.kin_tab, "image_viewer", None)
-                elif active_tab == self.acq_tab:
-                    viewer = getattr(self.acq_tab, "preview_viewer", None)
-                
-                if viewer is not None and hasattr(viewer, 'set_source_image'):
-                    viewer.set_source_image(last_raw)
-
-        if hasattr(active_tab, "on_tab_activated"):
-            try:
-                active_tab.on_tab_activated()
-            except Exception as e:
-                app_logger.error(f"Error in on_tab_activated for {type(active_tab).__name__}: {e}", exc_info=True)
-
-        for i, btn in enumerate(self._nav_btns):
-            btn.setChecked(i == idx)
-
     def dump_ui_screenshots(self):
-        """모든 탭을 순회하며 스크린샷을 찍어 'UI_Debug' 폴더에 저장한다."""
+        """현재 화면 스크린샷을 'UI_Debug' 폴더에 저장."""
         import os
         from datetime import datetime
-        
+
         save_dir = "UI_Debug"
         os.makedirs(save_dir, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
-        orig_idx = self.stack.currentIndex()
-        
         try:
-            for i in range(self.stack.count()):
-                self._switch_mode(i)
-                QApplication.processEvents() # UI 갱신 대기
-                
-                tab = self.stack.widget(i)
-                label = self._nav_btns[i].text().strip()
-                filename = f"tab_{i}_{label}_{ts}.png"
-                path = os.path.join(save_dir, filename)
-                
-                # 메인 윈도우 전체 캡처
-                pixmap = self.grab()
-                pixmap.save(path, "PNG")
-                app_logger.info(f"[UI Dump] Saved: {path}")
-                
-            self._switch_mode(orig_idx)
-            self._on_status(f"📸 모든 탭 스크린샷 저장 완료 ({save_dir})")
+            filename = f"deepalign_{ts}.png"
+            path = os.path.join(save_dir, filename)
+            pixmap = self.grab()
+            pixmap.save(path, "PNG")
+            app_logger.info(f"[UI Dump] Saved: {path}")
+            self._on_status(f"📸 스크린샷 저장 완료 ({path})")
         except Exception as e:
             self._on_status(f"❌ 스크린샷 저장 실패: {e}")
 
     # ── 슬롯 ─────────────────────────────────────────────────────────
-
-    def _on_camera_connected(self, camera):
-        name = type(camera).__name__.replace("Camera", "")
-        _s = (f"color: #4ecdc4; font-family: '{Fonts.MONO}';"
-              f" font-size: {Sizes.SMALL}; padding: 0 8px;")
-        self._sb_camera.setText(f"📷 {name}")
-        self._sb_camera.setStyleSheet(_s)
-        self._hdr_camera.setText(name)
-        self._hdr_camera.setStyleSheet(
-            f"color: #4ecdc4; font-family: '{Fonts.MONO}'; font-size: 10px; padding: 0 6px;"
-        )
-
-    def _on_camera_disconnected(self):
-        _s = (f"color: {C_TEXT_DIM}; font-family: '{Fonts.MONO}';"
-              f" font-size: {Sizes.SMALL}; padding: 0 8px;")
-        self._sb_camera.setText("📷 —"); self._sb_camera.setStyleSheet(
-            f"color: {C_ACCENT}; font-family: '{Fonts.MONO}'; font-size: {Sizes.SMALL}; padding: 0 8px;"
-        )
-        self._sb_size.setText("📐 —")
-        self._sb_fps.setText("fps: —")
-        self._sb_exp.setText("⏱ —")
-        _ds = (f"color: {_TAB_NORMAL}; font-family: '{Fonts.MONO}'; font-size: 10px; padding: 0 6px;")
-        self._hdr_camera.setText("—"); self._hdr_camera.setStyleSheet(_ds)
-        self._hdr_exp.setText("—"); self._hdr_fps.setText("—")
-
-    def _on_exposure_changed(self, ms: float):
-        if ms < 1.0:
-            t = f"{ms*1000:.0f}µs"
-        elif ms >= 1000.0:
-            t = f"{ms/1000:.2f}s"
-        else:
-            t = f"{ms:.1f}ms"
-        self._sb_exp.setText(f"⏱ {t}")
-        self._hdr_exp.setText(t)
-
-    def _on_frame_stats(self, fps: float, w: int, h: int):
-        self._sb_size.setText(f"📐 {w}×{h}")
-        if fps > 0:
-            fps_t = f"{fps:.1f}fps"
-            self._sb_fps.setText(f"fps: {fps:.1f}")
-            self._hdr_fps.setText(fps_t)
-
-    def _on_spe_saved(self, path: str):
-        self.analysis_tab.open_spe(path)
-        analysis_idx = self.stack.indexOf(self.analysis_tab)
-        if analysis_idx >= 0:
-            self._switch_mode(analysis_idx)
-        self._on_status(f"SPE 열림: {path}")
 
     def _on_status(self, msg: str):
         self._status_label.setText(msg)
 
     # ── 종료 처리 ────────────────────────────────────────────────────
 
-    # ── 종료 처리 ────────────────────────────────────────────────────
-
     def save_all_settings(self):
         """aboutToQuit / SIGINT 등 모든 종료 경로에서 설정 저장 및 UI 상태 저장."""
-        # 1. MainWindow 상태 저장
         cfg = get_config()
         cfg.set("window.main.geometry", self.saveGeometry())
         cfg.set("window.main.windowState", self.saveState())
-        cfg.set("window.main.active_tab", self.stack.currentIndex())
         cfg.save()
 
-        # 2. 서브 탭 설정 저장 및 하드웨어/워커 정리
-        for tab in (self.live_tab, self.acq_tab, self.scan_tab, self.af_tab, self.kin_tab, self.analysis_tab, self.deep_align_tab):
-            if hasattr(tab, "_save_settings"):
-                try: tab._save_settings()
-                except Exception: pass
-            
-            if hasattr(tab, "cleanup"):
-                try: tab.cleanup()
-                except Exception: pass
+        if hasattr(self.deep_align_tab, "_save_settings"):
+            try: self.deep_align_tab._save_settings()
+            except Exception: pass
+        if hasattr(self.deep_align_tab, "cleanup"):
+            try: self.deep_align_tab.cleanup()
+            except Exception: pass
 
     def _setup_log_dock(self):
-        """[Phase 2] 전역 하단 로그 도크 — 모든 탭의 메시지를 통합 수신."""
+        """전역 하단 로그 도크 — 모든 카테고리 메시지 통합 수신."""
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # 탭 디자인
         self.log_tabs = QTabWidget()
         self.log_tabs.setStyleSheet(f"""
             QTabWidget::pane {{ border: none; background: #050a15; border-top: 1px solid #0f3460; }}
@@ -648,8 +387,7 @@ class MainWindow(QMainWindow):
         self.dock_log.setWidget(container)
         self.dock_log.setAllowedAreas(Qt.DockWidgetArea.BottomDockWidgetArea)
         self.dock_log.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable | QDockWidget.DockWidgetFeature.DockWidgetClosable)
-        
-        # 커스텀 헤더 (옵션)
+
         hdr = QWidget()
         hdr.setFixedHeight(24)
         hdr.setStyleSheet("background: #0c1428; border-bottom: 1px solid #1a3060;")
@@ -667,7 +405,7 @@ class MainWindow(QMainWindow):
         import logging
         ts = datetime.now().strftime("%H:%M:%S")
         ts_html = f"<span style='color:#4a5a7a; font-family: {Fonts.MONO}; font-size:11px;'>[{ts}]</span>"
-        
+
         cat_tag = ""
         if category != "sys":
             tag_color = "#aa7acc" if category == "calc" else "#4ecdc4" if category == "camera" else "#ff9f43"
@@ -682,7 +420,7 @@ class MainWindow(QMainWindow):
             color = "#6080a0"
         else:
             msg_lower = msg.lower()
-            if any(x in msg_lower for x in ["성공", "connected", "ok", "success"]): 
+            if any(x in msg_lower for x in ["성공", "connected", "ok", "success"]):
                 color = "#4ecdc4"
 
         msg_html = f"<span style='color:{color}; font-family: {Fonts.MONO};'>{msg}</span>"
@@ -692,12 +430,12 @@ class MainWindow(QMainWindow):
         if category == "dev": target = self.txt_dev
         elif category == "camera": target = self.txt_camera
         elif category == "calc": target = self.txt_calc
-        
+
         target.append(html)
         target.moveCursor(target.textCursor().MoveOperation.End)
 
     def _restore_settings(self):
-        """Load saved MainWindow UI state and forward to sub‑tabs."""
+        """Load saved MainWindow UI state and forward to DeepAlign tab."""
         cfg = get_config()
         try:
             geom = cfg.get("window.main.geometry")
@@ -706,72 +444,52 @@ class MainWindow(QMainWindow):
             state = cfg.get("window.main.windowState")
             if state:
                 self.restoreState(state)
-            idx = cfg.get("window.main.active_tab")
-            if idx is not None:
-                idx = int(idx)
-                if 0 <= idx < self.stack.count():
-                    self._switch_mode(idx)
         except Exception as e:
             print(f"MainWindow settings restore error: {e}")
 
-        # Restore sub‑tab settings
-        for tab in (self.live_tab, self.acq_tab, self.scan_tab, self.af_tab, self.kin_tab, self.analysis_tab, self.deep_align_tab):
-            if hasattr(tab, "_restore_settings"):
-                try:
-                    tab._restore_settings()
-                except Exception as e:
-                    print(f"Error restoring settings for {type(tab).__name__}: {e}")
+        if hasattr(self.deep_align_tab, "_restore_settings"):
+            try:
+                self.deep_align_tab._restore_settings()
+            except Exception as e:
+                print(f"Error restoring settings for DeepAlignMainTab: {e}")
 
     def closeEvent(self, event):
-        """프로그램 종료 시 모든 탭의 폴링/타이머/워커를 안전하게 정지"""
+        """프로그램 종료 시 폴링/타이머/워커를 안전하게 정지"""
         try:
-            # 주요 탭들 순회하며 정리 (Live, Kinematic 등)
-            all_tabs = [
-                self.live_tab, self.acq_tab, self.scan_tab, 
-                self.af_tab, self.kin_tab, self.analysis_tab, self.deep_align_tab
-            ]
-            for tab in all_tabs:
-                if hasattr(tab, "stop_polling"):
-                    try:
-                        tab.stop_polling()
-                    except Exception as e:
-                        print(f"Error stopping polling for {type(tab).__name__}: {e}")
+            if hasattr(self.deep_align_tab, "stop_polling"):
+                try:
+                    self.deep_align_tab.stop_polling()
+                except Exception as e:
+                    print(f"Error stopping polling for DeepAlignMainTab: {e}")
         except Exception as e:
             print(f"Close cleanup error: {e}")
-            
+
         self.save_all_settings()
         super().closeEvent(event)
 
     def show_main_window(self):
         """스플래시 화면을 닫고 메인 윈도우를 표시합니다."""
-        # 1. 메인 윈도우 먼저 표시 (안전한 활성화 상태 전이)
         self.show()
-        # 2. 스플래시 화면 숨김
         if hasattr(self, "startup_overlay"):
             self.startup_overlay.hide()
-        # 3. 메인 윈도우가 켜진 상태이므로, 창이 전부 닫히면 앱이 정상 종료되는 Qt 기본 설정 복원
         QApplication.setQuitOnLastWindowClosed(True)
 
     def start_application(self):
         """어플리케이션 시작 시 자동 연결 설정에 따라 스플래시 또는 메인 화면을 노출합니다."""
         auto_connect_enabled = bool(get_config().get("window.main.auto_connect", True))
         if auto_connect_enabled:
-            # 스플래시 화면만 떠 있는 동안 창 전환 시 Qt 앱이 강제 종료(quitOnLastWindowClosed)되는 것 방지
             QApplication.setQuitOnLastWindowClosed(False)
-            # 1. 스플래시 화면(독립 프레임리스 창) 노출
             if hasattr(self, "startup_overlay"):
                 self.startup_overlay.show()
                 self.startup_overlay.raise_()
-            # 2. 백그라운드 자동 연결 개시
             self._auto_connect_startup()
         else:
-            # 자동 연결이 비활성화인 경우 즉시 메인 화면 표시
             self.show()
 
     def _auto_connect_startup(self):
         """백그라운드에서 모든 하드웨어 연결 자동 시도 (예외 안전)"""
         auto_connect_enabled = bool(get_config().get("window.main.auto_connect", True))
-        
+
         if not auto_connect_enabled:
             app_logger.info("[Auto-Connect] 자동 장비 연결 기능이 비활성화 상태입니다. (자동 연결 스킵)")
             if hasattr(self, "startup_overlay"):
@@ -780,10 +498,10 @@ class MainWindow(QMainWindow):
             return
 
         import threading
-        
+
         def worker():
             app_logger.info("[Auto-Connect] 백그라운드 자동 장비 연결 시퀀스 가동...")
-            
+
             # 1. Picomotor 자동 연결
             try:
                 self.auto_connect_status.emit("pico", "connecting")
@@ -812,10 +530,6 @@ class MainWindow(QMainWindow):
                 self.auto_connect_status.emit("kimm", "skipped")
 
             # 3. ACS Stage 자동 연결 → GUI 스레드에서 실행
-            # 이유: AcsStageController.start_polling 이 QApplication.processEvents() 로
-            # 첫 폴링 완료를 동기 대기한다. 백그라운드 스레드에서는 이벤트 큐가 없어
-            # 항상 3초 timeout → RuntimeError 가 발생한다.
-            # 카메라 자동연결도 ACS 완료 후 순차 실행되도록 chain.
             QTimer.singleShot(100, self._auto_connect_acs_then_camera_on_gui)
 
         t = threading.Thread(target=worker, daemon=True, name="StartupAutoConnect")
@@ -838,55 +552,45 @@ class MainWindow(QMainWindow):
             app_logger.warning(f"[Auto-Connect] ACS Stage 연결 스킵 (타임아웃 또는 점유): {e}")
             self.auto_connect_status.emit("acs", "skipped")
         finally:
-            # ACS 성공/실패 여부와 무관하게 카메라 자동연결로 진행
             QTimer.singleShot(100, self._auto_connect_camera_on_gui)
 
     def _auto_connect_camera_on_gui(self):
         """메인 GUI 스레드에서 안전하게 카메라 자동 연결 수행 (DeepAlign 탭 기준)"""
         try:
             self.auto_connect_status.emit("camera", "connecting")
-            # 저장된 카메라 vendor 로드 (camera.last_used.vendor)
             vendor = str(get_config().get("camera.last_used.vendor", "Simulation")).strip()
-            
+
             app_logger.info(f"[Auto-Connect] 저장된 카메라 벤더 로드: {vendor}")
-            
-            # 2. session_hub에 vendor 선택 및 카메라 스캔
+
             vendor_key = vendor.lower()
             if vendor_key in ("simulation", "simulated"):
                 vendor_key = "simulated"
-                
+
             self.session_hub.select_camera_vendor(vendor_key)
             devices = self.session_hub.scan_cameras()
-            
+
             if devices:
                 dev = devices[0]
                 device_id = getattr(dev, "device_id", "")
                 app_logger.info(f"[Auto-Connect] 카메라 연결 시도: vendor={vendor}, device={device_id}...")
                 self.session_hub.connect_camera(str(device_id))
                 app_logger.info(f"[Auto-Connect] 카메라 연결 성공: {device_id}")
-                
-                # DeepAlignMainTab UI 갱신을 위해 mixin에 디바이스 목록 바인딩 처리
+
                 self.deep_align_tab._scanned_devices = list(devices)
                 self.deep_align_tab._populate_camera_list_from_devices(devices)
-                
-                # 콤보박스 선택 인덱스 매칭
+
                 idx = self.deep_align_tab.cb_vendor.findText(vendor)
                 if idx >= 0:
                     self.deep_align_tab.cb_vendor.blockSignals(True)
                     self.deep_align_tab.cb_vendor.setCurrentIndex(idx)
                     self.deep_align_tab.cb_vendor.blockSignals(False)
-                
-                # 카메라가 연결된 후 capabilities와 settings 적용
+
                 try:
                     caps = self.session_hub.camera_get_capabilities()
                 except Exception:
                     caps = None
                 self.deep_align_tab._apply_camera_capabilities(caps)
 
-                # ── [PUSH] config 의 이전 설정 → 카메라 (read-back 직전) ──
-                # 수동 connect 와 동일하게 exposure/fps/temp/ADC 를 카메라에 다시
-                # 밀어넣는다. 빠뜨리면 카메라가 펌웨어 default 로 동작하여
-                # 사용자의 직전 세션 값이 적용되지 않음.
                 try:
                     self.deep_align_tab._push_saved_camera_settings(caps, vendor)
                 except Exception:
@@ -900,8 +604,7 @@ class MainWindow(QMainWindow):
                     self.deep_align_tab.spin_exposure.blockSignals(False)
                 except Exception:
                     pass
-                
-                # 온도 및 ADC 설정 즉시 동기화
+
                 if caps and caps.has_temperature:
                     try:
                         reading, setpoint, status = self.session_hub.camera_get_temperature(OWNER_DEEPALIGN)
@@ -914,7 +617,7 @@ class MainWindow(QMainWindow):
                             self.deep_align_tab.spin_temp.blockSignals(False)
                     except Exception:
                         pass
-                
+
                 if caps and caps.has_adc:
                     try:
                         adc_settings = self.session_hub.camera_get_adc_settings(OWNER_DEEPALIGN)
@@ -934,7 +637,7 @@ class MainWindow(QMainWindow):
                                     cb.blockSignals(False)
                     except Exception:
                         pass
-                
+
                 self.deep_align_tab._set_camera_action_state(True)
                 if caps and getattr(caps, "has_temperature", False):
                     self.deep_align_tab._start_temp_polling()
@@ -946,7 +649,6 @@ class MainWindow(QMainWindow):
             app_logger.warning(f"[Auto-Connect] 카메라 자동 연결 실패: {e}")
             self.auto_connect_status.emit("camera", "skipped")
         finally:
-            # 1.2초 대기하여 사용자가 최종 상태를 눈으로 확인하게 한 뒤 오버레이 숨기기
             QTimer.singleShot(1200, self.startup_overlay.hide_overlay)
 
     def _on_auto_connect_toggled(self):
@@ -956,4 +658,3 @@ class MainWindow(QMainWindow):
         cfg.set("window.main.auto_connect", checked)
         cfg.save()
         app_logger.info(f"[Auto-Connect] 자동 연결 기능 설정 변경 -> {'활성화' if checked else '비활성화'}")
-

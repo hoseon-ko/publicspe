@@ -488,6 +488,13 @@ class SpeImageViewerV2(QWidget):
                     else:
                         xp, yp = ImageProvider.get_roi_profile(self._img_data, x0, y0, x1, y1)
                         self.multi_profile_updated.emit(xp, yp)
+                        # Box ROI일 경우 히스토그램도 계산해서 전송
+                        ix0, ix1 = int(min(x0, x1)), int(max(x0, x1))
+                        iy0, iy1 = int(min(y0, y1)), int(max(y0, y1))
+                        sub = self._img_data[iy0:iy1, ix0:ix1]
+                        if sub.size > 0:
+                            counts, bin_edges = np.histogram(sub, bins=256)
+                            self.histogram_updated.emit(counts, bin_edges)
 
                     # [센스 구현] 내부 위젯(Ruler)은 ROI가 선이든 박스든 항상 해당 영역의 X/Y 평균을 보여줌
                     # (Line일 경우에도 영역 평균을 보여주거나, 혹은 포인트 프로파일로 대체 가능)
@@ -526,6 +533,14 @@ class SpeImageViewerV2(QWidget):
         if xp.size > 0:
             self.ruler_system.set_profiles(xp, yp)
             self.multi_profile_updated.emit(xp, yp)
+            
+            # 기본 ROI에 대해서도 히스토그램 계산 후 전송
+            ix0, ix1 = int(min(x0, x1)), int(max(x0, x1))
+            iy0, iy1 = int(min(y0, y1)), int(max(y0, y1))
+            sub = self._img_data[iy0:iy1, ix0:ix1]
+            if sub.size > 0:
+                counts, bin_edges = np.histogram(sub, bins=256)
+                self.histogram_updated.emit(counts, bin_edges)
             
         if self.btn_roi_range.isChecked():
             self._apply_roi_range_with_pts(x0, y0, x1, y1)

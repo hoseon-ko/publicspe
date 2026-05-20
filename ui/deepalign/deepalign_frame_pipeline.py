@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import QListWidgetItem
 from PyQt6.QtGui import QImage, QPixmap, QIcon
 
 from ui.deepalign.deepalign_workers import _FrameConvertWorker, _convert_raw_to_rgb
+from ui.deepalign.image_metrics import ImageMetrics
 
 
 class FramePipelineMixin:
@@ -69,14 +70,13 @@ class FramePipelineMixin:
         raw = self._apply_background_subtraction(raw)
         self._last_proc_stats = None
         raw = self._apply_proc_image(raw)
-        # Mode 1/2 통계가 생성되었으면 시계열 플롯에 1점 추가
-        stats = getattr(self, "_last_proc_stats", None)
-        if stats is not None and hasattr(self, "proc_stats_panel"):
-            mode, mean_v, mn, mx = stats
+        # Mode 1/2 통계가 생성되었으면 시계열 플롯에 추가
+        stats_dict = getattr(self, "_last_proc_stats", None)
+        if stats_dict is not None and hasattr(self, "proc_stats_panel"):
             try:
-                self.proc_stats_panel.add_point(source, mode, mean_v, mn, mx)
-            except Exception:
-                pass
+                self.proc_stats_panel.add_point_dict(source, stats_dict)
+            except Exception as e:
+                print(f"Error adding point to proc stats: {e}")
 
         worker.submit({
             "raw": raw,
@@ -142,49 +142,49 @@ class FramePipelineMixin:
 
         orig_dtype = raw.dtype
 
+        # 1. 먼저 대상 영역 정의 (전체 또는 ROI)
+        raw_roi = raw if roi_slice is None else raw[roi_slice]
+        img_roi = None
+        if img is not None:
+            img_roi = img if roi_slice is None else img[roi_slice]
+
         if mode == 1:
+            # ROI 영역에 대해서만 연산
             full = raw.astype(np.float32) - img.astype(np.float32)
+            sample = raw_roi.astype(np.float32) - img_roi.astype(np.float32)
+            
             if np.issubdtype(orig_dtype, np.unsignedinteger):
                 full = np.clip(full, 0, np.iinfo(orig_dtype).max)
+                sample = np.clip(sample, 0, np.iinfo(orig_dtype).max)
             out = full.astype(orig_dtype)
-            sample = full if roi_slice is None else full[roi_slice]
-            mean_v = float(np.mean(sample))
-            min_v  = float(np.min(sample))
-            max_v  = float(np.max(sample))
-            calc_logger.info(
-                f"Mode 1 (sub) [{region}] | mean={mean_v:.4f}  min={min_v:.4f}  max={max_v:.4f}"
-            )
 
         elif mode == 2:
-            denom = img.astype(np.float32)
-            denom[denom == 0] = np.nan          # 0 나누기 방지
-            full = raw.astype(np.float32) / denom
+            # 필요한 영역만 계산하여 메모리 및 시간 절약
+            denom = img_roi.astype(np.float32)
+            denom[denom == 0] = np.nan
+            sample = raw_roi.astype(np.float32) / denom
+            
+            # full 연산이 반드시 필요한 경우가 아니라면 생략 가능
+            full = raw.astype(np.float32) / np.where(img == 0, np.nan, img) 
             out = full.astype(np.float32)
-            sample = full if roi_slice is None else full[roi_slice]
-            mean_v = float(np.nanmean(sample))
-            min_v  = float(np.nanmin(sample))
-            max_v  = float(np.nanmax(sample))
-            calc_logger.info(
-                f"Mode 2 (div) [{region}] | mean={mean_v:.4f}  min={min_v:.4f}  max={max_v:.4f}"
-            )
 
         elif mode == 3:
-            # raw 자체 분석 — 이미지 변형 없이 통계만
             out = raw
-            sample = raw if roi_slice is None else raw[roi_slice]
-            sample_f = sample.astype(np.float32)
-            mean_v = float(np.mean(sample_f))
-            min_v  = float(np.min(sample_f))
-            max_v  = float(np.max(sample_f))
-            calc_logger.info(
-                f"Mode 3 (analyze) [{region}] | mean={mean_v:.4f}  min={min_v:.4f}  max={max_v:.4f}"
-            )
+            sample = raw_roi
 
         else:
             return raw
 
-        # 통계 저장 — snap/live/acquire 핸들러가 ProcStatsPlot.add_point() 에 전달
-        self._last_proc_stats = (int(mode), mean_v, min_v, max_v)
+        # 구조체(ImageMetrics)를 통해 통계 추출 및 캐싱
+        metrics = ImageMetrics(sample)
+        stats_dict = metrics.to_dict()
+                
+        calc_logger.info(
+            f"Mode {mode} [{region}] | Opt1={stats_dict['opt1']:.4f}  Opt2={stats_dict['opt2']:.4f}  Opt3={stats_dict['opt3']:.4f}"
+        )
+
+        # 통계 저장 — snap/live/acquire 핸들러가 ProcStatsPlot.add_point_dict() 에 전달
+        self._last_proc_stats = stats_dict
         return out
 
     def _apply_background_subtraction(self, raw: np.ndarray) -> np.ndarray:

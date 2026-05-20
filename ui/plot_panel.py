@@ -252,7 +252,8 @@ class PlotPanel(QWidget):
         )
         path, _ = QFileDialog.getSaveFileName(
             self, "프로파일 CSV 저장", default_name,
-            "CSV 파일 (*.csv);;모든 파일 (*)"
+            "CSV 파일 (*.csv);;모든 파일 (*)",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
         if not path:
             return
