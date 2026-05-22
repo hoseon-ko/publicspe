@@ -23,7 +23,7 @@ import pyqtgraph as pg
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QCheckBox, QRadioButton,
-    QButtonGroup, QPushButton, QLabel, QFrame, QSplitter,
+    QButtonGroup, QPushButton, QLabel, QFrame,
     QTableWidget, QTableWidgetItem, QAbstractItemView, QHeaderView,
     QFileDialog, QMessageBox
 )
@@ -36,17 +36,27 @@ SOURCE_LIVE = "live"
 SOURCE_ACQ  = "acquire"
 
 # 동적 옵션 정의: (표시명, 키, 색상, 기본활성화여부)
+# 밝기 8종 (opt1~opt8) + 대비 9종 (opt9~opt17)
 _OPTIONS = [
-    ("Opt 1", "opt1", "#4ecdc4", True),
-    ("Opt 2", "opt2", "#ffe66d", True),
-    ("Opt 3", "opt3", "#e94560", True),
-    ("Opt 4", "opt4", "#38bdf8", False),
-    ("Opt 5", "opt5", "#fbbf24", False),
-    ("Opt 6", "opt6", "#a78bfa", False),
-    ("Opt 7", "opt7", "#f472b6", False),
-    ("Opt 8", "opt8", "#34d399", False),
-    ("Opt 9", "opt9", "#fb923c", False),
-    ("Opt 10", "opt10", "#94a3b8", False),
+    # 밝기 (Brightness)
+    ("Mean",      "opt1",  "#4ecdc4", True),
+    ("Median",    "opt2",  "#ffe66d", True),
+    ("RMS",       "opt3",  "#e94560", True),
+    ("Top5%",     "opt4",  "#38bdf8", False),
+    ("Top1%",     "opt5",  "#fbbf24", False),
+    ("P90",       "opt6",  "#a78bfa", False),
+    ("BI",        "opt7",  "#f472b6", False),
+    ("Log Mean",  "opt8",  "#34d399", False),
+    # 대비 (Contrast)
+    ("Michelson", "opt9",  "#fb923c", False),
+    ("Mich.Loc",  "opt10", "#94a3b8", False),
+    ("RMS Cont",  "opt11", "#60a5fa", False),
+    ("Weber",     "opt12", "#f87171", False),
+    ("SNR",       "opt13", "#4ade80", True),
+    ("Dyn.Range", "opt14", "#facc15", False),
+    ("Sharpness", "opt15", "#c084fc", False),
+    ("Prof.H",    "opt16", "#67e8f9", False),
+    ("Prof.V",    "opt17", "#fda4af", False),
 ]
 
 class _IntAxis(pg.AxisItem):
@@ -68,7 +78,7 @@ class _IntAxis(pg.AxisItem):
 
 
 class ProcStatsPlot(QWidget):
-    """Mode 1/2/3 결과 통계 시계열 플롯 (10가지 옵션 지원)."""
+    """Mode 1/2/3 결과 통계 시계열 플롯 (밝기 8종 + 대비 9종, 총 17가지 옵션 지원)."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -127,11 +137,12 @@ class ProcStatsPlot(QWidget):
         opt_layout = QVBoxLayout(self.options_widget)
         opt_layout.setContentsMargins(0, 0, 0, 0)
         
-        row2 = QHBoxLayout()
-        row2.setSpacing(6)
-        row3 = QHBoxLayout()
-        row3.setSpacing(6)
-        
+        rows = [QHBoxLayout() for _ in range(4)]
+        for r in rows:
+            r.setSpacing(6)
+        # 4 / 4 / 4 / 5 분할
+        _ROW_BREAKS = [4, 8, 12]
+
         for i, (label, key, color, default_on) in enumerate(_OPTIONS):
             c = self.plot.plot(pen=pg.mkPen(color, width=2), name=key)
             c.setVisible(default_on)
@@ -140,19 +151,13 @@ class ProcStatsPlot(QWidget):
             chk = self._mk_color_check(label, color, default_on)
             chk.toggled.connect(c.setVisible)
             self._checks[key] = chk
-            
-            if i < 5:
-                row2.addWidget(chk)
-            else:
-                row3.addWidget(chk)
 
-        row2.addStretch()
-        row3.addStretch()
-        opt_layout.addLayout(row2)
-        opt_layout.addLayout(row3)
-        
-        # v.addLayout(row2)  <- 메인 패널에는 더 이상 추가하지 않음
-        # v.addLayout(row3)
+            row_idx = sum(1 for b in _ROW_BREAKS if i >= b)
+            rows[row_idx].addWidget(chk)
+
+        for r in rows:
+            r.addStretch()
+            opt_layout.addLayout(r)
 
         # ── 표 (그래프와 동일한 데이터, 헤더 클릭으로 정렬 가능) ────────
         self.table = QTableWidget(0, 1 + len(_OPTIONS))
@@ -179,13 +184,8 @@ class ProcStatsPlot(QWidget):
             QTableWidget::item:selected { background: #1e3a5f; color: #f1f5f9; }
         """)
 
-        # 그래프 + 표를 splitter 로 묶어 비율 조정 가능
-        split = QSplitter(Qt.Orientation.Vertical)
-        split.addWidget(self.plot)
-        split.addWidget(self.table)
-        split.setSizes([300, 150])
-        split.setChildrenCollapsible(False)
-        v.addWidget(split, 1)
+        # 그래프만 메인 레이아웃에 추가 — table 은 별도 dock_proc_table 도킹으로 분리
+        v.addWidget(self.plot, 1)
 
     def _mk_color_check(self, text: str, color: str, checked: bool) -> QCheckBox:
         c = QCheckBox(text)

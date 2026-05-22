@@ -104,24 +104,25 @@ class HikvisionCameraAdapter(CameraHal):
             raise HalCommandError(f"Hikvision get exposure failed: {exc}", cause=exc) from exc
 
     def get_frame_total_s(self) -> float:
-        """프레임 총 시간(초).
+        """프레임 총 시간(초) = 라이브 프레임 주기 추정값.
 
-        MVS SDK AcquisitionFrameRate는 FPS 잠금/비잠금 모두에서
-        exposure + readout을 반영한 실제 달성 가능 프레임레이트를 반환하므로
-        1/fps 가 가장 정확한 프레임 주기 추정값이다.
-        FPS 읽기 실패 시 노출 시간으로 폴백.
+        HIKVISION은 FPS 제어를 지원하는 카메라이므로 프레임 주기는 **1/FPS** 가 기준이다.
+        MVS SDK ResultingFrameRate 는 exposure + readout 제약을 이미 반영한
+        '실제 달성 가능 FPS' 라서 1/fps 가 곧 (노출+리드아웃) 을 포함한 프레임 주기다.
+        따라서 노출과 max() 로 섞지 않고 FPS 를 그대로 따른다.
+        FPS 를 읽지 못할 때만 노출 시간으로 폴백한다 (FPS 미지원 카메라의 Readout+Exposure 대체).
         """
         try:
-            exp_s = max(0.005, self.get_exposure_ms() / 1000.0)
+            fps = 0.0
             try:
                 fps = self.get_fps()
-                if fps > 0:
-                    total_s = max(1.0 / fps, exp_s)
-                else:
-                    total_s = exp_s
             except Exception:
-                total_s = exp_s
-            cam_logger.debug(f"[HikvisionCameraAdapter] get_frame_total_s succeeded s={total_s}")
+                cam_logger.debug("[HikvisionCameraAdapter] get_frame_total_s: FPS read failed, fallback to exposure")
+            if fps > 0:
+                total_s = 1.0 / fps
+            else:
+                total_s = max(0.005, self.get_exposure_ms() / 1000.0)
+            cam_logger.debug(f"[HikvisionCameraAdapter] get_frame_total_s succeeded s={total_s} fps={fps}")
             return total_s
         except Exception as exc:
             cam_logger.exception("[HikvisionCameraAdapter] get_frame_total_s failed")

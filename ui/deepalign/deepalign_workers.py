@@ -45,8 +45,14 @@ def _convert_raw_to_rgb(raw, cmap: str, vmin: float, vmax: float) -> np.ndarray:
     return np.ascontiguousarray(np.stack([gray, gray, gray], axis=-1))
 
 
+from ui.deepalign.image_metrics import ImageMetrics
+from core.logger import calc_logger
+from ui.deepalign.roi_finder import extract_ring_pixels
+from ui.deepalign._perf_probe import perf_tick  # [임시 계측]
+
+
 class _FrameConvertWorker(QObject):
-    """raw numpy → RGB 변환을 워커 스레드에서 수행.
+    """raw numpy → RGB 변환 및 프레임 프로세싱을 워커 스레드에서 수행.
 
     submit()은 메인 스레드에서 호출한다.
     QueuedConnection으로 _process()가 워커 스레드 이벤트 루프에서 실행됨.
@@ -54,7 +60,7 @@ class _FrameConvertWorker(QObject):
     """
 
     _submit = pyqtSignal(object)
-    result_ready = pyqtSignal(object, object, str)  # rgb, raw, gallery_label
+    result_ready = pyqtSignal(dict)  # result dictionary
 
     def __init__(self):
         super().__init__()
@@ -73,13 +79,147 @@ class _FrameConvertWorker(QObject):
     @pyqtSlot(object)
     def _process(self, task: dict) -> None:
         self._busy = True
+        _perf_t0 = time.perf_counter()  # [임시 계측]
+        _perf_src = task.get("source", "live")  # [임시 계측]
         try:
+            raw = task["raw"]
+            if raw is None:
+                return
+
+            # 1. 배경 차감 (Background Subtraction)
+            bg_enabled = task.get("bg_enabled", False)
+            bg_frame = task.get("bg_frame", None)
+            if bg_enabled and bg_frame is not None and bg_frame.shape == raw.shape:
+                result = raw.astype(np.int32) - bg_frame.astype(np.int32)
+                if np.issubdtype(raw.dtype, np.unsignedinteger):
+                    result = np.clip(result, 0, np.iinfo(raw.dtype).max)
+                raw_after_bg = result.astype(raw.dtype)
+            else:
+                raw_after_bg = raw
+
+            # 2. 이미지 프로세싱 & 메트릭 계산 (Mode 1/2/3)
+            proc_enabled = task.get("proc_enabled", False)
+            proc_mode = task.get("proc_mode", 1)
+            proc_region = task.get("proc_region", "full")
+            proc_image = task.get("proc_image", None)
+            proc_bg_mode = task.get("proc_bg_mode", "ring")
+            bg_gap = task.get("bg_gap", 2)
+            bg_thickness = task.get("bg_thickness", 10)
+            sig_roi_rect = task.get("sig_roi_rect", None)
+            bg_roi_rect = task.get("bg_roi_rect", None)
+
+            processed_raw = raw_after_bg
+            stats_dict = None
+
+            if proc_enabled:
+                # Mode 1/2 는 proc image 필수
+                has_proc_image = proc_image is not None and proc_image.shape == raw_after_bg.shape
+                
+                # ROI mask 계산 (region == 'roi' 일 때만)
+                roi_slice = None
+                if proc_region == "roi" and sig_roi_rect is not None:
+                    h, w = raw_after_bg.shape[:2]
+                    x0, y0, x1, y1 = sig_roi_rect
+                    x0 = max(0, min(w, int(round(min(x0, x1)))))
+                    x1 = max(0, min(w, int(round(max(x0, x1)))))
+                    y0 = max(0, min(h, int(round(min(y0, y1)))))
+                    y1 = max(0, min(h, int(round(max(y0, y1)))))
+                    if x1 > x0 and y1 > y0:
+                        roi_slice = (slice(y0, y1), slice(x0, x1))
+
+                orig_dtype = raw_after_bg.dtype
+                raw_roi = raw_after_bg if roi_slice is None else raw_after_bg[roi_slice]
+                img_roi = None
+                if proc_image is not None:
+                    img_roi = proc_image if roi_slice is None else proc_image[roi_slice]
+
+                valid_mode = True
+                if proc_mode in (1, 2) and not has_proc_image:
+                    valid_mode = False
+
+                if valid_mode:
+                    if proc_mode == 1:
+                        full = raw_after_bg.astype(np.float32) - proc_image.astype(np.float32)
+                        sample = raw_roi.astype(np.float32) - img_roi.astype(np.float32)
+                        if np.issubdtype(orig_dtype, np.unsignedinteger):
+                            full = np.clip(full, 0, np.iinfo(orig_dtype).max)
+                            sample = np.clip(sample, 0, np.iinfo(orig_dtype).max)
+                        processed_raw = full.astype(orig_dtype)
+                    elif proc_mode == 2:
+                        denom = img_roi.astype(np.float32)
+                        denom[denom == 0] = np.nan
+                        sample = raw_roi.astype(np.float32) / denom
+                        full = raw_after_bg.astype(np.float32) / np.where(proc_image == 0, np.nan, proc_image)
+                        processed_raw = full.astype(np.float32)
+                    elif proc_mode == 3:
+                        processed_raw = raw_after_bg
+                        sample = raw_roi
+                    else:
+                        valid_mode = False
+
+                if valid_mode:
+                    # BG 픽셀 추출
+                    bg_pixels = None
+                    if roi_slice is not None:
+                        if proc_bg_mode == 'ring' and sig_roi_rect is not None:
+                            try:
+                                x0r, y0r, x1r, y1r = sig_roi_rect
+                                sig_xywh = (
+                                    int(min(x0r, x1r)), int(min(y0r, y1r)),
+                                    int(abs(x1r - x0r)), int(abs(y1r - y0r)),
+                                )
+                                ring = extract_ring_pixels(raw_after_bg.astype(np.float64), sig_xywh,
+                                                          gap=bg_gap, thickness=bg_thickness)
+                                if ring is not None and ring.size > 0:
+                                    bg_pixels = ring.reshape(1, -1)
+                            except Exception:
+                                pass
+                        elif proc_bg_mode == 'manual' and bg_roi_rect is not None:
+                            try:
+                                bx0, by0, bx1, by1 = bg_roi_rect
+                                h, w = raw_after_bg.shape[:2]
+                                bx0i = max(0, int(round(min(bx0, bx1))))
+                                bx1i = min(w, int(round(max(bx0, bx1))))
+                                by0i = max(0, int(round(min(by0, by1))))
+                                by1i = min(h, int(round(max(by0, by1))))
+                                if bx1i > bx0i and by1i > by0i:
+                                    bg_pixels = raw_after_bg[by0i:by1i, bx0i:bx1i].astype(np.float64)
+                            except Exception:
+                                pass
+
+                    _perf_t_m0 = time.perf_counter()  # [임시 계측]
+                    metrics = ImageMetrics(sample, bg_2d=bg_pixels)
+                    stats_dict = metrics.to_dict(profile=(_perf_src == "live"))  # [임시 계측] profile
+                    if _perf_src == "live":  # [임시 계측]
+                        perf_tick("worker.metrics_total", (time.perf_counter() - _perf_t_m0) * 1000.0)
+                    calc_logger.info(
+                        f"Mode {proc_mode} [{proc_region}] | Opt1={stats_dict['opt1']:.4f}  Opt2={stats_dict['opt2']:.4f}  Opt3={stats_dict['opt3']:.4f}"
+                    )
+
+            _perf_t_proc = time.perf_counter()  # [임시 계측] bg+proc+stats 끝
+
+            # 3. RGB 이미지 변환
             rgb = _convert_raw_to_rgb(
-                task["raw"], task["cmap"], task["vmin"], task["vmax"]
+                processed_raw, task["cmap"], task["vmin"], task["vmax"]
             )
-            self.result_ready.emit(rgb, task["raw"], task.get("gallery_label", ""))
+
+            if _perf_src == "live":  # [임시 계측]
+                _perf_t_rgb = time.perf_counter()
+                perf_tick("worker.proc(bg+proc+stat)", (_perf_t_proc - _perf_t0) * 1000.0)
+                perf_tick("worker.rgb_convert", (_perf_t_rgb - _perf_t_proc) * 1000.0)
+                perf_tick("worker.total", (_perf_t_rgb - _perf_t0) * 1000.0)
+
+            self.result_ready.emit({
+                "rgb": rgb,
+                "raw_after_bg": raw_after_bg,
+                "processed_raw": processed_raw,
+                "stats_dict": stats_dict,
+                "gallery_label": task.get("gallery_label", ""),
+                "source": task.get("source", "live")
+            })
         except Exception:
-            pass
+            import traceback
+            traceback.print_exc()
         finally:
             self._busy = False
 

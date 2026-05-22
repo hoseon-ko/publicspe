@@ -300,6 +300,8 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self._proc_mode: int = 1
         self._proc_enabled: bool = False
         self._proc_region: str = "full"   # "full" | "roi"
+        self._proc_bg_mode: str = "ring"  # "ring" | "manual" | "none"
+        # proc ROI는 interaction_layer의 전용 아이템으로 관리 (roi_id 불필요)
 
         # Background subtraction
         self._bg_frame: np.ndarray | None = None
@@ -504,6 +506,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self.btn_toggle_hist_sm.toggled.connect(self.dock_hist.setVisible)
         self.btn_toggle_proc_sm.toggled.connect(self.dock_proc_stats.setVisible)
         self.btn_toggle_roi_sm.toggled.connect(self.dock_roi.setVisible)
+        self.btn_toggle_table_sm.toggled.connect(self.dock_proc_table.setVisible)
         self.dock_plot.visibilityChanged.connect(
             lambda visible: self._sync_analysis_dock_toggle(self.dock_plot, self.btn_toggle_plot_sm, visible)
         )
@@ -515,6 +518,9 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         )
         self.dock_roi.visibilityChanged.connect(
             lambda visible: self._sync_analysis_dock_toggle(self.dock_roi, self.btn_toggle_roi_sm, visible)
+        )
+        self.dock_proc_table.visibilityChanged.connect(
+            lambda visible: self._sync_analysis_dock_toggle(self.dock_proc_table, self.btn_toggle_table_sm, visible)
         )
         self.btn_reset_dock.clicked.connect(self._on_reset_dock_layout)
 
@@ -535,6 +541,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self._sync_analysis_dock_toggle(self.dock_hist, self.btn_toggle_hist_sm, self.dock_hist.isVisible())
         self._sync_analysis_dock_toggle(self.dock_proc_stats, self.btn_toggle_proc_sm, self.dock_proc_stats.isVisible())
         self._sync_analysis_dock_toggle(self.dock_roi, self.btn_toggle_roi_sm, self.dock_roi.isVisible())
+        self._sync_analysis_dock_toggle(self.dock_proc_table, self.btn_toggle_table_sm, self.dock_proc_table.isVisible())
 
         # ROI Panel
         self.roi_panel.roi_selected.connect(self._on_roi_selected)
@@ -568,6 +575,22 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self._proc_mode_group.idClicked.connect(self._on_proc_mode_changed)
         self._proc_region_group.idClicked.connect(self._on_proc_region_changed)
         self.btn_proc_load.clicked.connect(self._on_proc_load_clicked)
+        self.btn_draw_sig_roi.clicked.connect(self._start_draw_sig_roi)
+        self.btn_auto_refine_roi.clicked.connect(self._auto_refine_roi)
+        self.btn_draw_bg_roi.clicked.connect(self._start_draw_bg_roi)
+        self.btn_clear_roi.clicked.connect(self._clear_proc_rois)
+        self._proc_bg_group.idClicked.connect(self._on_proc_bg_mode_changed)
+        self.spin_bg_gap.valueChanged.connect(self._save_settings)
+        self.spin_bg_gap.valueChanged.connect(self._refresh_ring_overlay)
+        self.spin_bg_thickness.valueChanged.connect(self._save_settings)
+        self.spin_bg_thickness.valueChanged.connect(self._refresh_ring_overlay)
+        self.spin_refine_threshold.valueChanged.connect(self._save_settings)
+        self.spin_refine_blur.valueChanged.connect(self._save_settings)
+        self.spin_refine_margin.valueChanged.connect(self._save_settings)
+        self.spin_refine_expand.valueChanged.connect(self._save_settings)
+
+        # ── Ring BG 오버레이 초기화 ───────────────────────────────────
+        self._init_ring_overlay()
 
         # ── Background subtraction ────────────────────────────────────
         self.check_use_bg.toggled.connect(self._on_bg_enable_toggled)
@@ -621,12 +644,98 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         # Region radio 도 enable 따라감
         self.radio_region_full.setEnabled(checked)
         self.radio_region_roi.setEnabled(checked)
+        # Signal ROI 버튼은 proc enabled 이면 항상 활성
+        self.btn_draw_sig_roi.setEnabled(checked)
+        # ROI 초기화 버튼도 proc enabled 이면 활성
+        self.btn_clear_roi.setEnabled(checked)
+        # Auto-Refine 파라미터 spinbox: proc enabled 이면 항상 활성
+        for sp in ('spin_refine_threshold', 'spin_refine_blur',
+                   'spin_refine_margin', 'spin_refine_expand'):
+            w = getattr(self, sp, None)
+            if w: w.setEnabled(checked)
+        # 나머지는 region=="roi" 일 때만 활성
+        roi_mode = checked and self._proc_region == "roi"
+        # AUTO-REFINE: proc ROI가 존재하는지 interaction_layer에서 직접 확인
+        has_sig_roi = False
+        try:
+            has_sig_roi = self.cam_viewer.view.interactions.get_proc_roi('signal') is not None
+        except AttributeError:
+            pass
+        self.btn_auto_refine_roi.setEnabled(roi_mode and has_sig_roi)
+        self.radio_bg_ring.setEnabled(roi_mode)
+        self.radio_bg_manual.setEnabled(roi_mode)
+        self.radio_bg_none.setEnabled(roi_mode)
+        ring_params   = roi_mode and self._proc_bg_mode == "ring"
+        manual_active = roi_mode and self._proc_bg_mode == "manual"
+        self.spin_bg_gap.setEnabled(ring_params)
+        self.spin_bg_thickness.setEnabled(ring_params)
+        self.btn_draw_bg_roi.setEnabled(manual_active)
+        self._refresh_ring_overlay()
 
     def _on_proc_mode_changed(self, mode_id: int) -> None:
         self._proc_mode = mode_id
 
     def _on_proc_region_changed(self, region_id: int) -> None:
         self._proc_region = "roi" if region_id == 1 else "full"
+        roi_mode = self._proc_enabled and self._proc_region == "roi"
+        # Auto-Refine 파라미터 spinbox: proc enabled 이면 항상 활성 (region 무관)
+        for sp in ('spin_refine_threshold', 'spin_refine_blur',
+                   'spin_refine_margin', 'spin_refine_expand'):
+            w = getattr(self, sp, None)
+            if w: w.setEnabled(self._proc_enabled)
+        has_sig_roi = False
+        try:
+            has_sig_roi = self.cam_viewer.view.interactions.get_proc_roi('signal') is not None
+        except AttributeError:
+            pass
+        self.btn_auto_refine_roi.setEnabled(roi_mode and has_sig_roi)
+        self.radio_bg_ring.setEnabled(roi_mode)
+        self.radio_bg_manual.setEnabled(roi_mode)
+        self.radio_bg_none.setEnabled(roi_mode)
+        ring_params   = roi_mode and self._proc_bg_mode == "ring"
+        manual_active = roi_mode and self._proc_bg_mode == "manual"
+        self.spin_bg_gap.setEnabled(ring_params)
+        self.spin_bg_thickness.setEnabled(ring_params)
+        self.btn_draw_bg_roi.setEnabled(manual_active)
+        self._refresh_ring_overlay()
+        self._save_settings()
+
+    def _on_proc_bg_mode_changed(self, mode_id: int) -> None:
+        modes = {0: "ring", 1: "manual", 2: "none"}
+        self._proc_bg_mode = modes.get(mode_id, "ring")
+        roi_mode      = self._proc_enabled and self._proc_region == "roi"
+        ring_params   = roi_mode and self._proc_bg_mode == "ring"
+        manual_active = roi_mode and self._proc_bg_mode == "manual"
+        self.spin_bg_gap.setEnabled(ring_params)
+        self.spin_bg_thickness.setEnabled(ring_params)
+        self.btn_draw_bg_roi.setEnabled(manual_active)
+        self._refresh_ring_overlay()
+        self._save_settings()
+
+    def _start_draw_sig_roi(self) -> None:
+        """Signal ROI 그리기 시작 — 전용 proc_signal 모드 (일반 ROI 시스템과 무관)."""
+        try:
+            self.cam_viewer.view.interactions.set_roi_mode("proc_signal")
+        except AttributeError:
+            pass
+
+    def _start_draw_bg_roi(self) -> None:
+        """Manual BG ROI 그리기 시작 — 전용 proc_bg 모드 (일반 ROI 시스템과 무관)."""
+        try:
+            self.cam_viewer.view.interactions.set_roi_mode("proc_bg")
+        except AttributeError:
+            pass
+
+    def _clear_proc_rois(self) -> None:
+        """Signal / BG proc ROI를 모두 지운다. clear_proc_roi가 proc_roi_updated(mode, None)을
+        emit → _on_proc_roi_updated가 라벨/오버레이/auto-refine 버튼 상태를 동기화."""
+        try:
+            it = self.cam_viewer.view.interactions
+            it.clear_proc_roi('signal')
+            it.clear_proc_roi('bg')
+            it.set_roi_mode(None)
+        except AttributeError:
+            pass
 
     def _on_proc_load_clicked(self) -> None:
         start = self.edit_folder.text().strip() or "."
@@ -900,9 +1009,16 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         c.set("tabs.deepalign.save.time_fmt",      self.cb_time_fmt.currentText())
         c.set("tabs.deepalign.save.place",         self.cb_place.currentText())
         # Image Processing 상태
-        c.set("tabs.deepalign.proc.enabled", bool(self.check_use_proc.isChecked()))
-        c.set("tabs.deepalign.proc.mode",    int(self._proc_mode))
-        c.set("tabs.deepalign.proc.region",  str(self._proc_region))
+        c.set("tabs.deepalign.proc.enabled",  bool(self.check_use_proc.isChecked()))
+        c.set("tabs.deepalign.proc.mode",     int(self._proc_mode))
+        c.set("tabs.deepalign.proc.region",   str(self._proc_region))
+        c.set("tabs.deepalign.proc.bg_mode",      str(self._proc_bg_mode))
+        c.set("tabs.deepalign.proc.bg_gap",       int(self.spin_bg_gap.value()))
+        c.set("tabs.deepalign.proc.bg_thickness", int(self.spin_bg_thickness.value()))
+        c.set("tabs.deepalign.proc.refine_threshold", float(self.spin_refine_threshold.value()))
+        c.set("tabs.deepalign.proc.refine_blur",      float(self.spin_refine_blur.value()))
+        c.set("tabs.deepalign.proc.refine_margin",    int(self.spin_refine_margin.value()))
+        c.set("tabs.deepalign.proc.refine_expand",    int(self.spin_refine_expand.value()))
         # DeepAlign 내부 dock 레이아웃 (Plot/Hist/Proc/ROI 위치+가시성)
         try:
             c.set("window.deepalign.dockState", self.dock_host.saveState())
@@ -914,7 +1030,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         src_id = ps._grp.checkedId()
         c.set("tabs.deepalign.proc_stats.source",
               "snap" if src_id == 0 else "live" if src_id == 1 else "all")
-        for key in [f"opt{i}" for i in range(1, 11)]:
+        for key in [f"opt{i}" for i in range(1, 18)]:
             if key in ps._checks:
                 c.set(f"tabs.deepalign.proc_stats.show_{key}", bool(ps._checks[key].isChecked()))
 
@@ -1012,6 +1128,20 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
             else: self.radio_proc_mode3.setChecked(True)
             if self._proc_region == "roi": self.radio_region_roi.setChecked(True)
             else: self.radio_region_full.setChecked(True)
+            bg_mode = str(c.get("tabs.deepalign.proc.bg_mode", "ring"))
+            self._proc_bg_mode = bg_mode if bg_mode in ("ring", "manual", "none") else "ring"
+            {
+                "ring":   self.radio_bg_ring,
+                "manual": self.radio_bg_manual,
+                "none":   self.radio_bg_none,
+            }[self._proc_bg_mode].setChecked(True)
+            self.spin_bg_gap.setValue(int(c.get("tabs.deepalign.proc.bg_gap", 2)))
+            self.spin_bg_thickness.setValue(int(c.get("tabs.deepalign.proc.bg_thickness", 10)))
+            self.spin_refine_threshold.setValue(float(c.get("tabs.deepalign.proc.refine_threshold", 50.0)))
+            self.spin_refine_blur.setValue(float(c.get("tabs.deepalign.proc.refine_blur", 2.0)))
+            self.spin_refine_margin.setValue(int(c.get("tabs.deepalign.proc.refine_margin", 5)))
+            self.spin_refine_expand.setValue(int(c.get("tabs.deepalign.proc.refine_expand", 20)))
+
             self.check_use_proc.setChecked(proc_en)
             # _restore_settings 는 시그널 연결 이전에 호출되므로 핸들러 명시 호출
             # (enable 규칙 / radio enable / mode·region 변수 동기화)
@@ -1032,6 +1162,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
                 (self.dock_hist, self.btn_toggle_hist_sm),
                 (self.dock_proc_stats, self.btn_toggle_proc_sm),
                 (self.dock_roi, self.btn_toggle_roi_sm),
+                (self.dock_proc_table, self.btn_toggle_table_sm),
             ):
                 self._sync_analysis_dock_toggle(dock, btn, dock.isVisible())
 
@@ -1042,9 +1173,9 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
             if   src == "live": ps.radio_live.setChecked(True)
             elif src == "all":  ps.radio_all.setChecked(True)
             else:               ps.radio_snap.setChecked(True)
-            for key in [f"opt{i}" for i in range(1, 11)]:
+            for key in [f"opt{i}" for i in range(1, 18)]:
                 if key in ps._checks:
-                    default_val = key in ("opt1", "opt2", "opt3")
+                    default_val = key in ("opt1", "opt2", "opt3", "opt13")  # Mean/Median/RMS/SNR 기본 활성
                     ps._checks[key].setChecked(bool(c.get(f"tabs.deepalign.proc_stats.show_{key}", default_val)))
 
             self._update_save_control_state()
@@ -1385,6 +1516,8 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
                         "Vendor": vendor,
                     },
                     "ScanRecords": {f"step_{r.get('step','?')}": r for r in records_str},
+                    **( {"ProcROI": self._get_proc_roi_metadata()}
+                        if self._get_proc_roi_metadata() else {} ),
                 },
             )
             scan_widget.set_scan_status(f"💾 SPE 저장: {fname}", "ok")
@@ -1904,6 +2037,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         if name == "dock_plot":         return getattr(v, "btn_toggle_profile",   None)
         if name == "dock_histogram":    return getattr(v, "btn_toggle_histogram", None)
         if name == "dock_proc_stats":   return getattr(v, "btn_toggle_proc",      None)
+        if name == "dock_proc_table":   return getattr(v, "btn_toggle_table",     None)
         return None
 
     def _on_gallery_item_double_clicked(self, item: QListWidgetItem):
@@ -2071,6 +2205,9 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         elif panel_type == "proc":
             self.dock_proc_stats.setVisible(not self.dock_proc_stats.isVisible())
             self.btn_toggle_proc_sm.setChecked(self.dock_proc_stats.isVisible())
+        elif panel_type == "table":
+            self.dock_proc_table.setVisible(not self.dock_proc_table.isVisible())
+            self.btn_toggle_table_sm.setChecked(self.dock_proc_table.isVisible())
         elif panel_type == "roi":
             self.dock_roi.setVisible(not self.dock_roi.isVisible())
             self.btn_toggle_roi_sm.setChecked(self.dock_roi.isVisible())
@@ -2105,6 +2242,8 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self.btn_laser_poll.toggled.connect(self._on_laser_poll_toggled)
         self.btn_laser_pulse.clicked.connect(self._on_laser_pulse_clicked)
         self.btn_laser_hf.clicked.connect(self._on_laser_hf_clicked)
+        self.btn_laser_pe_set.clicked.connect(self._on_laser_pe_set_clicked)
+        self.btn_laser_freq_set.clicked.connect(self._on_laser_freq_set_clicked)
         self.combo_laser_auth_type.currentIndexChanged.connect(self._on_laser_auth_type_changed)
         self.btn_laser_token_browse.clicked.connect(self._on_browse_laser_token)
 
@@ -2200,6 +2339,34 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
             self.laser_controller.control_hf(checked)
         self.lbl_laser_info.setText(f"Turning High Freq {'ON' if checked else 'OFF'}...")
 
+    def _on_laser_pe_set_clicked(self) -> None:
+        """Pulse Energy setpoint PUT."""
+        ip = self.edit_laser_ip.text().strip() or "127.0.0.1"
+        port = self.edit_laser_port.text().strip() or "5643"
+        self.laser_controller.set_connection_info(ip, port)
+        self.laser_controller.set_auth_config(self.combo_laser_auth_type.currentIndex())
+        value = self.spin_laser_pe.value()
+
+        if not self.laser_controller.session_token:
+            self._login_to_laser_server(lambda: self.laser_controller.set_pulse_energy(value))
+        else:
+            self.laser_controller.set_pulse_energy(value)
+        self.lbl_laser_info.setText(f"Setting Pulse Energy → {value:.1f} %...")
+
+    def _on_laser_freq_set_clicked(self) -> None:
+        """Frequency setpoint PUT."""
+        ip = self.edit_laser_ip.text().strip() or "127.0.0.1"
+        port = self.edit_laser_port.text().strip() or "5643"
+        self.laser_controller.set_connection_info(ip, port)
+        self.laser_controller.set_auth_config(self.combo_laser_auth_type.currentIndex())
+        value = self.spin_laser_freq.value()
+
+        if not self.laser_controller.session_token:
+            self._login_to_laser_server(lambda: self.laser_controller.set_frequency(value))
+        else:
+            self.laser_controller.set_frequency(value)
+        self.lbl_laser_info.setText(f"Setting Frequency → {value:.2f} Hz...")
+
     def _on_laser_status_updated(self, states: dict) -> None:
         self._update_laser_status_ui()
 
@@ -2220,6 +2387,10 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
             self.btn_laser_hf.setText("🟢 HIGH ON" if is_hf else "🔴 HIGH OFF")
             self.btn_laser_hf.setStyleSheet(self._laser_btn_style(is_hf))
             self.btn_laser_hf.blockSignals(False)
+        elif req_type == "PUT_PULSE_ENERGY":
+            self.lbl_laser_info.setText(f"Pulse Energy Set Error: {err_msg}")
+        elif req_type == "PUT_FREQ":
+            self.lbl_laser_info.setText(f"Frequency Set Error: {err_msg}")
 
     def _on_laser_login_status_changed(self, success: bool, message: str) -> None:
         self.lbl_laser_info.setText(message)
@@ -2243,6 +2414,8 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         temp = states.get("temp", "N/A")
         pulse_state = states.get("pulse", "N/A")
         hf_state = states.get("hf", "N/A")
+        pulse_energy = states.get("pulse_energy", "N/A")
+        freq = states.get("freq", "N/A")
 
         # Sync buttons
         is_pulse = (pulse_state == "ON")
@@ -2258,6 +2431,10 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self.btn_laser_hf.setText("🟢 HIGH ON" if is_hf else "🔴 HIGH OFF")
         self.btn_laser_hf.setStyleSheet(self._laser_btn_style(is_hf))
         self.btn_laser_hf.blockSignals(False)
+
+        # Sync setpoint current-value labels
+        self.lbl_laser_pe_current.setText(pulse_energy)
+        self.lbl_laser_freq_current.setText(freq)
 
         pulse_icon = "🟢" if pulse_state == "ON" else "🔴" if pulse_state == "OFF" else "⚪"
         hf_icon = "🟢" if hf_state == "ON" else "🔴" if hf_state == "OFF" else "⚪"
@@ -2275,20 +2452,24 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
             self.lbl_laser_info.setStyleSheet("color: #ef4444; font-size: 11px; font-weight: bold; font-family: monospace;")
             status_text = (
                 f"\u26a1 [DISK TEMP ALARM ACTIVE]\n"
-                f"Disk Temp  : {temp} (LOW)\n"
-                f"EUV Power  : {states.get('power', 'N/A')}\n"
-                f"Duty Cycle : {states.get('duty', 'N/A')}\n"
+                f"Disk Temp   : {temp} (LOW)\n"
+                f"EUV Power   : {states.get('power', 'N/A')}\n"
+                f"Duty Cycle  : {states.get('duty', 'N/A')}\n"
+                f"Pulse Energy: {pulse_energy}\n"
+                f"Frequency   : {freq}\n"
                 f"{pulse_icon} Pulse State : {pulse_state}\n"
-                f"{hf_icon} High Freq  : {hf_state}"
+                f"{hf_icon} High Freq   : {hf_state}"
             )
         else:
             self.lbl_laser_info.setStyleSheet("color: #64748b; font-size: 11px; font-weight: bold; font-family: monospace;")
             status_text = (
-                f"Disk Temp  : {temp}\n"
-                f"EUV Power  : {states.get('power', 'N/A')}\n"
-                f"Duty Cycle : {states.get('duty', 'N/A')}\n"
+                f"Disk Temp   : {temp}\n"
+                f"EUV Power   : {states.get('power', 'N/A')}\n"
+                f"Duty Cycle  : {states.get('duty', 'N/A')}\n"
+                f"Pulse Energy: {pulse_energy}\n"
+                f"Frequency   : {freq}\n"
                 f"{pulse_icon} Pulse State : {pulse_state}\n"
-                f"{hf_icon} High Freq  : {hf_state}"
+                f"{hf_icon} High Freq   : {hf_state}"
             )
         self.lbl_laser_info.setText(status_text)
 

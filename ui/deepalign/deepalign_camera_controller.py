@@ -369,6 +369,19 @@ class CameraControllerMixin(CameraHubMixin):
             except Exception:
                 pass
 
+        extra: dict = {
+            "DeepAlign": {
+                "Owner":  "DeepAlign",
+                "Frames": len(frames),
+                "Vendor": vendor,
+            }
+        }
+        proc_roi_meta = {}
+        if callable(getattr(self, '_get_proc_roi_metadata', None)):
+            proc_roi_meta = self._get_proc_roi_metadata()
+        if proc_roi_meta:
+            extra["ProcROI"] = proc_roi_meta
+
         return save_spe(
             path,
             frames,
@@ -378,13 +391,7 @@ class CameraControllerMixin(CameraHubMixin):
             camera_serial=camera_serial,
             creator="DeepAlign",
             software="SpeAnalyze-DeepAlign",
-            extra_metadata={
-                "DeepAlign": {
-                    "Owner": "DeepAlign",
-                    "Frames": len(frames),
-                    "Vendor": vendor,
-                }
-            },
+            extra_metadata=extra,
         )
 
     def _on_save_current_spe(self) -> None:
@@ -436,7 +443,12 @@ class CameraControllerMixin(CameraHubMixin):
 
         self._set_camera_action_state(True, busy=True)
         self._hub_live_progress_started_at = time.monotonic()
-        self._hub_live_first_frame = True  # 첫 프레임 도착 시 cycle_s 즉시 보정
+        # 진행바 주기는 카메라가 보고하는 실제 프레임 주기(1/ResultingFrameRate)를 따른다.
+        # 시작 직후·이후 주기적으로 카메라에서 재조회한다 (_maybe_refresh_live_cycle).
+        self._hub_live_cycle_refresh_at = 0.0  # 0 → 첫 tick 에서 즉시 1회 재조회
+        # 수신 프레임레이트(받는중) 측정용 — 드랍 전, 카메라에서 받은 모든 프레임 타임스탬프
+        self._live_rx_times = []
+        self._live_rx_push_at = 0.0
         self._set_master_progress(0)
         self._hub_live_progress_timer.start()
         dev_logger.debug("[DeepAlign] hub live stream started")
@@ -461,39 +473,92 @@ class CameraControllerMixin(CameraHubMixin):
             self._hub_live_progress_timer.stop()
         self._set_master_progress(0)
         self._set_camera_action_state(self._is_hub_camera_connected(), busy=False)
+        # 수신 FPS 표시 정리 (라이브 종료 → info_bar 에서 RX 숨김)
+        self._live_rx_times = []
+        try:
+            self.cam_viewer.viewer.set_rx_fps(0.0)
+        except Exception:
+            pass
         dev_logger.debug("[DeepAlign] hub live stream stopped")
+        try:  # [임시 계측] 라이브 정지 시 잔여 perf 버킷 강제 출력
+            from ui.deepalign._perf_probe import perf_flush
+            perf_flush()
+        except Exception:
+            pass
         if callable(after_stop):
             after_stop()
 
     def _on_hub_live_frame(self, raw) -> None:
         if self._acq.running:
             return
+        # 진행바 주기(_hub_live_progress_cycle_s)는 여기서 측정하지 않는다.
+        # 과거에는 (now - _hub_live_progress_started_at) 로 프레임 간격을 EMA 추정했으나,
+        # 이 값은 카메라 실제 프레임 주기가 아니라 'GUI 스레드 Qt 이벤트 간격'이라
+        # 프레임당 viewer 렌더 블로킹(~수백 ms)에 오염됐다.
+        # → 카메라가 보고하는 실제 주기(1/ResultingFrameRate)를 _maybe_refresh_live_cycle 에서 사용.
         now = time.monotonic()
-        # 실제 프레임 간격으로 cycle_s 보정.
-        # 첫 프레임: 추정값(_estimate_frame_seconds)이 실제와 크게 다를 수 있어
-        #            (예: 추정 0.25s vs 실제 0.05s → 게이지가 20%에서 멈칫) 즉시 덮어쓴다.
-        # 이후: EMA α=0.2 로 완만하게 추적.
-        if self._hub_live_progress_started_at > 0:
-            actual_interval = now - self._hub_live_progress_started_at
-            if 0.01 < actual_interval < 10.0:
-                if getattr(self, "_hub_live_first_frame", False):
-                    self._hub_live_progress_cycle_s = actual_interval
-                    self._hub_live_first_frame = False
-                else:
-                    self._hub_live_progress_cycle_s = (
-                        0.8 * self._hub_live_progress_cycle_s + 0.2 * actual_interval
-                    )
         self._hub_live_progress_started_at = now
+        # 수신 프레임레이트(받는중) 측정: 드랍 여부와 무관하게 받은 모든 프레임을 기록.
+        rx_hist = getattr(self, "_live_rx_times", None)
+        if rx_hist is not None:
+            rx_hist.append(now)
         self._push_frame(raw, drop_if_busy=True)
 
     def _on_hub_live_frame_ready(self, rgb, raw) -> None:
         self._on_hub_live_frame(raw)
+
+    def _update_live_rx_fps(self) -> None:
+        """수신 프레임레이트(받는중)를 1.5초 윈도우로 계산해 뷰어 하단에 표시 (~250ms 스로틀).
+
+        진행바 타이머(20ms)마다 호출되므로 info_bar 갱신은 throttle 한다.
+        프레임이 멈추면 윈도우가 비어 자동으로 0으로 수렴한다."""
+        rx_hist = getattr(self, "_live_rx_times", None)
+        if rx_hist is None:
+            return
+        now = time.monotonic()
+        cutoff = now - 1.5
+        while rx_hist and rx_hist[0] < cutoff:
+            rx_hist.pop(0)
+
+        if now - getattr(self, "_live_rx_push_at", 0.0) < 0.25:
+            return
+        self._live_rx_push_at = now
+
+        rx_fps = 0.0
+        if len(rx_hist) >= 2:
+            span = rx_hist[-1] - rx_hist[0]
+            if span > 0:
+                rx_fps = (len(rx_hist) - 1) / span
+        try:
+            self.cam_viewer.viewer.set_rx_fps(rx_fps)
+        except Exception:
+            pass
+
+    def _maybe_refresh_live_cycle(self) -> None:
+        """진행바 주기를 카메라가 보고하는 실제 프레임 주기로 갱신 (~1s 스로틀).
+
+        라이브 중 노출/FPS를 바꾸면 ResultingFrameRate가 변하므로 주기적으로 재조회한다.
+        SDK 읽기는 수 ms이며 1Hz라 부담이 없고, 카메라 콜백 스레드와 충돌하지 않는다
+        (get_fps는 _sdk_lock으로 보호, 콜백은 _sdk_lock 미사용)."""
+        now = time.monotonic()
+        last = getattr(self, "_hub_live_cycle_refresh_at", 0.0)
+        if now - last < 1.0:
+            return
+        self._hub_live_cycle_refresh_at = now
+        try:
+            cycle_s = float(self._estimate_frame_seconds())
+            if cycle_s > 0:
+                self._hub_live_progress_cycle_s = max(0.02, cycle_s)
+        except Exception:
+            dev_logger.debug("[DeepAlign] live cycle refresh from camera failed")
 
     def _on_hub_live_progress_tick(self) -> None:
         if not self._hub_live_progress_timer.isActive() or self._acq.running:
             return
         if not getattr(self, "_hub_live_active", False):
             return
+        self._maybe_refresh_live_cycle()
+        self._update_live_rx_fps()
         cycle = max(0.02, float(self._hub_live_progress_cycle_s))
         elapsed = max(0.0, time.monotonic() - self._hub_live_progress_started_at)
         # 예상 초과 시 서서히 99%에 접근 (snap/acquire와 동일 패턴)

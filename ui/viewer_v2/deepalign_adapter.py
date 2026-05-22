@@ -94,6 +94,12 @@ class DeepAlignViewerV2Adapter(QWidget):
     # ------------------------------------------------------------------
 
     @property
+    def view(self):
+        """내부 뷰 위젯 (SpeImageViewerV2View) 을 반환합니다.
+        cam_viewer.view.interactions 등 직접 접근 경로에서 사용됩니다."""
+        return self._view
+
+    @property
     def current_cmap(self) -> str:
         """현재 적용된 컬러맵 이름을 반환합니다."""
         return self._current_cmap

@@ -340,6 +340,14 @@ class LayoutBuilderMixin:
         self.dock_proc_stats.setMinimumWidth(280)
         self.dock_proc_stats.setVisible(False)
 
+        # Proc Table — 연산 결과 수치 테이블 (하단 dock, 기본 숨김)
+        self.dock_proc_table = self._wrap_dock(
+            "dock_proc_table", "📋  METRIC TABLE",
+            self.proc_stats_panel.table, Qt.DockWidgetArea.BottomDockWidgetArea, host
+        )
+        self.dock_proc_table.setMinimumHeight(120)
+        self.dock_proc_table.setVisible(False)
+
         self.file_list_panel = FileListPanel()
         self.dock_files = self._wrap_dock(
             "dock_files", "📁  FILES",
@@ -999,8 +1007,183 @@ class LayoutBuilderMixin:
         self.lbl_proc_status.setStyleSheet(f"color: {C_TEXT_DEAD}; font-size: 11px; font-weight: bold;")
         self.lbl_proc_status.setWordWrap(True)
         il.addWidget(self.lbl_proc_status)
-        
-        # Proc Stats 옵션 1~10 체크박스 그룹 추가
+
+        # ROI 그리기 행: SIGNAL | BG
+        draw_row = QHBoxLayout()
+        draw_row.setSpacing(6)
+        self.btn_draw_sig_roi = self._style_btn("DRAW SIGNAL", "#e94560")
+        self.btn_draw_sig_roi.setEnabled(False)
+        self.btn_draw_bg_roi = self._style_btn("DRAW BG", "#38bdf8")
+        self.btn_draw_bg_roi.setEnabled(False)
+        draw_row.addWidget(self.btn_draw_sig_roi)
+        draw_row.addWidget(self.btn_draw_bg_roi)
+        il.addLayout(draw_row)
+
+        # ROI 액션 행: AUTO-REFINE | RESET ROI
+        action_row = QHBoxLayout()
+        action_row.setSpacing(6)
+        self.btn_auto_refine_roi = self._style_btn("AUTO-REFINE", "#8b5cf6")
+        self.btn_auto_refine_roi.setEnabled(False)
+        self.btn_clear_roi = self._style_btn("RESET ROI", "#64748b")
+        self.btn_clear_roi.setEnabled(False)
+        action_row.addWidget(self.btn_auto_refine_roi)
+        action_row.addWidget(self.btn_clear_roi)
+        il.addLayout(action_row)
+
+        self.lbl_sig_roi_status = QLabel("Signal ROI: —")
+        self.lbl_sig_roi_status.setStyleSheet(f"color: {C_TEXT_DEAD}; font-size: 10px;")
+        il.addWidget(self.lbl_sig_roi_status)
+
+        # Auto-Refine 파라미터 행 (Threshold / Blur / Margin)
+        _dspin_style = f"""
+            QDoubleSpinBox {{
+                background: #0a0f1a; color: {C_TEXT}; border: 1px solid #1e293b;
+                border-radius: 3px; padding: 1px 4px; font-size: 11px;
+            }}
+            QDoubleSpinBox:disabled {{ color: {C_TEXT_DEAD}; border-color: #0d1829; }}
+            QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
+                width: 14px; border: none; background: #1e293b;
+            }}
+        """
+        _spin_s2 = f"""
+            QSpinBox {{
+                background: #0a0f1a; color: {C_TEXT}; border: 1px solid #1e293b;
+                border-radius: 3px; padding: 1px 4px; font-size: 11px;
+            }}
+            QSpinBox:disabled {{ color: {C_TEXT_DEAD}; border-color: #0d1829; }}
+            QSpinBox::up-button, QSpinBox::down-button {{
+                width: 14px; border: none; background: #1e293b;
+            }}
+        """
+        refine_row1 = QHBoxLayout()
+        refine_row1.setSpacing(6)
+        lbl_rthr = QLabel("Thr:")
+        lbl_rthr.setStyleSheet(_lbl_s2)
+        self.spin_refine_threshold = QDoubleSpinBox()
+        self.spin_refine_threshold.setRange(1.0, 99.0)
+        self.spin_refine_threshold.setValue(70.0)
+        self.spin_refine_threshold.setSingleStep(5.0)
+        self.spin_refine_threshold.setSuffix(" %")
+        self.spin_refine_threshold.setFixedWidth(68)
+        self.spin_refine_threshold.setEnabled(False)
+        self.spin_refine_threshold.setStyleSheet(_dspin_style)
+        lbl_rblur = QLabel("Blur:")
+        lbl_rblur.setStyleSheet(_lbl_s2)
+        self.spin_refine_blur = QDoubleSpinBox()
+        self.spin_refine_blur.setRange(0.0, 10.0)
+        self.spin_refine_blur.setValue(2.0)
+        self.spin_refine_blur.setSingleStep(0.5)
+        self.spin_refine_blur.setSuffix(" σ")
+        self.spin_refine_blur.setFixedWidth(62)
+        self.spin_refine_blur.setEnabled(False)
+        self.spin_refine_blur.setStyleSheet(_dspin_style)
+        refine_row1.addWidget(lbl_rthr)
+        refine_row1.addWidget(self.spin_refine_threshold)
+        refine_row1.addSpacing(6)
+        refine_row1.addWidget(lbl_rblur)
+        refine_row1.addWidget(self.spin_refine_blur)
+        refine_row1.addStretch()
+        il.addLayout(refine_row1)
+
+        refine_row2 = QHBoxLayout()
+        refine_row2.setSpacing(6)
+        lbl_rmargin = QLabel("Margin:")
+        lbl_rmargin.setStyleSheet(_lbl_s2)
+        self.spin_refine_margin = QSpinBox()
+        self.spin_refine_margin.setRange(0, 30)
+        self.spin_refine_margin.setValue(5)
+        self.spin_refine_margin.setSuffix(" px")
+        self.spin_refine_margin.setFixedWidth(62)
+        self.spin_refine_margin.setEnabled(False)
+        self.spin_refine_margin.setStyleSheet(_spin_s2)
+        lbl_rexp = QLabel("Expand:")
+        lbl_rexp.setStyleSheet(_lbl_s2)
+        self.spin_refine_expand = QSpinBox()
+        self.spin_refine_expand.setRange(0, 200)
+        self.spin_refine_expand.setValue(0)
+        self.spin_refine_expand.setSuffix(" px")
+        self.spin_refine_expand.setFixedWidth(68)
+        self.spin_refine_expand.setEnabled(False)
+        self.spin_refine_expand.setStyleSheet(_spin_s2)
+        refine_row2.addWidget(lbl_rmargin)
+        refine_row2.addWidget(self.spin_refine_margin)
+        refine_row2.addSpacing(6)
+        refine_row2.addWidget(lbl_rexp)
+        refine_row2.addWidget(self.spin_refine_expand)
+        refine_row2.addStretch()
+        il.addLayout(refine_row2)
+
+        # BG ROI 모드 행 (Ring / Manual / None)
+        bg_roi_row = QHBoxLayout()
+        bg_roi_row.setSpacing(6)
+        lbl_bg = QLabel("BG ROI:")
+        lbl_bg.setStyleSheet(_lbl_s2)
+        self.radio_bg_ring   = QRadioButton("Ring")
+        self.radio_bg_manual = QRadioButton("Manual")
+        self.radio_bg_none   = QRadioButton("None")
+        self.radio_bg_ring.setChecked(True)
+        for rb in (self.radio_bg_ring, self.radio_bg_manual, self.radio_bg_none):
+            rb.setEnabled(False)
+            rb.setStyleSheet(_radio_style)
+        self._proc_bg_group = QButtonGroup()
+        self._proc_bg_group.addButton(self.radio_bg_ring,   0)
+        self._proc_bg_group.addButton(self.radio_bg_manual, 1)
+        self._proc_bg_group.addButton(self.radio_bg_none,   2)
+        bg_roi_row.addWidget(lbl_bg)
+        bg_roi_row.addWidget(self.radio_bg_ring)
+        bg_roi_row.addWidget(self.radio_bg_manual)
+        bg_roi_row.addWidget(self.radio_bg_none)
+        bg_roi_row.addStretch()
+        il.addLayout(bg_roi_row)
+
+        # Ring 파라미터 행 (Gap / Thickness)
+        _spin_style = f"""
+            QSpinBox {{
+                background: #0a0f1a; color: {C_TEXT}; border: 1px solid #1e293b;
+                border-radius: 3px; padding: 1px 4px; font-size: 11px;
+            }}
+            QSpinBox:disabled {{ color: {C_TEXT_DEAD}; border-color: #0d1829; }}
+            QSpinBox::up-button, QSpinBox::down-button {{
+                width: 14px; border: none; background: #1e293b;
+            }}
+        """
+        ring_row = QHBoxLayout()
+        ring_row.setSpacing(6)
+
+        lbl_gap = QLabel("Gap:")
+        lbl_gap.setStyleSheet(_lbl_s2)
+        self.spin_bg_gap = QSpinBox()
+        self.spin_bg_gap.setRange(0, 50)
+        self.spin_bg_gap.setValue(2)
+        self.spin_bg_gap.setSuffix(" px")
+        self.spin_bg_gap.setFixedWidth(62)
+        self.spin_bg_gap.setEnabled(False)
+        self.spin_bg_gap.setStyleSheet(_spin_style)
+
+        lbl_thick = QLabel("Width:")
+        lbl_thick.setStyleSheet(_lbl_s2)
+        self.spin_bg_thickness = QSpinBox()
+        self.spin_bg_thickness.setRange(2, 100)
+        self.spin_bg_thickness.setValue(10)
+        self.spin_bg_thickness.setSuffix(" px")
+        self.spin_bg_thickness.setFixedWidth(62)
+        self.spin_bg_thickness.setEnabled(False)
+        self.spin_bg_thickness.setStyleSheet(_spin_style)
+
+        ring_row.addWidget(lbl_gap)
+        ring_row.addWidget(self.spin_bg_gap)
+        ring_row.addSpacing(8)
+        ring_row.addWidget(lbl_thick)
+        ring_row.addWidget(self.spin_bg_thickness)
+        ring_row.addStretch()
+        il.addLayout(ring_row)
+
+        # BG 상태 라벨
+        self.lbl_bg_roi_status = QLabel("—")
+        self.lbl_bg_roi_status.setStyleSheet(f"color: {C_TEXT_DEAD}; font-size: 10px;")
+        il.addWidget(self.lbl_bg_roi_status)
+
+        # Proc Stats 옵션 1~17 체크박스 그룹 추가
         if hasattr(self, "proc_stats_panel") and hasattr(self.proc_stats_panel, "options_widget"):
             il.addWidget(self.proc_stats_panel.options_widget)
 
@@ -1111,6 +1294,60 @@ class LayoutBuilderMixin:
         laser_alarm_row.addWidget(self.chk_laser_temp_alarm)
         laser_alarm_row.addWidget(self.spin_laser_temp_alarm_min, 1)
         ll.addLayout(laser_alarm_row)
+
+        # Pulse Energy Setpoint Row
+        laser_pe_row = QHBoxLayout()
+        lbl_pe = QLabel("Pulse Energy:")
+        lbl_pe.setStyleSheet(f"color: {C_TEXT_DIM}; font-size: 12px; font-weight: bold;")
+        self.lbl_laser_pe_current = QLabel("N/A")
+        self.lbl_laser_pe_current.setStyleSheet("color: #eab308; font-size: 11px; font-weight: bold; font-family: monospace; min-width: 60px;")
+        self.spin_laser_pe = QDoubleSpinBox()
+        self.spin_laser_pe.setRange(0.0, 100.0)
+        self.spin_laser_pe.setDecimals(1)
+        self.spin_laser_pe.setSingleStep(0.5)
+        self.spin_laser_pe.setSuffix(" %")
+        self.spin_laser_pe.setStyleSheet(editor_spin_style)
+        self.btn_laser_pe_set = QPushButton("Set")
+        self.btn_laser_pe_set.setFixedWidth(36)
+        self.btn_laser_pe_set.setStyleSheet(f"""
+            QPushButton {{
+                background: {C_BG_MED}; color: #eab308; border: 1px solid #eab308;
+                border-radius: 4px; font-weight: bold; font-size: 11px; padding: 2px 4px;
+            }}
+            QPushButton:hover {{ background: #eab30822; }}
+        """)
+        laser_pe_row.addWidget(lbl_pe)
+        laser_pe_row.addWidget(self.lbl_laser_pe_current)
+        laser_pe_row.addWidget(self.spin_laser_pe, 1)
+        laser_pe_row.addWidget(self.btn_laser_pe_set)
+        ll.addLayout(laser_pe_row)
+
+        # Frequency Setpoint Row
+        laser_freq_row = QHBoxLayout()
+        lbl_freq = QLabel("Frequency:")
+        lbl_freq.setStyleSheet(f"color: {C_TEXT_DIM}; font-size: 12px; font-weight: bold;")
+        self.lbl_laser_freq_current = QLabel("N/A")
+        self.lbl_laser_freq_current.setStyleSheet("color: #eab308; font-size: 11px; font-weight: bold; font-family: monospace; min-width: 60px;")
+        self.spin_laser_freq = QDoubleSpinBox()
+        self.spin_laser_freq.setRange(0.0, 100000.0)
+        self.spin_laser_freq.setDecimals(2)
+        self.spin_laser_freq.setSingleStep(10.0)
+        self.spin_laser_freq.setSuffix(" Hz")
+        self.spin_laser_freq.setStyleSheet(editor_spin_style)
+        self.btn_laser_freq_set = QPushButton("Set")
+        self.btn_laser_freq_set.setFixedWidth(36)
+        self.btn_laser_freq_set.setStyleSheet(f"""
+            QPushButton {{
+                background: {C_BG_MED}; color: #eab308; border: 1px solid #eab308;
+                border-radius: 4px; font-weight: bold; font-size: 11px; padding: 2px 4px;
+            }}
+            QPushButton:hover {{ background: #eab30822; }}
+        """)
+        laser_freq_row.addWidget(lbl_freq)
+        laser_freq_row.addWidget(self.lbl_laser_freq_current)
+        laser_freq_row.addWidget(self.spin_laser_freq, 1)
+        laser_freq_row.addWidget(self.btn_laser_freq_set)
+        ll.addLayout(laser_freq_row)
 
         # Controls Row
         laser_btn_row = QHBoxLayout()
@@ -1514,14 +1751,14 @@ class LayoutBuilderMixin:
 
     def _create_master_bar(self):
         bar = QFrame()
-        bar.setFixedHeight(75)
+        bar.setFixedHeight(95)
         bar.setStyleSheet(f"background-color: {C_BG_DEEP}; border-top: none;")
         lay = QHBoxLayout(bar)
         lay.setContentsMargins(15, 10, 15, 5)
         lay.setSpacing(25)
 
         self.master_btn_stack = QStackedWidget()
-        self.master_btn_stack.setFixedSize(380, 45)
+        self.master_btn_stack.setFixedSize(540, 72)
 
         cam_w = QWidget(); cbl = QHBoxLayout(cam_w); cbl.setContentsMargins(0, 0, 0, 0); cbl.setSpacing(8)
         self.btn_snap = self._dash_btn("SNAP", "", "#3b82f6")
@@ -1530,6 +1767,7 @@ class LayoutBuilderMixin:
         self.btn_stop_main = self._dash_btn("STOP", "", "#ef4444")
         for button in (self.btn_snap, self.btn_live_air, self.btn_acquire, self.btn_stop_main):
             cbl.addWidget(button)
+        cbl.addStretch()
         self.master_btn_stack.addWidget(cam_w)
 
         mir_w = QWidget(); mbl = QHBoxLayout(mir_w); mbl.setContentsMargins(0, 0, 0, 0); mbl.setSpacing(8)
@@ -1538,6 +1776,7 @@ class LayoutBuilderMixin:
         self.btn_mirror_stop     = self._dash_btn("STOP",     "EMERGENCY","#ef4444")
         for button in (self.btn_mirror_zero_all, self.btn_mirror_reset, self.btn_mirror_stop):
             mbl.addWidget(button)
+        mbl.addStretch()
         self.master_btn_stack.addWidget(mir_w)
 
         af_w = QWidget(); abl = QHBoxLayout(af_w); abl.setContentsMargins(0, 0, 0, 0); abl.setSpacing(8)
@@ -1546,6 +1785,7 @@ class LayoutBuilderMixin:
         self.btn_af_set_z = self._dash_btn("SET Z",  "BASE",   "#3b82f6")
         for button in (self.btn_af_run, self.btn_af_abort, self.btn_af_set_z):
             abl.addWidget(button)
+        abl.addStretch()
         self.master_btn_stack.addWidget(af_w)
 
         al_w = QWidget(); albl = QHBoxLayout(al_w); albl.setContentsMargins(0, 0, 0, 0); albl.setSpacing(8)
@@ -1555,6 +1795,7 @@ class LayoutBuilderMixin:
         self.btn_align_stop   = self._dash_btn("STOP",   "ALL",     "#64748b")
         for button in (self.btn_align_enable, self.btn_align_calc, self.btn_align_move, self.btn_align_stop):
             albl.addWidget(button)
+        albl.addStretch()
         self.master_btn_stack.addWidget(al_w)
 
         mo_w = QWidget(); mol = QHBoxLayout(mo_w); mol.setContentsMargins(0, 0, 0, 0); mol.setSpacing(8)
@@ -1563,6 +1804,7 @@ class LayoutBuilderMixin:
         self.btn_motion_stop      = self._dash_btn("STOP",      "ALL", "#ef4444")
         for button in (self.btn_motion_refresh, self.btn_motion_reconnect, self.btn_motion_stop):
             mol.addWidget(button)
+        mol.addStretch()
         self.master_btn_stack.addWidget(mo_w)
 
         an_w = QWidget(); anbl = QHBoxLayout(an_w); anbl.setContentsMargins(0, 0, 0, 0); anbl.setSpacing(6)
@@ -1571,21 +1813,24 @@ class LayoutBuilderMixin:
         self.btn_an_fit = self._dash_btn("FIT VIEW", "RESET", "#64748b")
         self.btn_reset_dock = self._dash_btn("RESET", "LAYOUT", "#94a3b8")
         
-        # 도킹 토글 버튼 — 2x2 그리드 (높이 45 안에 4개 모두 보이도록)
+        # 도킹 토글 버튼 — 3x2 그리드 (5개)
         from PyQt6.QtWidgets import QGridLayout
         dock_g = QGridLayout(); dock_g.setSpacing(2); dock_g.setContentsMargins(5, 0, 0, 0)
-        self.btn_toggle_plot_sm = self._small_toggle_btn("📈 Plot")
-        self.btn_toggle_hist_sm = self._small_toggle_btn("📊 Hist")
-        self.btn_toggle_proc_sm = self._small_toggle_btn("📉 Proc")
-        self.btn_toggle_roi_sm  = self._small_toggle_btn("🎯 ROI")
-        dock_g.addWidget(self.btn_toggle_plot_sm, 0, 0)
-        dock_g.addWidget(self.btn_toggle_hist_sm, 0, 1)
-        dock_g.addWidget(self.btn_toggle_proc_sm, 1, 0)
-        dock_g.addWidget(self.btn_toggle_roi_sm,  1, 1)
+        self.btn_toggle_plot_sm  = self._small_toggle_btn("📈 Plot")
+        self.btn_toggle_hist_sm  = self._small_toggle_btn("📊 Hist")
+        self.btn_toggle_proc_sm  = self._small_toggle_btn("📉 Proc")
+        self.btn_toggle_roi_sm   = self._small_toggle_btn("🎯 ROI")
+        self.btn_toggle_table_sm = self._small_toggle_btn("📋 Table")
+        dock_g.addWidget(self.btn_toggle_plot_sm,  0, 0)
+        dock_g.addWidget(self.btn_toggle_hist_sm,  0, 1)
+        dock_g.addWidget(self.btn_toggle_proc_sm,  1, 0)
+        dock_g.addWidget(self.btn_toggle_roi_sm,   1, 1)
+        dock_g.addWidget(self.btn_toggle_table_sm, 2, 0)
 
         for button in (self.btn_an_open, self.btn_an_roi_range, self.btn_an_fit, self.btn_reset_dock):
             anbl.addWidget(button)
         anbl.addLayout(dock_g)
+        anbl.addStretch()
         self.master_btn_stack.addWidget(an_w)
 
         lay.addWidget(self.master_btn_stack)

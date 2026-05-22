@@ -27,7 +27,9 @@ class EuvLaserController(QObject):
             "power": "N/A",
             "duty": "N/A",
             "pulse": "N/A",
-            "hf": "N/A"
+            "hf": "N/A",
+            "pulse_energy": "N/A",
+            "freq": "N/A",
         }
         self.ip = "127.0.0.1"
         self.port = "5643"
@@ -64,7 +66,8 @@ class EuvLaserController(QObject):
 
     def stop_polling(self):
         self.poll_timer.stop()
-        self.states = {"temp": "N/A", "power": "N/A", "duty": "N/A", "pulse": "N/A", "hf": "N/A"}
+        self.states = {"temp": "N/A", "power": "N/A", "duty": "N/A", "pulse": "N/A", "hf": "N/A",
+                       "pulse_energy": "N/A", "freq": "N/A"}
         self.session_token = ""
         self.status_updated.emit(self.states)
 
@@ -137,7 +140,9 @@ class EuvLaserController(QObject):
             "GET_POWER": f"{self.base_url}/api/euvChamber/euvPower/value",
             "GET_DUTY": f"{self.base_url}/api/euvChamber/euvDutyCycle/value",
             "GET_PULSE": f"{self.base_url}/api/laser/enablePulse",
-            "GET_HF": f"{self.base_url}/api/laser/enableHighFrequency"
+            "GET_HF": f"{self.base_url}/api/laser/enableHighFrequency",
+            "GET_PULSE_ENERGY": f"{self.base_url}/api/laser/pulseEnergy/setpoint",
+            "GET_FREQ": f"{self.base_url}/api/laser/frequency/setpoint",
         }
 
         for req_type, url_str in endpoints.items():
@@ -155,6 +160,34 @@ class EuvLaserController(QObject):
     def control_hf(self, enabled: bool):
         url_str = f"{self.base_url}/api/laser/enableHighFrequency"
         self._send_put_request("PUT_HF", url_str, enabled)
+
+    def set_pulse_energy(self, value: float):
+        """펄스 에너지 세트포인트 설정 (단위: %). maintenance 권한 필요."""
+        url_str = f"{self.base_url}/api/laser/pulseEnergy/setpoint"
+        self._send_put_float_request("PUT_PULSE_ENERGY", url_str, value)
+
+    def set_frequency(self, value: float):
+        """주파수 세트포인트 설정 (단위: Hz). operator 권한 필요."""
+        url_str = f"{self.base_url}/api/laser/frequency/setpoint"
+        self._send_put_float_request("PUT_FREQ", url_str, value)
+
+    def _send_put_float_request(self, req_type: str, url_str: str, value: float):
+        request = QNetworkRequest(QUrl(url_str))
+        request.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader, "application/json")
+        for k, v in self.get_auth_headers().items():
+            request.setRawHeader(k, v)
+
+        body_bytes = str(value).encode("utf-8")
+        buf = QBuffer()
+        buf.setData(QByteArray(body_bytes))
+        buf.open(QBuffer.OpenModeFlag.ReadOnly)
+
+        dev_logger.info(f"[DeepAlign] PUT {url_str} body={body_bytes}")
+
+        reply = self.manager.sendCustomRequest(request, b"PUT", buf)
+        buf.setParent(reply)
+        reply.setProperty("req_type", req_type)
+        reply.setProperty("sent_value", value)
 
     def _send_put_request(self, req_type: str, url_str: str, enabled: bool):
         request = QNetworkRequest(QUrl(url_str))
@@ -222,6 +255,10 @@ class EuvLaserController(QObject):
                 self.states["pulse"] = "Error"
             elif req_type == "GET_HF":
                 self.states["hf"] = "Error"
+            elif req_type == "GET_PULSE_ENERGY":
+                self.states["pulse_energy"] = "Error"
+            elif req_type == "GET_FREQ":
+                self.states["freq"] = "Error"
 
             self.error_occurred.emit(req_type, err_msg)
             self.status_updated.emit(self.states)
@@ -275,6 +312,32 @@ class EuvLaserController(QObject):
         elif req_type == "PUT_HF":
             target_status = reply.property("target_status")
             self.states["hf"] = "ON" if (target_status == "on") else "OFF"
+
+        elif req_type == "GET_PULSE_ENERGY":
+            try:
+                parsed = json.loads(data_str)
+                val = float(parsed["value"]) if (isinstance(parsed, dict) and "value" in parsed) else float(data_str)
+                self.states["pulse_energy"] = f"{val:.1f} %"
+            except Exception:
+                self.states["pulse_energy"] = data_str[:15]
+
+        elif req_type == "GET_FREQ":
+            try:
+                parsed = json.loads(data_str)
+                val = float(parsed["value"]) if (isinstance(parsed, dict) and "value" in parsed) else float(data_str)
+                self.states["freq"] = f"{val:.2f} Hz"
+            except Exception:
+                self.states["freq"] = data_str[:15]
+
+        elif req_type == "PUT_PULSE_ENERGY":
+            sent_val = reply.property("sent_value")
+            if sent_val is not None:
+                self.states["pulse_energy"] = f"{float(sent_val):.1f} %"
+
+        elif req_type == "PUT_FREQ":
+            sent_val = reply.property("sent_value")
+            if sent_val is not None:
+                self.states["freq"] = f"{float(sent_val):.2f} Hz"
 
         elif req_type == "GET_ACCESS_LEVEL":
             user = reply.property("user") or "unknown"

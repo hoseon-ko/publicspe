@@ -17,6 +17,7 @@ from ui.roi_items import LineROI, BoxROI, HistROI
 from ui.viewer_v2.image_provider import ImageProvider
 from ui.histogram_range_widget import HistogramRangeWidget
 from ui.viewer.graphics_view import _RangePopup
+from ui.deepalign._perf_probe import perf_tick  # [임시 계측]
 
 class SpeImageViewerV2(QWidget):
     """
@@ -37,7 +38,10 @@ class SpeImageViewerV2(QWidget):
         self._img_data: np.ndarray | None = None
         self._last_stats = (0.0, 0.0, 0.0)
         self._last_cursor = (0, 0, 0.0)
-        
+        self._fps_history = []
+        self._last_fps_time = 0.0
+        self._current_fps = 0.0
+
         # 렌더링 성능 최적화를 위한 스로틀링 타이머
         self._refresh_timer = QTimer()
         self._refresh_timer.setSingleShot(True)
@@ -114,9 +118,16 @@ class SpeImageViewerV2(QWidget):
         self.btn_toggle_profile = make_btn("📈 Plot", "Show/Hide Profile Panel")
         self.btn_toggle_histogram = make_btn("📊 Hist", "Show/Hide Histogram Panel")
         self.btn_toggle_proc = make_btn("📉 Proc", "Show/Hide Proc Stats Plot")
+        self.btn_toggle_table = make_btn("📋 Table", "Show/Hide Metric Table")
         # dock visibility 와 동기화되도록 checkable
-        for b in (self.btn_toggle_profile, self.btn_toggle_histogram, self.btn_toggle_proc):
+        for b in (self.btn_toggle_profile, self.btn_toggle_histogram,
+                  self.btn_toggle_proc, self.btn_toggle_table):
             b.setCheckable(True)
+
+        # Online Statistics 팝업 (선택 ROI/전체 픽셀 통계)
+        self.btn_online_stats = make_btn("Σ Stats", "Online Statistics 팝업 열기")
+        self.btn_online_stats.clicked.connect(self._open_online_stats)
+        self._online_stats_dlg = None
 
         # 현재 viewer 표시 raw 를 SPE 로 저장
         self.btn_save_spe = make_btn("💾 Save SPE", "현재 표시된 raw 를 SPE 로 저장")
@@ -164,13 +175,16 @@ class SpeImageViewerV2(QWidget):
         row2.addWidget(self.btn_toggle_profile)
         row2.addWidget(self.btn_toggle_histogram)
         row2.addWidget(self.btn_toggle_proc)
-        
+        row2.addWidget(self.btn_toggle_table)
+        row2.addWidget(self.btn_online_stats)
+
         row2.addStretch()
         row2.addWidget(self.btn_save_spe)
 
         self.btn_toggle_profile.clicked.connect(lambda: self.toggle_analysis_requested.emit("profile"))
         self.btn_toggle_histogram.clicked.connect(lambda: self.toggle_analysis_requested.emit("histogram"))
         self.btn_toggle_proc.clicked.connect(lambda: self.toggle_analysis_requested.emit("proc"))
+        self.btn_toggle_table.clicked.connect(lambda: self.toggle_analysis_requested.emit("table"))
         
         tb_layout.addLayout(row1)
         tb_layout.addLayout(row2)
@@ -255,6 +269,23 @@ class SpeImageViewerV2(QWidget):
     def set_image(self, image: np.ndarray):
         try:
             if image is None: return
+
+            import time
+            _ps0 = time.perf_counter()  # [임시 계측]
+            now = time.time()
+            if now - self._last_fps_time > 1.5:
+                self._fps_history = []
+            self._last_fps_time = now
+            self._fps_history.append(now)
+            if len(self._fps_history) > 15:
+                self._fps_history.pop(0)
+
+            if len(self._fps_history) > 1:
+                dt = self._fps_history[-1] - self._fps_history[0]
+                self._current_fps = (len(self._fps_history) - 1) / dt if dt > 0 else 0.0
+            else:
+                self._current_fps = 0.0
+
             self._img_data = image
             h, w = image.shape[:2]
             self._state.img_width = w
@@ -271,26 +302,31 @@ class SpeImageViewerV2(QWidget):
                 self._state.bit_depth = 16 # 기본값
             
             print(f"[ViewerV2] Setting image: {w}x{h}, dtype={image.dtype}, depth={self._state.bit_depth}")
-            
+            _ps_head = time.perf_counter()  # [임시 계측] fps+maxval+print
+
             # 0. Vmin/Vmax 초기화 (중요: 이게 없으면 화면이 뭉개짐)
             f_data = image.astype(np.float32)
             dmin, dmax = float(np.min(f_data)), float(np.max(f_data))
             self._state.update_range(dmin, dmax)
-            
+
             # ROI Range 모드 활성화 중이면 즉시 적용
             if self.btn_roi_range.isChecked():
                 self._apply_roi_range()
+            _ps_range = time.perf_counter()  # [임시 계측] astype+min/max+update_range
 
             # 1. 렌더링용 Pixmap 생성 (Vmin/Vmax 반영)
             pix = ImageProvider.get_display_pixmap(
                 image, self._state.colormap, self._state.vmin, self._state.vmax
             )
+            _ps_pix = time.perf_counter()  # [임시 계측] get_display_pixmap
             self.view.set_image(pix, w, h, image)
-            
+            _ps_view = time.perf_counter()  # [임시 계측] view.set_image
+
             # 2. 히스토그램 업데이트
             # 2. 히스토그램 위젯 업데이트 (데이터 발송은 하지 않음)
             self._hist_widget.update_image(image, self._state.colormap)
-            
+            _ps_hist = time.perf_counter()  # [임시 계측] hist update
+
             # 3. 전역 통계
             # 4. 분석 데이터 갱신
             sel_id = self.view.interactions._selected_roi_id
@@ -309,10 +345,19 @@ class SpeImageViewerV2(QWidget):
                     y_prof = np.mean(self._img_data, axis=1)
                     self.ruler_system.set_profiles(x_prof, y_prof)
 
-                
+            _ps_prof = time.perf_counter()  # [임시 계측] ROI/profile 분석
             self._refresh_display()
             self._update_info_text()
             print(f"[ViewerV2] Image set successfully.")
+            _ps_end = time.perf_counter()  # [임시 계측]
+            perf_tick("viewer.1_head(fps+max+print)", (_ps_head - _ps0) * 1000.0)
+            perf_tick("viewer.2_range(astype+mnmx)", (_ps_range - _ps_head) * 1000.0)
+            perf_tick("viewer.3_get_pixmap", (_ps_pix - _ps_range) * 1000.0)
+            perf_tick("viewer.4_view.set_image", (_ps_view - _ps_pix) * 1000.0)
+            perf_tick("viewer.5_hist_update", (_ps_hist - _ps_view) * 1000.0)
+            perf_tick("viewer.6_profile/roi", (_ps_prof - _ps_hist) * 1000.0)
+            perf_tick("viewer.7_refresh+info+print", (_ps_end - _ps_prof) * 1000.0)
+            perf_tick("viewer.TOTAL_set_image", (_ps_end - _ps0) * 1000.0)
         except Exception as e:
             print(f"[ViewerV2:Error] set_image failed: {e}")
             traceback.print_exc()
@@ -356,8 +401,58 @@ class SpeImageViewerV2(QWidget):
                 vmin, vmax = float(np.min(sub)), float(np.max(sub))
                 self._state.update_range(vmin, vmax)
 
+    def get_active_region(self):
+        """Online Statistics 용 활성 영역 반환.
+
+        선택 ROI(전문 Line/Box/Hist → 기본 드래그) 우선, 없으면 전체 이미지.
+        returns (sub_2d | None, x0, y0). x0,y0 는 전체 이미지 좌표계 기준
+        좌상단 오프셋 (위치 통계 보정용).
+        """
+        if self._img_data is None:
+            return None, 0, 0
+        ih, iw = self._img_data.shape[:2]
+
+        def _clip_box(x0, y0, x1, y1):
+            ix0 = max(0, min(iw, int(min(x0, x1))))
+            iy0 = max(0, min(ih, int(min(y0, y1))))
+            ix1 = max(0, min(iw, int(max(x0, x1))))
+            iy1 = max(0, min(ih, int(max(y0, y1))))
+            sub = self._img_data[iy0:iy1, ix0:ix1]
+            return (sub, ix0, iy0) if sub.size > 0 else None
+
+        # 1. 전문 ROI 선택 우선
+        sel_id = self.view.interactions._selected_roi_id
+        if sel_id is not None and sel_id != -1:
+            roi = self.view.interactions._rois.get(sel_id)
+            if roi is not None:
+                res = _clip_box(*roi.get_points())
+                if res is not None:
+                    return res
+
+        # 2. 기본 드래그 ROI
+        roi = self._state.selected_roi
+        if not roi.isNull() and roi.width() >= 1 and roi.height() >= 1:
+            res = _clip_box(roi.x(), roi.y(),
+                            roi.x() + roi.width(), roi.y() + roi.height())
+            if res is not None:
+                return res
+
+        # 3. 전체 이미지
+        return self._img_data, 0, 0
+
+    def _open_online_stats(self):
+        """Online Statistics 팝업 열기 (이미 열려 있으면 앞으로 가져오기)."""
+        from ui.viewer_v2.online_stats_dialog import OnlineStatsDialog
+        if self._online_stats_dlg is None:
+            self._online_stats_dlg = OnlineStatsDialog(self.get_active_region, parent=self)
+            self._online_stats_dlg.finished.connect(
+                lambda _=None: setattr(self, "_online_stats_dlg", None))
+        self._online_stats_dlg.show()
+        self._online_stats_dlg.raise_()
+        self._online_stats_dlg.activateWindow()
+
     # ── ROI 핸들러 ───────────────────────────────────────────
-    
+
     def _on_roi_added(self, roi):
         """신규 ROI 생성 시 패널 목록에 추가"""
         self.roi_panel.add_roi(roi.roi_id, roi.label(), roi.color)
@@ -598,9 +693,35 @@ class SpeImageViewerV2(QWidget):
             stat_txt = f" | Stats: {stats[0]:.0f}~{stats[1]:.0f} (Avg:{stats[2]:.1f})"
             range_txt = f" | Range: [{self._state.vmin:.0f} ~ {self._state.vmax:.0f}]"
             
-            self.info_bar.setText(base_txt + tool_txt + stat_txt + range_txt)
+            # 4. FPS 표시
+            #  - Render: set_image() 호출 빈도(화면에 실제 표시되는 프레임레이트, 드랍 후)
+            #  - RX    : 카메라에서 수신 중인 프레임레이트(드랍 전). 외부(라이브 컨트롤러)가 set_rx_fps 로 주입.
+            fps_txt = ""
+            import time
+            if getattr(self, "_current_fps", 0.0) > 0.0:
+                if time.time() - getattr(self, "_last_fps_time", 0.0) < 1.5:
+                    fps_txt += f" | Render {self._current_fps:.1f} fps"
+                else:
+                    self._current_fps = 0.0
+            rx_fps = getattr(self, "_rx_fps", 0.0)
+            if rx_fps > 0.0:
+                fps_txt += f" | RX {rx_fps:.1f} fps"
+
+            self.info_bar.setText(base_txt + tool_txt + stat_txt + range_txt + fps_txt)
         except Exception as e:
             print(f"[ViewerV2:Error] _update_info_text failed: {e}")
+
+    def set_rx_fps(self, fps: float) -> None:
+        """카메라에서 수신 중인 실제 프레임레이트(드랍 전)를 하단 info_bar 에 표시한다.
+
+        뷰어 자체는 표시된 프레임(set_image)만 보므로 수신 레이트를 알 수 없다.
+        DeepAlign 라이브 컨트롤러가 _on_hub_live_frame(수신마다 호출) 기준으로 측정해 주입한다.
+        0 이하이면 표시하지 않는다 (라이브 종료/비수신 상태)."""
+        try:
+            self._rx_fps = max(0.0, float(fps))
+        except (TypeError, ValueError):
+            self._rx_fps = 0.0
+        self._update_info_text()
 
     def _refresh_display(self, fit=False):
         """화면 갱신 요청 (스로틀링 적용: 약 30ms 대기 후 렌더링)"""
