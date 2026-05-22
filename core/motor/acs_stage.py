@@ -253,21 +253,46 @@ class AcsWorker(QObject):
             self._emit_current_states_sync()
 
     def _do_enable_all(self):
-        if self._api is None: return
+        if self._api is None:
+            log.error("[ACS Worker] _do_enable_all: _api is None — aborting")
+            return
 
-        # 0. 먼저 모든 축에 Halt 명령 — ACS 내부 모션 버퍼까지 강제 클리어
-        log.info("[ACS Worker] Halting all axes before EnableM...")
+        log.info("=" * 60)
+        log.info("[ACS Worker] === _do_enable_all START ===")
+        log.info(f"[ACS Worker]   api object: {self._api}")
+        log.info(f"[ACS Worker]   lock: {self._api_lock}")
+
+        # 0. 현재 각 축 상태 먼저 덤프
+        log.info("[ACS Worker] [STEP 0] Reading initial motor states...")
+        try:
+            with self._api_lock:
+                for i in range(6):
+                    ax = _axis_enum(i)
+                    mst = int(self._api.GetMotorState(ax))
+                    log.info(f"[ACS Worker]   Axis {i} ({ax}): mst=0x{mst:04X} "
+                             f"EN={bool(mst & _MST_ENABLE)} "
+                             f"MOV={bool(mst & _MST_ANY_MOTION)} "
+                             f"INPOS={bool(mst & _MST_INPOS)}")
+        except Exception as e:
+            log.error(f"[ACS Worker] [STEP 0] FAILED to read states: {e}")
+
+        # 1. 모든 축에 Halt 명령 — ACS 내부 모션 버퍼까지 강제 클리어
+        log.info("[ACS Worker] [STEP 1] Halting all axes...")
         with self._api_lock:
             for i in range(6):
+                ax = _axis_enum(i)
                 try:
-                    self._api.Halt(_axis_enum(i))
+                    log.info(f"[ACS Worker]   Halt(axis={ax}) → calling DLL...")
+                    self._api.Halt(ax)
+                    log.info(f"[ACS Worker]   Halt(axis={ax}) → OK")
                 except Exception as he:
-                    log.debug(f"[ACS Worker] Halt Axis {i} (ignored): {he}")
+                    log.warning(f"[ACS Worker]   Halt(axis={ax}) → IGNORED: {he}")
 
-        # Halt 후 충분한 정착 대기 (ACS 내부 state machine 정리 시간)
+        log.info("[ACS Worker] [STEP 1] Halt done — sleeping 0.5s...")
         time.sleep(0.5)
 
-        # 1. MOVE/ACC 비트가 완전히 꺼질 때까지 추가 대기 (최대 3초)
+        # 2. MOVE/ACC 비트가 완전히 꺼질 때까지 추가 대기 (최대 3초)
+        log.info("[ACS Worker] [STEP 2] Waiting for all axes to stop (max 3s)...")
         deadline = time.time() + 3.0
         while time.time() < deadline:
             all_stopped = True
@@ -278,43 +303,51 @@ class AcsWorker(QObject):
                         all_stopped = False
                         break
             if all_stopped:
+                log.info("[ACS Worker] [STEP 2] All axes stopped ✓")
                 break
             time.sleep(0.05)
         else:
-            log.warning("[ACS Worker] Axes did not stop within 3s after Halt — proceeding anyway")
+            log.warning("[ACS Worker] [STEP 2] Axes did not stop within 3s — proceeding anyway")
 
-        # 2. 6축 FaultClear 선 복구 (E-Stop/Limit 트립 리셋)
+        # 3. 6축 FaultClear
+        log.info("[ACS Worker] [STEP 3] FaultClear all axes...")
         with self._api_lock:
             for i in range(6):
+                ax = _axis_enum(i)
                 try:
-                    self._api.FaultClear(_axis_enum(i))
+                    log.info(f"[ACS Worker]   FaultClear(axis={ax}) → calling DLL...")
+                    self._api.FaultClear(ax)
+                    log.info(f"[ACS Worker]   FaultClear(axis={ax}) → OK")
                 except Exception as fe:
-                    log.debug(f"[ACS Worker] FaultClear Axis {i} (ignored): {fe}")
+                    log.warning(f"[ACS Worker]   FaultClear(axis={ax}) → IGNORED: {fe}")
 
-        # FaultClear 후 안정화 대기
+        log.info("[ACS Worker] [STEP 3] FaultClear done — sleeping 0.2s...")
         time.sleep(0.2)
 
-        # 3. 6개 축 + 종결자(NONE) 1개 = 총 7개 크기 배열 생성
+        # 4. EnableM 배열 구성
+        log.info("[ACS Worker] [STEP 4] Building EnableM axis array...")
         raw_indices = [0, 1, 4, 5, 8, 9]
         axis_array = System.Array.CreateInstance(_AxisEnum, len(raw_indices) + 1)
-        
-        # 4. 실제 축 데이터 채우기
         for i, val in enumerate(raw_indices):
             ax_obj = Enum.ToObject(_AxisEnum, val)
             axis_array.SetValue(ax_obj, i)
-            
-        # 5. 마지막 칸에 ACSC_NONE (-1) 주입
+            log.info(f"[ACS Worker]   axis_array[{i}] = {val} ({ax_obj})")
         none_obj = Enum.ToObject(_AxisEnum, -1)
         axis_array.SetValue(none_obj, len(raw_indices))
+        log.info(f"[ACS Worker]   axis_array[{len(raw_indices)}] = -1 (NONE)")
 
-        log.info("[ACS Worker] Attempting EnableM with type-safe array")
-        
-        with self._api_lock:
-            self._api.EnableM(axis_array)
+        # 5. EnableM 호출
+        log.info("[ACS Worker] [STEP 5] Calling EnableM → DLL...")
+        try:
+            with self._api_lock:
+                self._api.EnableM(axis_array)
+            log.info("[ACS Worker] [STEP 5] EnableM → OK ✓")
+        except Exception as em_err:
+            log.error(f"[ACS Worker] [STEP 5] EnableM → FAILED: {em_err}")
+            raise
 
-        # EnableM 발행 후 하드웨어가 실제로 Enable 될 때까지 대기 (최대 8초)
-        # ACS는 EnableM 명령 후 서보 제어 루프 활성화까지 수 초가 걸림
-        log.info("[ACS Worker] EnableM sent — waiting for hardware to confirm ENABLED state...")
+        # 6. EnableM 발행 후 하드웨어가 실제로 Enable 될 때까지 대기 (최대 8초)
+        log.info("[ACS Worker] [STEP 6] Waiting for hardware ENABLE confirmation (max 8s)...")
         enable_deadline = time.time() + 8.0
         while time.time() < enable_deadline:
             confirmed = []
@@ -326,13 +359,16 @@ class AcsWorker(QObject):
                     except:
                         confirmed.append(False)
             if all(confirmed):
-                log.info("[ACS Worker] All 6 axes confirmed ENABLED")
+                log.info("[ACS Worker] [STEP 6] All 6 axes confirmed ENABLED ✓")
                 break
             enabled_count = sum(confirmed)
-            log.debug(f"[ACS Worker] Waiting for enable... ({enabled_count}/6 axes enabled)")
+            log.info(f"[ACS Worker] [STEP 6] Waiting... {enabled_count}/6 axes enabled  {confirmed}")
             time.sleep(0.1)
         else:
-            log.warning("[ACS Worker] Not all axes confirmed ENABLED within 8s (some may still be enabling)")
+            log.warning("[ACS Worker] [STEP 6] Not all axes ENABLED within 8s")
+
+        log.info("[ACS Worker] === _do_enable_all END ===")
+        log.info("=" * 60)
 
     @pyqtSlot()
     def set_disable_all(self):
