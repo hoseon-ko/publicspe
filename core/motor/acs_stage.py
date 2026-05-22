@@ -312,6 +312,28 @@ class AcsWorker(QObject):
         with self._api_lock:
             self._api.EnableM(axis_array)
 
+        # EnableM 발행 후 하드웨어가 실제로 Enable 될 때까지 대기 (최대 8초)
+        # ACS는 EnableM 명령 후 서보 제어 루프 활성화까지 수 초가 걸림
+        log.info("[ACS Worker] EnableM sent — waiting for hardware to confirm ENABLED state...")
+        enable_deadline = time.time() + 8.0
+        while time.time() < enable_deadline:
+            confirmed = []
+            with self._api_lock:
+                for i in range(6):
+                    try:
+                        mst = int(self._api.GetMotorState(_axis_enum(i)))
+                        confirmed.append(bool(mst & _MST_ENABLE))
+                    except:
+                        confirmed.append(False)
+            if all(confirmed):
+                log.info("[ACS Worker] All 6 axes confirmed ENABLED")
+                break
+            enabled_count = sum(confirmed)
+            log.debug(f"[ACS Worker] Waiting for enable... ({enabled_count}/6 axes enabled)")
+            time.sleep(0.1)
+        else:
+            log.warning("[ACS Worker] Not all axes confirmed ENABLED within 8s (some may still be enabling)")
+
     @pyqtSlot()
     def set_disable_all(self):
         try:
@@ -667,7 +689,7 @@ class KinematicMoveWorker(QThread):
     finished = pyqtSignal()
     error    = pyqtSignal(str)
 
-    _SERVO_ON_MS   = 1000   # 서보 ON 확인 대기
+    _SERVO_ON_MS   = 12000  # 서보 ON 확인 대기 (Halt→FaultClear→EnableM→하드웨어 응답까지 총 시간)
     _SETTLE_MS     = 500    # In-Position 후 정착 대기
     _INPOS_TIMEOUT = 30000  # WaitMotionEnd 타임아웃 (ms)
 
