@@ -3,11 +3,11 @@ core/motor/acs_stage.py
 ACS SPiiPlus 6축 키네마틱 스테이지 컨트롤러.
 
 - 모든 Write 명령(Enable, Move, Stop 등)은 단일 워커 스레드(AcsWorker)에서 순차적으로 처리됩니다.
-- Read 명령(Position, State Polling)은 타이머를 통해 주기적으로 수행됩니다.
+- Read 명령(Position, State Polling)은 독립 상시 백그라운드 스레드(AcsPollingThread)에서 Lock을 잡고 주기적으로 수행됩니다.
+- API 공유 시 상호배제를 보장하기 위해 _api_lock(threading.Lock)을 채용합니다.
 """
 
 from __future__ import annotations
-
 
 import sys
 import os
@@ -80,8 +80,55 @@ def _axis_enum(idx: int):
         return axis_num
     return idx
 
+
+class AcsPollingThread(QThread):
+    """독립 상시 백그라운드 폴링(읽기) 스레드"""
+    positions_updated = pyqtSignal(list)
+    states_updated    = pyqtSignal(list)
+
+    def __init__(self, api, api_lock, parent=None):
+        super().__init__(parent)
+        self._api = api
+        self._api_lock = api_lock
+        self._stopped = False
+        self._is_polling = True
+        self._interval_ms = 200
+
+    def stop(self):
+        self._stopped = True
+
+    def set_polling(self, enable: bool):
+        self._is_polling = enable
+
+    def run(self):
+        log.info("[ACS Polling Thread] Polling run loop started")
+        while not self._stopped:
+            if self._is_polling and self._api is not None:
+                try:
+                    positions = []
+                    states = []
+                    
+                    with self._api_lock:
+                        for i in range(6):
+                            ax = _axis_enum(i)
+                            positions.append(float(self._api.GetFPosition(ax)))
+                            mstate = int(self._api.GetMotorState(ax))
+                            states.append({
+                                "enabled": bool(mstate & _MST_ENABLE),
+                                "moving":  bool(mstate & _MST_ANY_MOTION),
+                                "in_pos":  bool(mstate & _MST_INPOS)
+                            })
+                            
+                    self.positions_updated.emit(positions)
+                    self.states_updated.emit(states)
+                except Exception as e:
+                    log.debug(f"[ACS Polling Thread] Poll error: {e}")
+            self.msleep(self._interval_ms)
+        log.info("[ACS Polling Thread] Polling run loop stopped")
+
+
 class AcsWorker(QObject):
-    """ACS 하드웨어 통신 담당 워커 (단일 스레드 상주)"""
+    """ACS 하드웨어 통신 담당 워커 (단일 스레드 상주 - 오직 쓰기 명령 전송만 처리)"""
     positions_updated = pyqtSignal(list)
     states_updated    = pyqtSignal(list)
     connection_lost   = pyqtSignal()
@@ -89,86 +136,53 @@ class AcsWorker(QObject):
     def __init__(self):
         super().__init__()
         self._api = None
-        self._conn_params = None # (type, ip, port)
-        self._timer = None
-        self._is_polling = False
+        self._api_lock = None
 
-    def set_connection_params(self, conn_type, ip=None, port=None):
-        self._conn_params = (conn_type, ip, port)
+    def set_api(self, api):
+        self._api = api
+
+    def set_api_lock(self, api_lock):
+        self._api_lock = api_lock
 
     @pyqtSlot()
     def setup(self):
-        # 1. API 객체 생성 및 연결은 반드시 워커 스레드 내에서 실행!
+        # 1. 연결은 메인 스레드에서 완료되었으므로, 초기화 및 FaultClear만 수행!
         try:
             log.info(f"[ACS Worker] setup() start @ thread={int(self.thread().currentThreadId())}")
-            self._api = _Api()
-            conn_type, ip, port = self._conn_params
-            log.info(f"[ACS Worker] Connecting: {conn_type} {ip}:{port}")
-            if conn_type != "simulator" and ip:
-                try:
-                    with socket.create_connection((ip, int(port)), timeout=1.5):
-                        pass
-                except Exception as sock_err:
-                    log.warning(f"[ACS Worker] TCP preflight failed for {ip}:{port}: {sock_err}")
-                    self.connection_lost.emit()
-                    return
-            self._api.OpenCommSimulator() if conn_type == "simulator" else self._api.OpenCommEthernetTCP(ip, port)
-            log.info(f"[ACS Worker] Connected via {conn_type}")
+            if self._api is None:
+                raise ValueError("API instance is not set")
             
-            # [Safety] 연결 직후 에러 클리어
-            for i in range(6):
-                try:
-                    self._api.FaultClear(_axis_enum(i))
-                    log.debug(f"[ACS Worker] FaultClear Axis {i} OK")
-                except Exception as fe:
-                    log.warning(f"[ACS Worker] FaultClear Axis {i} failed: {fe}")
-            log.info("[ACS Worker] Initial FaultClear all axes done")
+            with self._api_lock:
+                # [Safety] 연결 직후 에러 클리어
+                for i in range(6):
+                    try:
+                        self._api.FaultClear(_axis_enum(i))
+                        log.debug(f"[ACS Worker] FaultClear Axis {i} OK")
+                    except Exception as fe:
+                        log.warning(f"[ACS Worker] FaultClear Axis {i} failed: {fe}")
+                log.info("[ACS Worker] Initial FaultClear all axes done")
 
         except Exception as e:
-            log.error(f"[ACS Worker] Connection failed: {e}")
+            log.error(f"[ACS Worker] Setup failed: {e}")
             self.connection_lost.emit()
             return
 
-        # 2. 폴링 타이머 시작
+        # 2. 동기식 초기 1회 폴링 데이터 강제 취득 및 전송
         try:
-            self._is_polling = True
-            self._do_initial_poll() # 동기식 초기 1회 폴링 강제 실행 (실패 시 예외 전파)
-            self._timer = QTimer()
-            self._timer.timeout.connect(self._poll)
-            self._timer.setInterval(200)
-            self._timer.start()
-            log.info("[ACS Worker] Polling timer started")
+            self._emit_current_states_sync()
+            log.info("[ACS Worker] Connected setup successfully completed")
         except Exception as e:
-            log.error(f"[ACS Worker] Initial poll or timer start failed: {e}")
+            log.error(f"[ACS Worker] Initial sync poll failed: {e}")
             self.connection_lost.emit()
             return
 
-    def _do_initial_poll(self):
-        """초기 1회 동기 폴링. 실패 시 예외가 외부로 전파되어 connection_lost를 유발합니다."""
+    def _emit_current_states_sync(self):
+        """현재 시점의 positions와 states를 락을 잡고 즉각 수집해 emit (캐시 업데이트용)"""
+        if self._api is None: return
         positions = []
         states = []
-        for i in range(6):
-            ax = _axis_enum(i)
-            positions.append(float(self._api.GetFPosition(ax)))
-            mstate = int(self._api.GetMotorState(ax))
-            states.append({
-                "enabled": bool(mstate & _MST_ENABLE),
-                "moving":  bool(mstate & _MST_ANY_MOTION),
-                "in_pos":  bool(mstate & _MST_INPOS)
-            })
-        self.positions_updated.emit(positions)
-        self.states_updated.emit(states)
-
-    def _poll(self):
-        if not self._is_polling: return
-        if self._api is None: return   # stop() 이후 보호
-        try:
-            positions = []
-            states = []
+        with self._api_lock:
             for i in range(6):
-                # 루프 중간에도 종료 신호 체크 — 6축 API 호출 누적 지연 방지
-                if not self._is_polling or self._api is None:
-                    return
                 ax = _axis_enum(i)
                 positions.append(float(self._api.GetFPosition(ax)))
                 mstate = int(self._api.GetMotorState(ax))
@@ -177,18 +191,15 @@ class AcsWorker(QObject):
                     "moving":  bool(mstate & _MST_ANY_MOTION),
                     "in_pos":  bool(mstate & _MST_INPOS)
                 })
-            if not self._is_polling: return
-            self.positions_updated.emit(positions)
-            self.states_updated.emit(states)
-        except Exception as e:
-            log.debug(f"[ACS Worker] Poll error: {e}")
+        self.positions_updated.emit(positions)
+        self.states_updated.emit(states)
 
     def _wait_axis_stopped(self, ax, timeout: float = 2.0):
-        """모든 모션 비트(_MST_ANY_MOTION)가 꺼질 때까지 폴링 대기(최대 timeout초)."""
         deadline = time.time() + timeout
         while time.time() < deadline:
             try:
-                mst = int(self._api.GetMotorState(ax))
+                with self._api_lock:
+                    mst = int(self._api.GetMotorState(ax))
                 if not (mst & _MST_ANY_MOTION):
                     return
             except:
@@ -198,9 +209,11 @@ class AcsWorker(QObject):
 
     @pyqtSlot(int, bool)
     def set_enable(self, axis: int, enable: bool):
+        if self._api is None: return
         try:
             ax = _axis_enum(axis)
-            mstate = int(self._api.GetMotorState(ax))
+            with self._api_lock:
+                mstate = int(self._api.GetMotorState(ax))
             is_enabled = bool(mstate & _MST_ENABLE)
 
             if is_enabled == enable:
@@ -210,90 +223,106 @@ class AcsWorker(QObject):
                 # MOVE/ACC 중이면 Enable 불가하므로 사전 정지 대기(최대 3초)
                 deadline = time.time() + 3.0
                 while time.time() < deadline:
-                    mst = int(self._api.GetMotorState(ax))
+                    with self._api_lock:
+                        mst = int(self._api.GetMotorState(ax))
                     if not (mst & _MST_ANY_MOTION):
                         break
                     time.sleep(0.05)
                 else:
                     log.warning(f"[ACS Worker] Axis {axis}: still in motion after 3s, attempting Enable anyway")
 
-                try:
-                    self._api.FaultClear(ax)
-                except:
-                    pass
-                self._api.Enable(ax)
+                with self._api_lock:
+                    try:
+                        self._api.FaultClear(ax)
+                    except:
+                        pass
+                    self._api.Enable(ax)
             else:
-                self._api.Disable(ax)
+                with self._api_lock:
+                    self._api.Disable(ax)
 
         except Exception as e:
             log.error(f"[ACS Worker] Enable error (Axis {axis}): {e}")
 
     @pyqtSlot()
     def set_enable_all(self):
-        #self._is_polling = False
         try:
             self._do_enable_all()
         finally:
-            self._is_polling = True
+            # 일괄 ON 직후, 즉각 강제 상태 갱신을 통해 UI 및 wait_for_enabled_all 즉시 완료 보장
+            self._emit_current_states_sync()
 
     def _do_enable_all(self):
-        # KillAll → MOVE/ACC 소멸 대기 → FaultClear → Enable
-        try:
-            #self._api.KillAll()
-            pass
-        except:
-            pass
-
+        if self._api is None: return
+        # MOVE/ACC 소멸 대기
         deadline = time.time() + 3.0
         while time.time() < deadline:
-            all_stopped = all(
-                not (int(self._api.GetMotorState(_axis_enum(i))) & _MST_ANY_MOTION)
-                for i in range(6)
-            )
+            all_stopped = True
+            with self._api_lock:
+                for i in range(6):
+                    mst = int(self._api.GetMotorState(_axis_enum(i)))
+                    if mst & _MST_ANY_MOTION:
+                        all_stopped = False
+                        break
             if all_stopped:
                 break
             time.sleep(0.05)
 
-     # 1. 6개 축 + 종결자(NONE) 1개 = 총 7개 크기 배열 생성
+        # 1. 6축 FaultClear 선 복구 (E-Stop/Limit 트립 리셋)
+        with self._api_lock:
+            for i in range(6):
+                try:
+                    self._api.FaultClear(_axis_enum(i))
+                except:
+                    pass
+
+        # 2. 6개 축 + 종결자(NONE) 1개 = 총 7개 크기 배열 생성
         raw_indices = [0, 1, 4, 5, 8, 9]
         axis_array = System.Array.CreateInstance(_AxisEnum, len(raw_indices) + 1)
         
-        # 2. 실제 축 데이터 채우기
+        # 3. 실제 축 데이터 채우기
         for i, val in enumerate(raw_indices):
             ax_obj = Enum.ToObject(_AxisEnum, val)
             axis_array.SetValue(ax_obj, i)
             
-        # 3. 핵심: 마지막 칸에 ACSC_NONE (-1) 주입
-        # C# 코드의 result[result.Length - 1] = Axis.ACSC_NONE; 부분
-        none_obj = Enum.ToObject(_AxisEnum, -1) # 보통 ACSC_NONE은 -1입니다.
+        # 4. 마지막 칸에 ACSC_NONE (-1) 주입
+        none_obj = Enum.ToObject(_AxisEnum, -1)
         axis_array.SetValue(none_obj, len(raw_indices))
 
         log.info(f"[ACS Worker] Attempting EnableM with type-safe array")
         time.sleep(0.1)  # EnableM 직전 잠시 대기
-        self._api.EnableM(axis_array)
+        
+        with self._api_lock:
+            self._api.EnableM(axis_array)
 
     @pyqtSlot()
     def set_disable_all(self):
-        self._is_polling = False
         try:
             for i in range(6):
                 self.set_enable(i, False)
         finally:
-            self._is_polling = True
+            self._emit_current_states_sync()
 
     @pyqtSlot(int, float)
     def move_to(self, axis: int, target: float):
+        if self._api is None: return
         try:
             ax = _axis_enum(axis)
             flags = _MotionFlags(0) if _MotionFlags is not None else 0
-            self._api.ToPoint(flags, ax, float(target))
+            with self._api_lock:
+                self._api.ToPoint(flags, ax, float(target))
         except Exception as e:
             log.error(f"[ACS Worker] Move error: {e}")
 
     @pyqtSlot(int)
     def stop_axis(self, axis: int):
-        try: self._api.Halt(_axis_enum(axis))
-        except: pass
+        if self._api is None: return
+        try:
+            ax = _axis_enum(axis)
+            with self._api_lock:
+                self._api.Halt(ax)
+        except:
+            pass
 
     @pyqtSlot()
     def stop_all(self):
@@ -301,21 +330,8 @@ class AcsWorker(QObject):
 
     @pyqtSlot()
     def stop(self):
-        """폴링 정지 + .NET API 명시적 close (terminate 회피)."""
-        self._is_polling = False
-        if self._timer:
-            self._timer.stop()
-            self._timer.deleteLater()
-            self._timer = None
-        # .NET API 연결을 명시적으로 닫아둠. 호출 안 하면 TCP 소켓이 leak 되고
-        # 다음 connect 시 같은 IP 재접속이 실패하거나, 워커 GC 타이밍에서
-        # finalizer 가 .NET interop 객체에 접근해 crash.
-        if self._api is not None:
-            try:
-                self._api.CloseComm()
-            except Exception:
-                pass
-            self._api = None
+        """워커 정지용 더미 슬롯 (API 정리는 컨트롤러가 담당)"""
+        self._api = None
 
 
 class AcsStageController(QObject):
@@ -339,12 +355,13 @@ class AcsStageController(QObject):
         self._simulator = False
         self._worker: Optional[AcsWorker] = None
         self._thread: Optional[QThread] = None
+        self._poll_thread: Optional[AcsPollingThread] = None
+        self._api_lock = threading.Lock()
         self.dry_run = False
         
         self._axes      = list(range(6))
         
-        # 캐시된 하드웨어 상태 (스레드 간 경합 방지용)
-        # _last_states 는 axis 별 독립 dict 여야 함 (리스트 곱셈은 동일 객체 6개 → 한 축 수정시 모두 변경되는 버그)
+        # 캐시된 하드웨어 상태
         self._last_positions = [0.0] * 6
         self._last_states    = [{"enabled": False, "moving": False, "in_pos": False} for _ in range(6)]
         
@@ -360,24 +377,48 @@ class AcsStageController(QObject):
     # 연결 제어 섹션
     def connect(self, ip: str, port: int = DEFAULT_PORT):
         if not _ACS_OK: raise RuntimeError(f"DLL Load Failed: {_ACS_IMPORT_ERROR}")
-        self.stop_polling() # 기존 세션 강제 종료
-        self._connected = True
-        self._simulator = False
-        self._conn_info = ("ethernet", ip, port)
-        dev_logger.info(f"ACS Connection requested: {ip}:{port}")
+        self.stop_polling() # 기존 세션 및 API 리소스 강제 종료
+        
+        try:
+            # TCP 예비 접속 검증 (Preflight) 안정성 개선
+            try:
+                with socket.create_connection((ip, int(port)), timeout=3.0):
+                    pass
+                time.sleep(0.5) # TIME_WAIT 우회
+            except Exception as sock_err:
+                raise RuntimeError(f"TCP preflight failed for {ip}:{port}: {sock_err}")
+
+            api = _Api()
+            api.OpenCommEthernetTCP(ip, port)
+            self._api = api
+            self._connected = True
+            self._simulator = False
+            self._conn_info = ("ethernet", ip, port)
+            dev_logger.info(f"ACS Connected via Ethernet to {ip}:{port}")
+        except Exception as e:
+            self._connected = False
+            self._api = None
+            raise RuntimeError(f"ACS Connection failed: {e}")
 
     def connect_simulator(self):
         if not _ACS_OK: raise RuntimeError(f"DLL Load Failed: {_ACS_IMPORT_ERROR}")
-        self._connected = True
-        self._simulator = True
-        self._conn_info = ("simulator", None, None)
+        self.stop_polling()
+        
+        try:
+            api = _Api()
+            api.OpenCommSimulator()
+            self._api = api
+            self._connected = True
+            self._simulator = True
+            self._conn_info = ("simulator", None, None)
+            dev_logger.info("ACS Connected to Simulator")
+        except Exception as e:
+            self._connected = False
+            self._api = None
+            raise RuntimeError(f"ACS Simulator Connection failed: {e}")
 
     def disconnect(self):
         self.stop_polling()
-        if self._api and self._connected:
-            try: self._api.CloseComm()
-            except: pass
-        self._api = None
         self._connected = False
 
     @property
@@ -387,8 +428,16 @@ class AcsStageController(QObject):
     def is_simulator(self) -> bool: return self._simulator
 
     # 제어 명령 (시그널을 통한 워커 슬롯 호출, QueuedConnection)
-    def enable_all(self):  self._cmd_enable_all.emit()
-    def disable_all(self): self._cmd_disable_all.emit()
+    def enable_all(self):
+        if self._poll_thread is not None:
+            self._poll_thread.set_polling(False)
+        self._cmd_enable_all.emit()
+
+    def disable_all(self):
+        if self._poll_thread is not None:
+            self._poll_thread.set_polling(False)
+        self._cmd_disable_all.emit()
+
     def stop_all(self):    self._cmd_stop_all.emit()
     def halt(self, axis: int): self._cmd_stop_axis.emit(axis)
 
@@ -421,11 +470,9 @@ class AcsStageController(QObject):
         return 0.0
 
     def get_positions(self) -> list[float]:
-        """최신 6축 위치 전체 목록 반환"""
         return list(self._last_positions)
 
     def get_axis_states(self) -> list[dict]:
-        """최신 6축 상태 전체 목록 반환"""
         return list(self._last_states)
 
     def is_enabled(self, axis: int) -> bool:
@@ -442,25 +489,22 @@ class AcsStageController(QObject):
         start = time.time()
         app = QApplication.instance()
         main_thread = app.thread() if app is not None else None
-        while (time.time() - start) * 1000 < timeout_ms:
-            if all(self.is_enabled(i) for i in range(6)):
-                return True
-            # 메인 스레드에서 호출될 경우에만 UI 이벤트 처리
-            if main_thread is not None and QThread.currentThread() == main_thread:
-                app.processEvents()
-            time.sleep(0.05)
-        return False
+        try:
+            while (time.time() - start) * 1000 < timeout_ms:
+                if all(self.is_enabled(i) for i in range(6)):
+                    return True
+                # 메인 스레드에서 호출될 경우에만 UI 이벤트 처리
+                if main_thread is not None and QThread.currentThread() == main_thread:
+                    app.processEvents()
+                time.sleep(0.05)
+            return False
+        finally:
+            # 대기 완료 후, 상시 폴링 스레드의 통신 동작을 반드시 복원
+            if self._poll_thread is not None:
+                self._poll_thread.set_polling(True)
 
     def wait_in_position_all(self, timeout_ms: int = 30000):
-        """하드웨어 API 직접 호출 없이 캐시된 moving 상태를 체크하며 대기.
-
-        주의: move 명령 emit 직후 호출되는 경우 캐시(_last_states)가 아직
-        moving=True 로 갱신되기 전일 수 있어 wait가 즉시 반환되는 race가 존재.
-        이를 방지하기 위해 시작 시 한 polling cycle(250ms) 강제 settle.
-
-        timeout_ms 만료 시 TimeoutError 를 raise (silent return 금지).
-        """
-        # 캐시 갱신 대기 (worker polling 주기 200ms + 여유)
+        # 캐시 갱신 대기 (polling 주기 200ms + 여유)
         time.sleep(0.25)
 
         start = time.time()
@@ -476,7 +520,7 @@ class AcsStageController(QObject):
 
     # 워커 생명주기 관리
     def start_polling(self, on_positions=None, on_states=None, on_lost=None):
-        if not self._connected: return
+        if not self._connected or self._api is None: return
 
         # UniqueConnection: 단일 슬롯에 대한 중복 연결 방지
         _UC = Qt.ConnectionType.UniqueConnection
@@ -484,108 +528,119 @@ class AcsStageController(QObject):
         if on_states:    self.states_updated.connect(on_states,       _UC)
         if on_lost:      self.connection_lost.connect(on_lost,        _UC)
 
-        if self._thread and self._thread.isRunning():
-            return
+        # 1. 명령 워커 스레드 기동
+        if not (self._thread and self._thread.isRunning()):
+            self._first_poll_done = False
+            self._connection_failed = False
 
-        self._first_poll_done = False
-        self._connection_failed = False
+            self._thread = QThread()
+            self._worker = AcsWorker()
+            self._worker.set_api(self._api)
+            self._worker.set_api_lock(self._api_lock)
+            self._worker.moveToThread(self._thread)
+            
+            self._thread.finished.connect(self._worker.deleteLater)
+            self._thread.started.connect(self._worker.setup)
 
-        self._thread = QThread()
-        self._worker = AcsWorker()
-        self._worker.set_connection_params(*self._conn_info)
-        self._worker.moveToThread(self._thread)
-        
-        # 스레드 종료 시 워커 자동 삭제 예약
-        self._thread.finished.connect(self._worker.deleteLater)
-        
-        self._thread.started.connect(self._worker.setup)
+            # 워커 -> 컨트롤러 (데이터 스트림)
+            self._worker.positions_updated.connect(self._update_positions)
+            self._worker.states_updated.connect(self._update_states)
+            self._worker.positions_updated.connect(self.positions_updated.emit)
+            self._worker.states_updated.connect(self.states_updated.emit)
+            self._worker.connection_lost.connect(self._on_worker_connection_lost)
+            self._worker.connection_lost.connect(self.connection_lost.emit)
 
-        # 워커 -> 컨트롤러 (데이터 스트림)
-        self._worker.positions_updated.connect(self._update_positions)
-        self._worker.states_updated.connect(self._update_states)
-        self._worker.positions_updated.connect(self.positions_updated.emit)
-        self._worker.states_updated.connect(self.states_updated.emit)
-        self._worker.connection_lost.connect(self._on_worker_connection_lost)
-        self._worker.connection_lost.connect(self.connection_lost.emit)
+            # 컨트롤러 -> 워커 (명령 다운스트림)
+            _QC = Qt.ConnectionType.QueuedConnection
+            self._cmd_enable.connect(self._worker.set_enable,           _QC)
+            self._cmd_enable_all.connect(self._worker.set_enable_all,   _QC)
+            self._cmd_disable_all.connect(self._worker.set_disable_all, _QC)
+            self._cmd_move_to.connect(self._worker.move_to,             _QC)
+            self._cmd_stop_axis.connect(self._worker.stop_axis,         _QC)
+            self._cmd_stop_all.connect(self._worker.stop_all,           _QC)
 
-        # 컨트롤러 -> 워커 (명령 다운스트림)
-        _QC = Qt.ConnectionType.QueuedConnection
-        self._cmd_enable.connect(self._worker.set_enable,           _QC)
-        self._cmd_enable_all.connect(self._worker.set_enable_all,   _QC)
-        self._cmd_disable_all.connect(self._worker.set_disable_all, _QC)
-        self._cmd_move_to.connect(self._worker.move_to,             _QC)
-        self._cmd_stop_axis.connect(self._worker.stop_axis,         _QC)
-        self._cmd_stop_all.connect(self._worker.stop_all,           _QC)
+            self._thread.start()
 
-        self._thread.start()
+            # GUI 스레드 블로킹 대기 (첫 폴링 완료 또는 연결 실패 시까지 최대 4.0초)
+            from PyQt6.QtWidgets import QApplication
+            import time
+            start_t = time.time()
+            main_thread = QApplication.instance().thread() if QApplication.instance() else None
+            while not self._first_poll_done and not self._connection_failed and (time.time() - start_t) < 4.0:
+                if main_thread and QThread.currentThread() == main_thread:
+                    QApplication.processEvents()
+                time.sleep(0.01)
 
-        # GUI 스레드 블로킹 대기 (첫 폴링 완료 또는 연결 실패 시까지 최대 3초)
-        from PyQt6.QtWidgets import QApplication
-        import time
-        start_t = time.time()
-        main_thread = QApplication.instance().thread() if QApplication.instance() else None
-        while not self._first_poll_done and not self._connection_failed and (time.time() - start_t) < 3.0:
-            if main_thread and QThread.currentThread() == main_thread:
-                QApplication.processEvents()
-            time.sleep(0.01)
+            if self._connection_failed:
+                self.stop_polling()
+                raise RuntimeError("ACS hardware connection failed (setup error)")
+            if not self._first_poll_done:
+                self.stop_polling()
+                raise RuntimeError("ACS hardware connection timed out waiting for first poll")
 
-        if self._connection_failed:
-            self.stop_polling()
-            raise RuntimeError("ACS hardware connection failed (preflight or setup error)")
-        if not self._first_poll_done:
-            self.stop_polling()
-            raise RuntimeError("ACS hardware connection timed out waiting for first poll")
+        # 2. 상시 백그라운드 폴링 스레드 기동
+        if self._poll_thread is None:
+            self._poll_thread = AcsPollingThread(self._api, self._api_lock)
+            self._poll_thread.positions_updated.connect(self._update_positions)
+            self._poll_thread.states_updated.connect(self._update_states)
+            self._poll_thread.positions_updated.connect(self.positions_updated.emit)
+            self._poll_thread.states_updated.connect(self.states_updated.emit)
+            self._poll_thread.start()
+            dev_logger.info("[ACS] Polling thread successfully started")
 
     def stop_polling(self):
-        if self._thread and self._thread.isRunning():
-            dev_logger.info("[ACS] Stopping polling thread...")
-            if self._worker:
-                # (1) main thread 에서 즉시 _is_polling=False 로 새로 트리거되는
-                #     _poll() 의 본문 실행 차단. 이미 진행 중인 .NET 호출에는
-                #     영향 없지만, 다음 timer tick 부터는 즉시 return.
-                try:
-                    self._worker._is_polling = False
-                except Exception:
-                    pass
+        # 1. 상시 폴링 스레드 정지
+        if self._poll_thread is not None:
+            self._poll_thread.stop()
+            self._poll_thread.wait(2000)
+            self._poll_thread = None
+            dev_logger.info("[ACS] Polling thread stopped")
 
-                # (2) 명령 다운스트림 신호 해제 (입력 차단)
+        # 2. 명령 스레드 정지
+        if self._thread and self._thread.isRunning():
+            dev_logger.info("[ACS] Stopping command thread...")
+            if self._worker:
+                # 명령 다운스트림 신호 해제
                 for sig in (self._cmd_enable, self._cmd_enable_all,
                             self._cmd_disable_all, self._cmd_move_to,
                             self._cmd_stop_axis, self._cmd_stop_all):
                     try: sig.disconnect()
                     except Exception: pass
 
-                # (3) 워커 → 컨트롤러 신호 해제 (queued 이벤트가 죽은 슬롯
-                #     호출하는 dangling 방지)
+                # 워커 → 컨트롤러 신호 해제
                 for sig_name in ("positions_updated", "states_updated", "connection_lost"):
                     sig = getattr(self._worker, sig_name, None)
                     if sig is not None:
                         try: sig.disconnect()
                         except Exception: pass
 
-                # (4) 워커 정지 명령 (queued — 워커가 idle 일 때 처리)
-                QMetaObject.invokeMethod(self._worker, "stop",
-                                         Qt.ConnectionType.QueuedConnection)
+                # 워커의 _api 참조를 끊어 진행 중인 .NET 호출이 끝나면 즉시 종료
+                self._worker._api = None
 
+            # 이벤트 루프 종료 요청 후 최대 4초 대기
             self._thread.quit()
-            if not self._thread.wait(3000):
-                # terminate() 는 .NET API 호출 중인 스레드를 강제로 죽이면
-                # CLR runtime crash 위험. terminate 대신 leak 을 감수하고 진행.
-                dev_logger.warning(
-                    "[ACS] Worker thread quit timeout 3s — terminate 회피, "
-                    "스레드 leak 가능 (재연결 시 새 워커 생성됨)"
-                )
+            if not self._thread.wait(4000):
+                dev_logger.warning("[ACS] Command thread quit timeout 4s - forcing terminate")
+                self._thread.terminate()   # 최후 수단: 강제 종료
+                self._thread.wait(1000)    # terminate 완료 대기
             else:
-                dev_logger.info("[ACS] Polling thread stopped safely")
+                dev_logger.info("[ACS] Command thread stopped safely")
 
-        # 스레드가 완전히 멈춘 후 참조 해제
         self._worker = None
         self._thread = None
+
+        # 3. API 리소스 정리 (메인 스레드에서 CloseComm 수행)
+        if self._api is not None:
+            with self._api_lock:
+                try:
+                    self._api.CloseComm()
+                except Exception:
+                    pass
+                self._api = None
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # KinematicMoveWorker — canonical 7-step servo ON → move → servo OFF 시퀀스
-# (이전: ui/live, ui/deepalign, ui/widgets 에 3벌 중복 → 단일화)
 # ──────────────────────────────────────────────────────────────────────────────
 
 class KinematicMoveWorker(QThread):
