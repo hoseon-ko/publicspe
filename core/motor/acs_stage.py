@@ -254,7 +254,20 @@ class AcsWorker(QObject):
 
     def _do_enable_all(self):
         if self._api is None: return
-        # MOVE/ACC 소멸 대기
+
+        # 0. 먼저 모든 축에 Halt 명령 — ACS 내부 모션 버퍼까지 강제 클리어
+        log.info("[ACS Worker] Halting all axes before EnableM...")
+        with self._api_lock:
+            for i in range(6):
+                try:
+                    self._api.Halt(_axis_enum(i))
+                except Exception as he:
+                    log.debug(f"[ACS Worker] Halt Axis {i} (ignored): {he}")
+
+        # Halt 후 충분한 정착 대기 (ACS 내부 state machine 정리 시간)
+        time.sleep(0.5)
+
+        # 1. MOVE/ACC 비트가 완전히 꺼질 때까지 추가 대기 (최대 3초)
         deadline = time.time() + 3.0
         while time.time() < deadline:
             all_stopped = True
@@ -267,30 +280,34 @@ class AcsWorker(QObject):
             if all_stopped:
                 break
             time.sleep(0.05)
+        else:
+            log.warning("[ACS Worker] Axes did not stop within 3s after Halt — proceeding anyway")
 
-        # 1. 6축 FaultClear 선 복구 (E-Stop/Limit 트립 리셋)
+        # 2. 6축 FaultClear 선 복구 (E-Stop/Limit 트립 리셋)
         with self._api_lock:
             for i in range(6):
                 try:
                     self._api.FaultClear(_axis_enum(i))
-                except:
-                    pass
+                except Exception as fe:
+                    log.debug(f"[ACS Worker] FaultClear Axis {i} (ignored): {fe}")
 
-        # 2. 6개 축 + 종결자(NONE) 1개 = 총 7개 크기 배열 생성
+        # FaultClear 후 안정화 대기
+        time.sleep(0.2)
+
+        # 3. 6개 축 + 종결자(NONE) 1개 = 총 7개 크기 배열 생성
         raw_indices = [0, 1, 4, 5, 8, 9]
         axis_array = System.Array.CreateInstance(_AxisEnum, len(raw_indices) + 1)
         
-        # 3. 실제 축 데이터 채우기
+        # 4. 실제 축 데이터 채우기
         for i, val in enumerate(raw_indices):
             ax_obj = Enum.ToObject(_AxisEnum, val)
             axis_array.SetValue(ax_obj, i)
             
-        # 4. 마지막 칸에 ACSC_NONE (-1) 주입
+        # 5. 마지막 칸에 ACSC_NONE (-1) 주입
         none_obj = Enum.ToObject(_AxisEnum, -1)
         axis_array.SetValue(none_obj, len(raw_indices))
 
-        log.info(f"[ACS Worker] Attempting EnableM with type-safe array")
-        time.sleep(0.1)  # EnableM 직전 잠시 대기
+        log.info("[ACS Worker] Attempting EnableM with type-safe array")
         
         with self._api_lock:
             self._api.EnableM(axis_array)
