@@ -136,38 +136,83 @@ class AcsWorker(QObject):
     def __init__(self):
         super().__init__()
         self._api = None
+        self._conn_params = None  # (type, ip, port)
         self._api_lock = None
 
-    def set_api(self, api):
-        self._api = api
+    def set_connection_params(self, conn_type, ip=None, port=None):
+        self._conn_params = (conn_type, ip, port)
 
     def set_api_lock(self, api_lock):
         self._api_lock = api_lock
 
     @pyqtSlot()
     def setup(self):
-        # 1. 연결은 메인 스레드에서 완료되었으므로, 초기화 및 FaultClear만 수행!
+        """API 객체 생성 및 연결을 워커 스레드 내에서 수행.
+        OpenComm* 호출은 daemon 스레드 + timeout으로 했 방지."""
         try:
             log.info(f"[ACS Worker] setup() start @ thread={int(self.thread().currentThreadId())}")
-            if self._api is None:
-                raise ValueError("API instance is not set")
-            
+            conn_type, ip, port = self._conn_params
+            log.info(f"[ACS Worker] Connecting: {conn_type} {ip}:{port}")
+
+            # TCP 예비 접속 검증 (Ethernet 전용)
+            if conn_type == "ethernet" and ip:
+                try:
+                    with socket.create_connection((ip, int(port)), timeout=3.0):
+                        pass
+                    time.sleep(0.5)  # TIME_WAIT 우회
+                except Exception as sock_err:
+                    log.warning(f"[ACS Worker] TCP preflight failed for {ip}:{port}: {sock_err}")
+                    self.connection_lost.emit()
+                    return
+
+            # --- OpenComm* 를 daemon thread 안에서 호출하여 timeout 감지 ---
+            api = _Api()
+            connect_result = [None]  # None=대기중, True=성공, Exception=실패
+
+            def _do_connect():
+                try:
+                    if conn_type == "simulator":
+                        api.OpenCommSimulator()
+                    else:
+                        api.OpenCommEthernetTCP(ip, port)
+                    connect_result[0] = True
+                except Exception as ce:
+                    connect_result[0] = ce
+
+            conn_thread = threading.Thread(target=_do_connect, daemon=True)
+            conn_thread.start()
+
+            # 5초 타임아웃으로 대기
+            conn_thread.join(timeout=5.0)
+
+            if connect_result[0] is None:
+                log.error("[ACS Worker] OpenComm timed out (5s) — hardware not responding")
+                self.connection_lost.emit()
+                return
+            if isinstance(connect_result[0], Exception):
+                log.error(f"[ACS Worker] OpenComm failed: {connect_result[0]}")
+                self.connection_lost.emit()
+                return
+
+            log.info(f"[ACS Worker] Connected via {conn_type}")
+
+            # 연결 직후 FaultClear
             with self._api_lock:
-                # [Safety] 연결 직후 에러 클리어
+                self._api = api
                 for i in range(6):
                     try:
                         self._api.FaultClear(_axis_enum(i))
                         log.debug(f"[ACS Worker] FaultClear Axis {i} OK")
                     except Exception as fe:
-                        log.warning(f"[ACS Worker] FaultClear Axis {i} failed: {fe}")
+                        log.warning(f"[ACS Worker] FaultClear Axis {i}: {fe}")
                 log.info("[ACS Worker] Initial FaultClear all axes done")
 
         except Exception as e:
-            log.error(f"[ACS Worker] Setup failed: {e}")
+            log.error(f"[ACS Worker] Connection failed: {e}")
             self.connection_lost.emit()
             return
 
-        # 2. 동기식 초기 1회 폴링 데이터 강제 취득 및 전송
+        # 동기식 초기 1회 폴링
         try:
             self._emit_current_states_sync()
             log.info("[ACS Worker] Connected setup successfully completed")
@@ -405,8 +450,15 @@ class AcsWorker(QObject):
 
     @pyqtSlot()
     def stop(self):
-        """워커 정지용 더미 슬롯 (API 정리는 컨트롤러가 담당)"""
-        self._api = None
+        """CloseComm 및 API 정리 슬롯 (워커 스레드에서 실행되어야 안전)"""
+        if self._api is not None:
+            with self._api_lock:
+                try:
+                    self._api.CloseComm()
+                    log.info("[ACS Worker] CloseComm done")
+                except Exception:
+                    pass
+                self._api = None
 
 
 class AcsStageController(QObject):
@@ -425,7 +477,6 @@ class AcsStageController(QObject):
 
     def __init__(self):
         super().__init__()
-        self._api = None
         self._connected = False
         self._simulator = False
         self._worker: Optional[AcsWorker] = None
@@ -449,48 +500,22 @@ class AcsStageController(QObject):
         self.plus_limits = DEFAULT_PLUS_LIMITS.copy()
         self.minus_limits = DEFAULT_MINUS_LIMITS.copy()
 
-    # 연결 제어 섹션
+    # 연결 제어 섹션 (파라미터 저장만, 실제 연결은 워커 스레드에서)
     def connect(self, ip: str, port: int = DEFAULT_PORT):
         if not _ACS_OK: raise RuntimeError(f"DLL Load Failed: {_ACS_IMPORT_ERROR}")
-        self.stop_polling() # 기존 세션 및 API 리소스 강제 종료
-        
-        try:
-            # TCP 예비 접속 검증 (Preflight) 안정성 개선
-            try:
-                with socket.create_connection((ip, int(port)), timeout=3.0):
-                    pass
-                time.sleep(0.5) # TIME_WAIT 우회
-            except Exception as sock_err:
-                raise RuntimeError(f"TCP preflight failed for {ip}:{port}: {sock_err}")
-
-            api = _Api()
-            api.OpenCommEthernetTCP(ip, port)
-            self._api = api
-            self._connected = True
-            self._simulator = False
-            self._conn_info = ("ethernet", ip, port)
-            dev_logger.info(f"ACS Connected via Ethernet to {ip}:{port}")
-        except Exception as e:
-            self._connected = False
-            self._api = None
-            raise RuntimeError(f"ACS Connection failed: {e}")
+        self.stop_polling()  # 기존 세션 강제 종료
+        self._connected = True
+        self._simulator = False
+        self._conn_info = ("ethernet", ip, port)
+        dev_logger.info(f"ACS Connection requested: {ip}:{port}")
 
     def connect_simulator(self):
         if not _ACS_OK: raise RuntimeError(f"DLL Load Failed: {_ACS_IMPORT_ERROR}")
         self.stop_polling()
-        
-        try:
-            api = _Api()
-            api.OpenCommSimulator()
-            self._api = api
-            self._connected = True
-            self._simulator = True
-            self._conn_info = ("simulator", None, None)
-            dev_logger.info("ACS Connected to Simulator")
-        except Exception as e:
-            self._connected = False
-            self._api = None
-            raise RuntimeError(f"ACS Simulator Connection failed: {e}")
+        self._connected = True
+        self._simulator = True
+        self._conn_info = ("simulator", None, None)
+        dev_logger.info("ACS Simulator connection requested")
 
     def disconnect(self):
         self.stop_polling()
@@ -595,7 +620,7 @@ class AcsStageController(QObject):
 
     # 워커 생명주기 관리
     def start_polling(self, on_positions=None, on_states=None, on_lost=None):
-        if not self._connected or self._api is None: return
+        if not self._connected: return
 
         # UniqueConnection: 단일 슬롯에 대한 중복 연결 방지
         _UC = Qt.ConnectionType.UniqueConnection
@@ -610,7 +635,7 @@ class AcsStageController(QObject):
 
             self._thread = QThread()
             self._worker = AcsWorker()
-            self._worker.set_api(self._api)
+            self._worker.set_connection_params(*self._conn_info)
             self._worker.set_api_lock(self._api_lock)
             self._worker.moveToThread(self._thread)
             
@@ -636,12 +661,10 @@ class AcsStageController(QObject):
 
             self._thread.start()
 
-            # GUI 스레드 블로킹 대기 (첫 폴링 완료 또는 연결 실패 시까지 최대 4.0초)
-            from PyQt6.QtWidgets import QApplication
-            import time
+            # GUI 스레드 블로킹 대기 (첫 폴링 완료 또는 연결 실패 시까지 최대 8초)
             start_t = time.time()
             main_thread = QApplication.instance().thread() if QApplication.instance() else None
-            while not self._first_poll_done and not self._connection_failed and (time.time() - start_t) < 4.0:
+            while not self._first_poll_done and not self._connection_failed and (time.time() - start_t) < 8.0:
                 if main_thread and QThread.currentThread() == main_thread:
                     QApplication.processEvents()
                 time.sleep(0.01)
@@ -655,7 +678,10 @@ class AcsStageController(QObject):
 
         # 2. 상시 백그라운드 폴링 스레드 기동
         if self._poll_thread is None:
-            self._poll_thread = AcsPollingThread(self._api, self._api_lock)
+            api_instance = self._worker._api  # 워커가 연결한 API 참조 사용
+            if api_instance is None:
+                raise RuntimeError("ACS Worker API not initialized")
+            self._poll_thread = AcsPollingThread(api_instance, self._api_lock)
             self._poll_thread.positions_updated.connect(self._update_positions)
             self._poll_thread.states_updated.connect(self._update_states)
             self._poll_thread.positions_updated.connect(self.positions_updated.emit)
@@ -671,7 +697,7 @@ class AcsStageController(QObject):
             self._poll_thread = None
             dev_logger.info("[ACS] Polling thread stopped")
 
-        # 2. 명령 스레드 정지
+        # 2. 명령 스레드 정지 (CloseComm는 worker.stop() 슬롯이 워커 스레드에서 수행)
         if self._thread and self._thread.isRunning():
             dev_logger.info("[ACS] Stopping command thread...")
             if self._worker:
@@ -689,29 +715,22 @@ class AcsStageController(QObject):
                         try: sig.disconnect()
                         except Exception: pass
 
-                # 워커의 _api 참조를 끊어 진행 중인 .NET 호출이 끝나면 즉시 종료
+                # 워커의 _api 참조를 None으로 설정하여 진행 중인 .NET 호출 조기 종료 유도
                 self._worker._api = None
 
-            # 이벤트 루프 종료 요청 후 최대 4초 대기
+                # worker.stop() 슬롯 바로 호출 대신 스레드 quit 요청만 수행
+                # (API 이미 None으로 CloseComm 괠)
+
             self._thread.quit()
             if not self._thread.wait(4000):
                 dev_logger.warning("[ACS] Command thread quit timeout 4s - forcing terminate")
-                self._thread.terminate()   # 최후 수단: 강제 종료
-                self._thread.wait(1000)    # terminate 완료 대기
+                self._thread.terminate()
+                self._thread.wait(1000)
             else:
                 dev_logger.info("[ACS] Command thread stopped safely")
 
         self._worker = None
         self._thread = None
-
-        # 3. API 리소스 정리 (메인 스레드에서 CloseComm 수행)
-        if self._api is not None:
-            with self._api_lock:
-                try:
-                    self._api.CloseComm()
-                except Exception:
-                    pass
-                self._api = None
 
 
 # ──────────────────────────────────────────────────────────────────────────────
