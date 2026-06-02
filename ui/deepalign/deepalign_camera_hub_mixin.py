@@ -122,6 +122,7 @@ class CameraHubMixin:
                 dev = self._scanned_devices[idx]
                 device_id = getattr(dev, "device_id", "")
                 self._session_hub.connect_camera(str(device_id))
+                self._active_device_id = str(device_id)  # 장치별 설정 저장을 위한 현재 ID 기록
                 try:
                     caps = self._session_hub.camera_get_capabilities()
                 except Exception:
@@ -196,6 +197,7 @@ class CameraHubMixin:
         if self._session_hub is not None:
             try:
                 self._session_hub.disconnect_camera(reason="deep_align user request")
+                self._active_device_id = ""
                 self._apply_camera_capabilities(None)
                 self._set_camera_action_state(False)
                 dev_logger.debug("[DeepAlign] disconnect via hub succeeded")
