@@ -45,7 +45,7 @@ class FramePipelineMixin:
         self._viewer_first_frame = False
 
     def _push_frame(self, raw, gallery_label: str = "", drop_if_busy: bool = False,
-                    source: str = "live") -> None:
+                    source: str = "live", skip_calc: bool = False) -> None:
         """raw 프레임을 변환 워커에 제출.
 
         cmap/vmin/vmax를 메인 스레드에서 읽어 task에 담고 워커에 전달한다.
@@ -55,6 +55,7 @@ class FramePipelineMixin:
         (live 스트림의 backpressure용).
 
         source ∈ {"snap","live","acquire"} — ProcStatsPlot 트리거 필터링용.
+        skip_calc=True 이면 프레임의 연산(proc, stats) 부하를 스킵한다.
         """
         if not hasattr(self, "_frame_convert_worker"):
             return
@@ -77,6 +78,9 @@ class FramePipelineMixin:
         bg_frame = getattr(self, '_bg_frame', None)
         
         proc_enabled = bool(getattr(self, '_proc_enabled', False))
+        if skip_calc:
+            proc_enabled = False
+
         proc_mode = int(getattr(self, '_proc_mode', 1))
         proc_region = str(getattr(self, '_proc_region', 'full'))
         proc_image = getattr(self, '_proc_image', None)

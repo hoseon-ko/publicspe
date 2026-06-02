@@ -272,8 +272,20 @@ class CameraControllerMixin(CameraHubMixin):
         )
         self._update_acquire_times(skip_progress_calc=True)
         ts = datetime.now().strftime("%H:%M:%S")
-        gallery_label = f"Acq_Last_{ts}" if cur == total else ""
-        self._push_frame(raw, gallery_label=gallery_label, source="acquire")
+        
+        is_last = (cur == total)
+        gallery_label = f"Acq_Last_{ts}" if is_last else ""
+        
+        # Acquire 중에는 UI 프리징을 막기 위해 
+        # 중간 프레임들은 drop_if_busy=True 로 두고, 연산(proc)도 스킵합니다.
+        # 마지막 프레임만 연산하고 갤러리에 추가하도록 구성합니다.
+        self._push_frame(
+            raw, 
+            gallery_label=gallery_label, 
+            drop_if_busy=not is_last, 
+            source="acquire",
+            skip_calc=not is_last
+        )
 
     def _on_acquire_finished(self, frames: list):
         self._acq.running = False
