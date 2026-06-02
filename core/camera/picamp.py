@@ -549,6 +549,7 @@ class PicamCameraWrapper:
         frames = []
         try:
             cam.setup_acquisition(mode="sequence", num_frames=n)
+            cam.clear_acquisition()
         except Exception:
             pass
         cam.start_acquisition()

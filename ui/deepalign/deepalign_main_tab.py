@@ -818,7 +818,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
             self._stop_hub_live()
 
         n = self.spin_bg_frames.value()
-        snap_fn = lambda: self._session_hub.snap(OWNER_DEEPALIGN)
+        acquire_fn = lambda cb, stop: self._session_hub.acquire_with_progress(OWNER_DEEPALIGN, n, progress_cb=cb, should_stop=stop)
 
         self.btn_bg_capture.setEnabled(False)
         self.btn_bg_load.setEnabled(False)
@@ -826,7 +826,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self.lbl_bg_status.setStyleSheet("color: #facc15; font-size: 11px; font-weight: bold;")
 
         self._bg_capture_thread = QThread(self)
-        self._bg_capture_worker = _BgCaptureWorker(snap_fn, n)
+        self._bg_capture_worker = _BgCaptureWorker(acquire_fn, n)
         self._bg_capture_worker.moveToThread(self._bg_capture_thread)
         self._bg_capture_thread.started.connect(self._bg_capture_worker.run)
         self._bg_capture_worker.progress.connect(self._on_bg_capture_progress)

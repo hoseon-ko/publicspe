@@ -259,15 +259,15 @@ class _AcquireWorker(QObject):
 
 
 class _BgCaptureWorker(QObject):
-    """N프레임 snap → 평균 → 배경 프레임 반환."""
+    """N프레임 acquire → 평균 → 배경 프레임 반환."""
 
     progress = pyqtSignal(int, int)   # current, total
     finished = pyqtSignal(object)     # averaged np.ndarray (원본 dtype)
     error    = pyqtSignal(str)
 
-    def __init__(self, snap_fn, n_frames: int):
+    def __init__(self, acquire_fn, n_frames: int):
         super().__init__()
-        self._snap_fn = snap_fn
+        self._acquire_fn = acquire_fn
         self._n = max(1, int(n_frames))
         self._stop = False
 
@@ -275,35 +275,42 @@ class _BgCaptureWorker(QObject):
         self._stop = True
 
     def run(self):
-        accum = None
-        orig_dtype = None
-        frame_count = 0
         try:
-            for i in range(self._n):
+            accum = [None]
+            orig_dtype = [None]
+            frame_count = [0]
+            
+            def _should_stop():
+                return self._stop
+                
+            def _progress_cb(idx, total, frame):
                 if self._stop:
-                    break
-                frame = np.asarray(self._snap_fn())
-
+                    return
                 # n>1일 때만 첫 프레임 스킵 (n=1이면 그냥 쓴다)
-                if self._n > 1 and i == 0:
-                    self.progress.emit(i + 1, self._n)
-                    continue
-
-                if orig_dtype is None:
-                    orig_dtype = frame.dtype
-                if accum is None:
-                    accum = frame.astype(np.float64)
+                if total > 1 and idx == 1:
+                    self.progress.emit(idx, total)
+                    return
+                
+                f = np.asarray(frame)
+                if orig_dtype[0] is None:
+                    orig_dtype[0] = f.dtype
+                if accum[0] is None:
+                    accum[0] = f.astype(np.float64)
                 else:
-                    accum += frame.astype(np.float64)
-                frame_count += 1
-                self.progress.emit(i + 1, self._n)
+                    accum[0] += f.astype(np.float64)
+                frame_count[0] += 1
+                self.progress.emit(idx, total)
 
-            if accum is not None:
-                avg = (accum / max(1, frame_count))
-                if orig_dtype is not None and np.issubdtype(orig_dtype, np.integer):
-                    info = np.iinfo(orig_dtype)
+            self._acquire_fn(_progress_cb, _should_stop)
+
+            if accum[0] is not None:
+                avg = (accum[0] / max(1, frame_count[0]))
+                if orig_dtype[0] is not None and np.issubdtype(orig_dtype[0], np.integer):
+                    info = np.iinfo(orig_dtype[0])
                     avg = np.clip(avg, info.min, info.max)
-                self.finished.emit(avg.astype(orig_dtype if orig_dtype is not None else np.uint16))
+                self.finished.emit(avg.astype(orig_dtype[0] if orig_dtype[0] is not None else np.uint16))
+            else:
+                self.error.emit("No valid frames acquired")
         except Exception as e:
             self.error.emit(str(e))
 
