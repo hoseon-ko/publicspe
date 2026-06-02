@@ -116,7 +116,11 @@ class SpeLoadWorker(QThread):
             self.progress.emit(10)
 
             # 기존 SPE 클래스로 로드
-            spe = self.spe_class(self.filepath)
+            if self.spe_class is None:
+                from core.spe_reader import SpeFile
+                spe = SpeFile(self.filepath)
+            else:
+                spe = self.spe_class(self.filepath)
 
             self.progress.emit(50)
 
