@@ -61,8 +61,10 @@ class CameraHubMixin:
         실패는 개별 try 로 격리해 다른 항목 push 를 막지 않는다.
         """
         cfg = self._cfg
+        device_id = getattr(self, "_active_device_id", "")
+        
         try:
-            saved_exp = cfg.get_camera_setting("exposure_ms", None, vendor=vendor_cfg)
+            saved_exp = cfg.get_camera_setting("exposure_ms", None, vendor=vendor_cfg, device_id=device_id)
             if saved_exp is not None:
                 self._session_hub.camera_set_exposure_ms(OWNER_DEEPALIGN, float(saved_exp))
         except Exception:
@@ -70,9 +72,9 @@ class CameraHubMixin:
 
         if caps and getattr(caps, "has_fps_control", False):
             try:
-                saved_fps_lock = bool(cfg.get_camera_setting("fps_lock", False, vendor=vendor_cfg))
+                saved_fps_lock = bool(cfg.get_camera_setting("fps_lock", False, vendor=vendor_cfg, device_id=device_id))
                 if saved_fps_lock:
-                    saved_fps = cfg.get_camera_setting("fps", None, vendor=vendor_cfg)
+                    saved_fps = cfg.get_camera_setting("fps", None, vendor=vendor_cfg, device_id=device_id)
                     if saved_fps is not None:
                         self._session_hub.camera_set_fps(OWNER_DEEPALIGN, float(saved_fps))
                 else:
@@ -82,7 +84,6 @@ class CameraHubMixin:
 
         if caps and getattr(caps, "has_temperature", False):
             try:
-                device_id = str(cfg.get("camera.last_used.device_id", "") or "")
                 saved_temp = cfg.get_camera_setting("temp_c", None, vendor=vendor_cfg, device_id=device_id)
                 if saved_temp is not None:
                     self._session_hub.camera_set_temperature(OWNER_DEEPALIGN, float(saved_temp))
@@ -99,7 +100,7 @@ class CameraHubMixin:
             }
             adc_kwargs = {}
             for cfg_key, hub_key in adc_map.items():
-                v = cfg.get_camera_setting(cfg_key, "", vendor=vendor_cfg)
+                v = cfg.get_camera_setting(cfg_key, "", vendor=vendor_cfg, device_id=device_id)
                 if v:
                     adc_kwargs[hub_key] = v
             if adc_kwargs:
