@@ -86,6 +86,8 @@ class FramePipelineMixin:
         spin_thick = getattr(self, 'spin_bg_thickness', None)
         bg_gap = int(spin_gap.value()) if spin_gap is not None else 2
         bg_thickness = int(spin_thick.value()) if spin_thick is not None else 10
+        spin_pitch = getattr(self, 'spin_pitch_nm', None)
+        pitch_nm = float(spin_pitch.value()) if spin_pitch is not None else 72.0
         
         sig_roi_rect = self._get_sig_roi_rect()
         bg_roi_rect = self._get_bg_box_roi_rect()
@@ -108,6 +110,7 @@ class FramePipelineMixin:
             "proc_bg_mode": proc_bg_mode,
             "bg_gap": bg_gap,
             "bg_thickness": bg_thickness,
+            "pitch_nm": pitch_nm,
             "sig_roi_rect": sig_roi_rect,
             "bg_roi_rect": bg_roi_rect,
         })
@@ -275,7 +278,9 @@ class FramePipelineMixin:
             # bg_mode == 'none' → bg_pixels remains None (calc_functions 내부 하위 20% 추정)
 
         # 구조체(ImageMetrics)를 통해 통계 추출 및 캐싱
-        metrics = ImageMetrics(sample, bg_2d=bg_pixels)
+        spin_pitch = getattr(self, 'spin_pitch_nm', None)
+        pitch_nm = float(spin_pitch.value()) if spin_pitch is not None else 72.0
+        metrics = ImageMetrics(sample, bg_2d=bg_pixels, pitch_nm=pitch_nm)
         stats_dict = metrics.to_dict()
                 
         calc_logger.info(

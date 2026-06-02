@@ -6,9 +6,12 @@ HIKVISION MVS SDK 기반 카메라 구현체.
 import는 성공하며, connect() 시점에 ImportError를 올린다.
 """
 
+
 from __future__ import annotations
+from logging import debug
 from core.logger import dev_logger
 
+import debugpy
 import sys
 import threading
 import time
@@ -111,6 +114,13 @@ class HikvisionCamera(BaseCamera):
         self._dispatcher = HikvisionLiveDispatcher()
         self._callback_fn = None
 
+        # snap 및 live 상태 동기화 변수들
+        self._snap_event = threading.Event()
+        self._snap_frame: Optional[np.ndarray] = None
+        self._waiting_snap = False
+        self._last_live_frame: Optional[np.ndarray] = None
+        self._live_active = False
+
     # ── BaseCamera 구현 ───────────────────────────────────────────────
 
     @property
@@ -186,6 +196,63 @@ class HikvisionCamera(BaseCamera):
         if self._cam.MV_CC_GetFloatValue("AcquisitionFrameRate", fval) == 0 and fval.fMax > fval.fMin:
             self._fps_range = (max(0.1, fval.fMin), fval.fMax)
 
+        # C++ SDK가 호출할 Python 콜백 함수 정의 (고정 콜백 등록)
+        if FrameInfoCallBack2 is None:
+            raise RuntimeError("MVS SDK 콜백 타입을 정의할 수 없습니다.")
+
+        def _py_callback(pstFrame, pUser, bAutoFree):
+            try:
+                if not pstFrame:
+                    return
+                # POINTER(MV_FRAME_OUT)에서 실제 구조체 인스턴스 획득
+                stFrame = cast(pstFrame, POINTER(MV_FRAME_OUT)).contents
+                if not stFrame:
+                    return
+
+                p_addr = stFrame.pBufAddr
+                if not p_addr:
+                    return
+
+                pBuf = cast(p_addr, c_void_p).value
+                if not pBuf:
+                    return
+
+                h = stFrame.stFrameInfo.nHeight
+                w = stFrame.stFrameInfo.nWidth
+                n = stFrame.stFrameInfo.nFrameLen
+
+                actual_pixels = h * w
+                if n < actual_pixels:
+                    return
+
+                # 프레임 데이터를 numpy 배열로 안전하게 복사
+                raw = np.frombuffer(
+                    (c_ubyte * n).from_address(pBuf), dtype=np.uint8
+                )[:actual_pixels].reshape(h, w).copy()
+
+                # 1. 라이브 스트림 데이터 처리
+                if self._live_active:
+                    self._last_live_frame = raw.copy()
+                    self._dispatcher.frame_ready.emit(raw)
+
+                # 2. 스냅 대기 중인 경우 데이터 전달 및 이벤트 세트
+                if self._waiting_snap:
+                    self._snap_frame = raw.copy()
+                    self._waiting_snap = False
+                    self._snap_event.set()
+
+            except Exception as e:
+                dev_logger.error(f"[HikvisionCamera] Callback error: {e}")
+
+        # ctypes 콜백 함수로 래핑하여 GC 방지를 위해 인스턴스 변수에 저장
+        self._callback_fn = FrameInfoCallBack2(_py_callback)
+
+        # 고정 콜백 등록 (bAutoFree=True로 설정하여 콜백 완료 후 SDK가 버퍼를 자동으로 해제하도록 함)
+        ret = self._cam.MV_CC_RegisterImageCallBackEx2(self._callback_fn, None, True)
+        if ret != 0:
+            self._callback_fn = None
+            raise RuntimeError(f"콜백 등록 실패 (에러코드: {ret})")
+
         self._connected = True
 
     def disconnect(self) -> None:
@@ -193,12 +260,18 @@ class HikvisionCamera(BaseCamera):
             self.stop_live()
         if self._cam is not None:
             try:
+                # 콜백 해제 시도
+                try:
+                    self._cam.MV_CC_RegisterImageCallBackEx2(None, None, True)
+                except Exception:
+                    pass
                 self._cam.MV_CC_CloseDevice()
                 self._cam.MV_CC_DestroyHandle()  # 필수 리소스 해제
             except Exception:
                 pass
         self._connected = False
         self._cam = None
+        self._callback_fn = None
         
         try:
             MvCamera.MV_CC_Finalize()  # SDK 글로벌 리소스 해제
@@ -226,138 +299,90 @@ class HikvisionCamera(BaseCamera):
     def snap(self) -> np.ndarray:
         if not self._connected or self._cam is None:
             raise RuntimeError("카메라가 연결되지 않았습니다")
-        # live 스트림이 없을 때만 StartGrabbing/StopGrabbing을 직접 관리한다.
-        # _grabbing=True이면 _AcquisitionWorker가 이미 스트림을 열고 있으므로
-        # StartGrabbing을 다시 호출하면 SDK 상태가 꼬이고, StopGrabbing은
-        # live 스트림을 죽인다. 두 경우 모두 _sdk_lock으로 GetImageBuffer를 직렬화한다.
-        was_grabbing = self._grabbing
-        if not was_grabbing:
-            # 단일 프레임 모드로 변경 (1 = SingleFrame)
-            self._cam.MV_CC_SetEnumValue("AcquisitionMode", 1)
+        
+        # 1. 라이브가 활성화된 경우: 가장 최근에 획득한 라이브 프레임을 즉시 복사하여 반환
+        if self._live_active:
+            start_time = time.time()
+            while self._last_live_frame is None:
+                time.sleep(0.01)
+                if time.time() - start_time > 3.0:
+                    raise RuntimeError("라이브 프레임 수신 대기 시간 초과 (3초)")
+            return self._last_live_frame.copy()
+
+        # 2. 라이브가 비활성화된 경우: 콜백 기반 동기 프레임 취득
+        self._snap_event.clear()
+        self._snap_frame = None
+        self._waiting_snap = True
+
+        with self._sdk_lock:
+            # 트리거 모드 활성화 (Software Trigger)
+            self._cam.MV_CC_SetEnumValue("AcquisitionMode", 2)  # Continuous
             self._cam.MV_CC_SetEnumValue("TriggerMode", 1)      # Trigger On
             self._cam.MV_CC_SetEnumValue("TriggerSource", 7)    # Software Trigger
+            
             ret = self._cam.MV_CC_StartGrabbing()
             if ret != 0:
+                self._waiting_snap = False
                 raise RuntimeError(f"StartGrabbing 실패 (에러코드: {ret})")
+            
             ret = self._cam.MV_CC_SetCommandValue("TriggerSoftware")
             if ret != 0:
-                print(f"소프트웨어 트리거 송신 실패: {ret}")
-        try:
-            out = MV_FRAME_OUT()
-            with self._sdk_lock:
-                ret = self._cam.MV_CC_GetImageBuffer(out, 3000)
-                if ret != 0:
-                    raise RuntimeError(f"프레임 취득 실패 (에러코드: {ret})")
-                
-                p_addr = out.pBufAddr
-                if not p_addr:
-                    self._cam.MV_CC_FreeImageBuffer(out)
-                    raise RuntimeError("프레임 버퍼 포인터가 NULL입니다.")
-                    
-                pBuf = cast(p_addr, c_void_p).value
-                if pBuf is None:
-                    self._cam.MV_CC_FreeImageBuffer(out)
-                    raise RuntimeError("프레임 버퍼 주소가 올바르지 않습니다.")
-                    
-                h, w = out.stFrameInfo.nHeight, out.stFrameInfo.nWidth
-                n = out.stFrameInfo.nFrameLen
-                
-                # 안전한 슬라이싱을 위해 크기 검증
-                actual_pixels = h * w
-                if n < actual_pixels:
-                    self._cam.MV_CC_FreeImageBuffer(out)
-                    raise RuntimeError(f"프레임 크기 부족: expected {actual_pixels}, got {n}")
-                    
-                raw = np.frombuffer(
-                    (c_ubyte * n).from_address(pBuf), dtype=np.uint8
-                )[:actual_pixels].reshape(h, w).copy()
-                
-                self._cam.MV_CC_FreeImageBuffer(out)
-            return raw
-        finally:
-            if not was_grabbing:
                 self._cam.MV_CC_StopGrabbing()
+                self._waiting_snap = False
+                raise RuntimeError(f"소프트웨어 트리거 송신 실패: {ret}")
+
+        # SDK Lock을 풀고 비동기 콜백 이벤트를 대기
+        success = self._snap_event.wait(timeout=3.0)
+
+        with self._sdk_lock:
+            self._cam.MV_CC_StopGrabbing()
+            self._waiting_snap = False
+
+        if not success or self._snap_frame is None:
+            raise RuntimeError("Snap 프레임 취득 실패 (타임아웃)")
+
+        return self._snap_frame.copy()
 
     def start_live(self, frame_cb: Callable[[np.ndarray], None]) -> None:
         if not self._connected or self._cam is None:
             raise RuntimeError("카메라가 연결되지 않았습니다")
+        
+        # 디스패처에 콜백 슬롯 연결
+        self._dispatcher.frame_ready.connect(frame_cb)
+        self._live_active = True
+        self._last_live_frame = None
+
         if self._grabbing:
             return
 
-        if FrameInfoCallBack2 is None:
-            raise RuntimeError("MVS SDK 콜백 타입을 정의할 수 없습니다.")
-
-        # 1. 디스패처에 콜백 슬롯 연결
-        self._dispatcher.frame_ready.connect(frame_cb)
-
-        # 2. C++ SDK가 호출할 Python 콜백 함수 정의
-        def _py_callback(pstFrame, pUser, bAutoFree):
-            try:
-                if not pstFrame:
-                    return
-                # POINTER(MV_FRAME_OUT)에서 실제 구조체 인스턴스 획득
-                stFrame = cast(pstFrame, POINTER(MV_FRAME_OUT)).contents
-                if not stFrame:
-                    return
-
-                p_addr = stFrame.pBufAddr
-                if not p_addr:
-                    return
-
-                pBuf = cast(p_addr, c_void_p).value
-                if not pBuf:
-                    return
-
-                h = stFrame.stFrameInfo.nHeight
-                w = stFrame.stFrameInfo.nWidth
-                n = stFrame.stFrameInfo.nFrameLen
-
-                actual_pixels = h * w
-                if n < actual_pixels:
-                    return
-
-                # 프레임 버퍼 데이터를 numpy 배열로 안전하게 복사
-                raw = np.frombuffer(
-                    (c_ubyte * n).from_address(pBuf), dtype=np.uint8
-                )[:actual_pixels].reshape(h, w).copy()
-
-                # 디스패처(GUI 스레드 소속)를 통해 프레임 시그널 방출
-                self._dispatcher.frame_ready.emit(raw)
-            except Exception as e:
-                dev_logger.error(f"[HikvisionCamera] Callback error: {e}")
-
-        # ctypes 콜백 함수로 래핑하고, GC 방지를 위해 인스턴스 변수에 저장
-        self._callback_fn = FrameInfoCallBack2(_py_callback)
-
-        # 3. SDK 설정 및 콜백 등록
+        # SDK 설정 및 스트리밍 시작
         with self._sdk_lock:
             # 연속 모드 및 트리거 모드 Off 설정 (실시간으로 프레임을 SDK 스레드가 획득하여 푸시함)
             self._cam.MV_CC_SetEnumValue("AcquisitionMode", 2)  # Continuous
             self._cam.MV_CC_SetEnumValue("TriggerMode", 0)      # Trigger Off
 
-            # 콜백 등록 (bAutoFree=True로 설정하여 콜백 완료 후 SDK가 버퍼를 자동으로 해제하도록 함)
-            ret = self._cam.MV_CC_RegisterImageCallBackEx2(self._callback_fn, None, True)
-            if ret != 0:
-                try:
-                    self._dispatcher.frame_ready.disconnect(frame_cb)
-                except Exception:
-                    pass
-                self._callback_fn = None
-                raise RuntimeError(f"콜백 등록 실패 (에러코드: {ret})")
-
             # 스트리밍 취득 시작
             ret = self._cam.MV_CC_StartGrabbing()
             if ret != 0:
+                self._live_active = False
                 try:
                     self._dispatcher.frame_ready.disconnect(frame_cb)
                 except Exception:
                     pass
-                self._callback_fn = None
                 raise RuntimeError(f"카메라 시작 실패 (에러코드: {ret})")
 
         self._grabbing = True
 
     def stop_live(self) -> None:
+        self._live_active = False
+        self._last_live_frame = None
+
+        # 디스패처 슬롯 연결 해제
+        try:
+            self._dispatcher.frame_ready.disconnect()
+        except Exception:
+            pass
+
         if not self._grabbing:
             return
 
@@ -368,14 +393,6 @@ class HikvisionCamera(BaseCamera):
                 except Exception as e:
                     dev_logger.error(f"[HikvisionCamera] StopGrabbing failed: {e}")
 
-        # 디스패처 슬롯 연결 해제
-        try:
-            self._dispatcher.frame_ready.disconnect()
-        except Exception:
-            pass
-
-        # 콜백 함수 포인터 제거 (GC 대상이 됨)
-        self._callback_fn = None
         self._grabbing = False
 
     # ── FPS 제어 ──────────────────────────────────────────────────────

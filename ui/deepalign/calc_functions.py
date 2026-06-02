@@ -192,3 +192,80 @@ def calc_function_17(arr: np.ndarray) -> float:
     mn, mx = prof.min(), prof.max()
     denom = mx + mn
     return float((mx - mn) / denom) if denom > 0 else 0.0
+
+
+def _calc_ils_nils(arr: np.ndarray, bg_arr: np.ndarray | None = None, pitch_nm: float = 72.0) -> tuple[float, float]:
+    from scipy.signal import find_peaks
+    a = np.where(np.isfinite(arr), arr, 0.0).astype(np.float64)
+    if a.size == 0:
+        return 0.0, 0.0
+    
+    flat = a.ravel()
+    mx_v = float(np.max(flat))
+    if mx_v <= 0:
+        return 0.0, 0.0
+        
+    if bg_arr is not None and bg_arr.size > 0:
+        bg = bg_arr.ravel()
+        bg = bg[np.isfinite(bg)]
+    else:
+        bg_thresh = np.percentile(flat, 20)
+        bg = flat[flat <= bg_thresh]
+    
+    bg_mean = float(np.mean(bg)) if bg.size > 0 else float(np.min(flat))
+    
+    I0 = (mx_v + bg_mean) / 2.0
+    ils_val, nils_val = 0.0, 0.0
+    if I0 > 0:
+        if a.shape[0] > 1 and a.shape[1] > 1:
+            grad_y, grad_x = np.gradient(a)
+            grad_mag = np.sqrt(grad_x**2 + grad_y**2)
+        elif a.shape[0] == 1 and a.shape[1] > 1:
+            grad_x = np.gradient(a[0])
+            grad_mag = np.abs(grad_x).reshape(1, -1)
+        elif a.shape[1] == 1 and a.shape[0] > 1:
+            grad_y = np.gradient(a[:, 0])
+            grad_mag = np.abs(grad_y).reshape(-1, 1)
+        else:
+            grad_mag = np.zeros_like(a)
+            
+        tol = 0.05 * mx_v
+        edge_mask = np.abs(a - I0) <= tol
+        
+        if np.any(edge_mask):
+            ils_px = float(np.mean(grad_mag[edge_mask])) / I0
+            
+            prof_h = a.mean(axis=0)
+            prof_v = a.mean(axis=1)
+            prom_h = 0.05 * (prof_h.max() - prof_h.min() + 1e-9)
+            prom_v = 0.05 * (prof_v.max() - prof_v.min() + 1e-9)
+            
+            ph, _ = find_peaks(prof_h, prominence=prom_h)
+            pv, _ = find_peaks(prof_v, prominence=prom_v)
+            
+            if len(ph) >= 2 and len(ph) >= len(pv):
+                pitch_px = float(np.mean(np.diff(ph)))
+            elif len(pv) >= 2:
+                pitch_px = float(np.mean(np.diff(pv)))
+            else:
+                pitch_px = 36.0 # Fallback
+                
+            pitch_nm = float(pitch_nm)
+            w_nm = pitch_nm / 2.0  
+            dx_nm = pitch_nm / pitch_px if pitch_px > 0 else 1.0
+            
+            ils_val = ils_px / dx_nm
+            nils_val = ils_val * w_nm
+            
+    return float(ils_val), float(nils_val)
+
+
+def calc_function_18(arr: np.ndarray, bg_arr: np.ndarray | None = None, pitch_nm: float = 72.0) -> float:
+    """대비 10: ILS (1/nm)"""
+    return _calc_ils_nils(arr, bg_arr, pitch_nm)[0]
+
+
+def calc_function_19(arr: np.ndarray, bg_arr: np.ndarray | None = None, pitch_nm: float = 72.0) -> float:
+    """대비 11: NILS (가변 Pitch)"""
+    return _calc_ils_nils(arr, bg_arr, pitch_nm)[1]
+

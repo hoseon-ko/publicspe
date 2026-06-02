@@ -188,7 +188,8 @@ class _FrameConvertWorker(QObject):
                                 pass
 
                     _perf_t_m0 = time.perf_counter()  # [임시 계측]
-                    metrics = ImageMetrics(sample, bg_2d=bg_pixels)
+                    pitch_nm = task.get("pitch_nm", 72.0)
+                    metrics = ImageMetrics(sample, bg_2d=bg_pixels, pitch_nm=pitch_nm)
                     stats_dict = metrics.to_dict(profile=(_perf_src == "live"))  # [임시 계측] profile
                     if _perf_src == "live":  # [임시 계측]
                         perf_tick("worker.metrics_total", (time.perf_counter() - _perf_t_m0) * 1000.0)

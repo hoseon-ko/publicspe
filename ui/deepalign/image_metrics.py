@@ -7,12 +7,13 @@ from ui.deepalign._perf_probe import perf_tick  # [임시 계측]
 class ImageMetrics:
     """이미지 혹은 ROI 배열로부터 밝기 8종·대비 9종을 계산하고 캐싱하는 구조체."""
 
-    def __init__(self, sample: np.ndarray, bg_2d: np.ndarray | None = None):
+    def __init__(self, sample: np.ndarray, bg_2d: np.ndarray | None = None, pitch_nm: float = 72.0):
         # 2D 공간 구조를 유지한 채 float64로 보관 (Laplacian·패치·프로파일 연산 필요)
         self.sample_2d = sample.astype(np.float64)
         self.has_data = self.sample_2d.size > 0 and bool(np.any(np.isfinite(self.sample_2d)))
         # 링 BG 픽셀 (1D flat). None 이면 calc_function_12/13/14 가 자동 추정.
         self.bg_flat = bg_2d.ravel().astype(np.float64) if bg_2d is not None else None
+        self.pitch_nm = float(pitch_nm)
         self._cache = {}
 
     def _get_or_compute(self, key: str, func_name: str) -> float:
@@ -35,7 +36,10 @@ class ImageMetrics:
         if key not in self._cache:
             try:
                 func = getattr(calc_functions, func_name)
-                self._cache[key] = float(func(self.sample_2d, bg_arr=self.bg_flat))
+                if key in ("opt18", "opt19"):
+                    self._cache[key] = float(func(self.sample_2d, bg_arr=self.bg_flat, pitch_nm=self.pitch_nm))
+                else:
+                    self._cache[key] = float(func(self.sample_2d, bg_arr=self.bg_flat))
             except Exception as e:
                 import sys
                 print(f"Error computing {func_name}: {e}", file=sys.stderr)
@@ -54,6 +58,7 @@ class ImageMetrics:
         ("opt14", "calc_function_14", True),
         ("opt15", "calc_function_15", False), ("opt16", "calc_function_16", False),
         ("opt17", "calc_function_17", False),
+        ("opt18", "calc_function_18", True),  ("opt19", "calc_function_19", True),
     ]
 
     def to_dict(self, profile: bool = False) -> dict:

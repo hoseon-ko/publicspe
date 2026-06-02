@@ -57,6 +57,8 @@ _OPTIONS = [
     ("Sharpness", "opt15", "#c084fc", False),
     ("Prof.H",    "opt16", "#67e8f9", False),
     ("Prof.V",    "opt17", "#fda4af", False),
+    ("ILS",       "opt18", "#fcd34d", False),
+    ("NILS",      "opt19", "#ef4444", False),
 ]
 
 class _IntAxis(pg.AxisItem):
