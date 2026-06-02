@@ -818,7 +818,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
             self._stop_hub_live()
 
         n = self.spin_bg_frames.value()
-        acquire_fn = lambda cb, stop: self._session_hub.acquire_with_progress(OWNER_DEEPALIGN, n, progress_cb=cb, should_stop=stop)
+        acquire_fn = lambda cb, stop: self._session_hub.acquire_with_progress(OWNER_DEEPALIGN, n, on_frame=cb, should_stop=stop)
 
         self.btn_bg_capture.setEnabled(False)
         self.btn_bg_load.setEnabled(False)

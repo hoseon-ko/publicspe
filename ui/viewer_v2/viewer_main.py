@@ -328,21 +328,51 @@ class SpeImageViewerV2(QWidget):
             _ps_hist = time.perf_counter()  # [임시 계측] hist update
 
             # 4. 분석 데이터 갱신 (선택 상태는 건드리지 않음 — 시각 강조는 선택 변경 시만)
+            has_profile_roi = False
+            has_hist_roi = False
+            
             sel_id = self.view.interactions._selected_roi_id
             if sel_id is not None and sel_id != -1:
-                # ① 마지막으로 선택된 전문 ROI(Line/Box/Hist) 기준으로 연산
                 roi = self.view.interactions._rois.get(sel_id)
                 if roi and self._img_data is not None:
                     self._compute_and_emit_roi(sel_id, roi)
-            elif not self._state.selected_roi.isNull():
-                # ② 선택된 ROI 없으면 기본 드래그 박스 기준
-                self._on_basic_roi_updated(self._state.selected_roi)
+                    if roi.roi_type in ('Line', 'Box'):
+                        has_profile_roi = True
+                    elif roi.roi_type == 'Hist':
+                        has_hist_roi = True
+
+            # 선택 안된 나머지 전문 ROI 처리
+            for rid, r in self.view.interactions._rois.items():
+                if rid == sel_id: continue
+                if r.roi_type in ('Line', 'Box') and not has_profile_roi:
+                    self._compute_and_emit_roi(rid, r, skip_ruler=True)
+                    has_profile_roi = True
+                elif r.roi_type == 'Hist' and not has_hist_roi:
+                    self._compute_and_emit_roi(rid, r, skip_ruler=True)
+                    has_hist_roi = True
+
+            # 아무것도 없으면 기본 드래그 박스 또는 전체 화면
+            if not self._state.selected_roi.isNull():
+                rect = self._state.selected_roi
+                x0, y0, x1, y1 = rect.left(), rect.top(), rect.right(), rect.bottom()
+                xp, yp = ImageProvider.get_roi_profile(self._img_data, x0, y0, x1, y1)
+                if xp.size > 0:
+                    if not has_profile_roi and not has_hist_roi:
+                        self.ruler_system.set_profiles(xp, yp)
+                    if not has_profile_roi:
+                        self.multi_profile_updated.emit(xp, yp)
+                    if not has_hist_roi:
+                        ix0, ix1 = int(min(x0, x1)), int(max(x0, x1))
+                        iy0, iy1 = int(min(y0, y1)), int(max(y0, y1))
+                        sub = self._img_data[iy0:iy1, ix0:ix1]
+                        if sub.size > 0:
+                            counts, bin_edges = np.histogram(sub, bins=256)
+                            self.histogram_updated.emit(counts, bin_edges)
             else:
-                # ③ 아무것도 없으면 전체 이미지 평균을 Ruler 에만 표시
-                #    외부 PlotPanel 로는 시그널을 보내지 않음
-                x_prof = np.mean(self._img_data, axis=0)
-                y_prof = np.mean(self._img_data, axis=1)
-                self.ruler_system.set_profiles(x_prof, y_prof)
+                if not has_profile_roi and not has_hist_roi:
+                    x_prof = np.mean(self._img_data, axis=0)
+                    y_prof = np.mean(self._img_data, axis=1)
+                    self.ruler_system.set_profiles(x_prof, y_prof)
 
             _ps_prof = time.perf_counter()  # [임시 계측] ROI/profile 분석
             self._refresh_display()
@@ -579,7 +609,7 @@ class SpeImageViewerV2(QWidget):
         # ── ② 분석 데이터 emit ──────────────────────────────────────
         self._compute_and_emit_roi(roi_id, roi)
 
-    def _compute_and_emit_roi(self, roi_id: int, roi):
+    def _compute_and_emit_roi(self, roi_id: int, roi, skip_ruler: bool = False):
         """선택된 ROI 기반 분석 계산 + 시그널 emit (선택·수정 공통 경로)"""
         if self._img_data is None:
             return
@@ -590,13 +620,15 @@ class SpeImageViewerV2(QWidget):
             prof = ImageProvider.get_line_profile(self._img_data, x0, y0, x1, y1)
             self.profile_updated.emit(prof, f"ROI #{roi_id} (Line)")
             # Ruler 는 Line 이어도 영역 X/Y 평균으로 표시
-            rxp, ryp = ImageProvider.get_roi_profile(self._img_data, x0, y0, x1, y1)
-            self.ruler_system.set_profiles(rxp, ryp)
+            if not skip_ruler:
+                rxp, ryp = ImageProvider.get_roi_profile(self._img_data, x0, y0, x1, y1)
+                self.ruler_system.set_profiles(rxp, ryp)
 
         elif roi.roi_type == 'Box':
             xp, yp = ImageProvider.get_roi_profile(self._img_data, x0, y0, x1, y1)
             self.multi_profile_updated.emit(xp, yp)
-            self.ruler_system.set_profiles(xp, yp)
+            if not skip_ruler:
+                self.ruler_system.set_profiles(xp, yp)
             sub = self._img_data[int(min(y0, y1)):int(max(y0, y1)),
                                  int(min(x0, x1)):int(max(x0, x1))]
             if sub.size > 0:
@@ -610,7 +642,8 @@ class SpeImageViewerV2(QWidget):
                 counts, bin_edges = np.histogram(sub, bins=256)
                 self.histogram_updated.emit(counts, bin_edges)
             # Hist ROI 선택 시 Ruler 는 비움 (히스토그램 전용 ROI)
-            self.ruler_system.set_profiles(np.array([]), np.array([]))
+            if not skip_ruler:
+                self.ruler_system.set_profiles(np.array([]), np.array([]))
 
         if self.btn_roi_range.isChecked():
             self._apply_roi_range_with_pts(x0, y0, x1, y1)
@@ -620,23 +653,29 @@ class SpeImageViewerV2(QWidget):
         if rect.isNull() or self._img_data is None:
             return
             
-        # 기본 ROI가 활성화되면 십자선/전문ROI 선택 해제
+        # 기본 ROI가 활성화되면 십자선 선택 해제
         self._state.toggle_crosshair(False)
+        
+        has_profile_roi = any(r.roi_type in ('Line', 'Box') for r in self.view.interactions._rois.values())
+        has_hist_roi = any(r.roi_type == 'Hist' for r in self.view.interactions._rois.values())
         
         x0, y0, x1, y1 = rect.left(), rect.top(), rect.right(), rect.bottom()
         xp, yp = ImageProvider.get_roi_profile(self._img_data, x0, y0, x1, y1)
         
         if xp.size > 0:
-            self.ruler_system.set_profiles(xp, yp)
-            self.multi_profile_updated.emit(xp, yp)
+            if not has_profile_roi and not has_hist_roi:
+                self.ruler_system.set_profiles(xp, yp)
             
-            # 기본 ROI에 대해서도 히스토그램 계산 후 전송
-            ix0, ix1 = int(min(x0, x1)), int(max(x0, x1))
-            iy0, iy1 = int(min(y0, y1)), int(max(y0, y1))
-            sub = self._img_data[iy0:iy1, ix0:ix1]
-            if sub.size > 0:
-                counts, bin_edges = np.histogram(sub, bins=256)
-                self.histogram_updated.emit(counts, bin_edges)
+            if not has_profile_roi:
+                self.multi_profile_updated.emit(xp, yp)
+            
+            if not has_hist_roi:
+                ix0, ix1 = int(min(x0, x1)), int(max(x0, x1))
+                iy0, iy1 = int(min(y0, y1)), int(max(y0, y1))
+                sub = self._img_data[iy0:iy1, ix0:ix1]
+                if sub.size > 0:
+                    counts, bin_edges = np.histogram(sub, bins=256)
+                    self.histogram_updated.emit(counts, bin_edges)
             
         if self.btn_roi_range.isChecked():
             self._apply_roi_range_with_pts(x0, y0, x1, y1)
