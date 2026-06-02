@@ -190,6 +190,7 @@ class PicamCameraAdapter(CameraHal):
             frames = cam._wrapper.acquire_images(
                 nframes=frame_count,
                 progress_cb=progress_cb,
+                should_stop=should_stop,
             )
             cam_logger.info(f"[PicamCameraAdapter] acquire finished frames={len(frames)}")
             return frames

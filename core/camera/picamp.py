@@ -525,7 +525,8 @@ class PicamCameraWrapper:
         self,
         nframes: int,
         timeout_s: Optional[float] = None,
-        progress_cb: Optional[Callable[[int, int], None]] = None,
+        progress_cb: Optional[Callable[[int, int, Any], None]] = None,
+        should_stop: Optional[Callable[[], bool]] = None,
     ):
         """이미지를 여러 장 취득해서 리스트로 반환한다.
         timeout_s=None이면 노출+리드아웃 기반 자동 계산."""
@@ -539,9 +540,11 @@ class PicamCameraWrapper:
         if timeout_s is None:
             timeout_s = self._auto_timeout()
         if n == 1:
+            if should_stop and should_stop():
+                return []
             frame = self.snap(timeout=float(timeout_s))
             if progress_cb is not None:
-                progress_cb(1, 1)
+                progress_cb(1, 1, frame)
             return [frame]
         frames = []
         try:
@@ -551,9 +554,13 @@ class PicamCameraWrapper:
         cam.start_acquisition()
         try:
             for idx in range(n):
+                if should_stop and should_stop():
+                    break
                 t0 = time.time()
                 got = False
                 while time.time() - t0 <= float(timeout_s):
+                    if should_stop and should_stop():
+                        break
                     try:
                         got = cam.wait_for_frame(timeout=0.05)
                         if got:
@@ -562,10 +569,14 @@ class PicamCameraWrapper:
                         pass
                     time.sleep(0.01)  # GIL 양보
                 
+                if should_stop and should_stop():
+                    break
+
                 if got:
-                    frames.append(cam.read_oldest_image())
+                    frame = cam.read_oldest_image()
+                    frames.append(frame)
                     if progress_cb is not None:
-                        progress_cb(idx + 1, n)
+                        progress_cb(idx + 1, n, frame)
                 else:
                     raise RuntimeError(
                         f"프레임 {idx+1}/{n} 대기 타임아웃 ({timeout_s:.1f}초) — "
