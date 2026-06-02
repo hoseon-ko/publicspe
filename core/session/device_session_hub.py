@@ -222,11 +222,11 @@ class DeviceSessionHub(QObject):
         on_frame: Callable[[int, int, object], None] | None = None,
         should_stop: Callable[[], bool] | None = None,
     ) -> list:
+        normalized = validate_owner(owner)
+        count = max(1, int(frame_count))
+        
         with self._camera_lock:
-            normalized = validate_owner(owner)
             hal = self._require_camera_hal()
-            count = max(1, int(frame_count))
-
             if not self.request_exclusive_mode(normalized, mode="acquire"):
                 raise HalCommandError("Cannot acquire: exclusive owner conflict")
 
@@ -235,13 +235,16 @@ class DeviceSessionHub(QObject):
                 f"acquisition started: owner={normalized}, frames={count}", source="hub"
             )
 
-            try:
-                frames = hal.acquire(
-                    frame_count=count,
-                    progress_cb=on_frame,
-                    should_stop=should_stop,
-                )
+        try:
+            # _camera_lock을 해제한 상태로 블로킹되는 acquire를 실행합니다.
+            # (UI 스레드의 온도 폴링 등이 _camera_lock을 대기하므로 락을 들고 있으면 UI가 프리징됩니다)
+            frames = hal.acquire(
+                frame_count=count,
+                progress_cb=on_frame,
+                should_stop=should_stop,
+            )
 
+            with self._camera_lock:
                 if frames:
                     self._last_frame = frames[-1]
                     self.publish_frame(frames[-1], frames[-1], source="hub")
@@ -250,14 +253,16 @@ class DeviceSessionHub(QObject):
                     f"acquisition finished: owner={normalized}, frames={len(frames)}",
                     source="hub",
                 )
-                return frames
-            except Exception as exc:
-                dev_logger.exception(
-                    f"[DeviceSessionHub] acquire failed owner={normalized}, frames={count}"
-                )
+            return frames
+        except Exception as exc:
+            dev_logger.exception(
+                f"[DeviceSessionHub] acquire failed owner={normalized}, frames={count}"
+            )
+            with self._camera_lock:
                 self.publish_error("acquisition", f"acquire failed: {exc}", source="hub")
-                raise
-            finally:
+            raise
+        finally:
+            with self._camera_lock:
                 self.mark_acquisition_finished(normalized, source="hub")
                 self.release_exclusive_mode(normalized, mode="acquire")
 
