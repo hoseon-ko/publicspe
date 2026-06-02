@@ -82,7 +82,8 @@ class CameraHubMixin:
 
         if caps and getattr(caps, "has_temperature", False):
             try:
-                saved_temp = cfg.get_camera_setting("temp_c", None, vendor=vendor_cfg)
+                device_id = str(cfg.get("camera.last_used.device_id", "") or "")
+                saved_temp = cfg.get_camera_setting("temp_c", None, vendor=vendor_cfg, device_id=device_id)
                 if saved_temp is not None:
                     self._session_hub.camera_set_temperature(OWNER_DEEPALIGN, float(saved_temp))
             except Exception:

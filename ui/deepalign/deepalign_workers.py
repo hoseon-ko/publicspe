@@ -277,20 +277,29 @@ class _BgCaptureWorker(QObject):
     def run(self):
         accum = None
         orig_dtype = None
+        frame_count = 0
         try:
             for i in range(self._n):
                 if self._stop:
                     break
                 frame = np.asarray(self._snap_fn())
+
+                # n>1일 때만 첫 프레임 스킵 (n=1이면 그냥 쓴다)
+                if self._n > 1 and i == 0:
+                    self.progress.emit(i + 1, self._n)
+                    continue
+
                 if orig_dtype is None:
                     orig_dtype = frame.dtype
                 if accum is None:
                     accum = frame.astype(np.float64)
                 else:
                     accum += frame.astype(np.float64)
+                frame_count += 1
                 self.progress.emit(i + 1, self._n)
+
             if accum is not None:
-                avg = (accum / max(1, self._n))
+                avg = (accum / max(1, frame_count))
                 if orig_dtype is not None and np.issubdtype(orig_dtype, np.integer):
                     info = np.iinfo(orig_dtype)
                     avg = np.clip(avg, info.min, info.max)

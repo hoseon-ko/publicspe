@@ -943,7 +943,8 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         exposure = float(c.get_camera_setting("exposure_ms", 20.0,  vendor=new_vendor))
         fps      = float(c.get_camera_setting("fps",         30.0,  vendor=new_vendor))
         fps_lock = bool(c.get_camera_setting("fps_lock",     False, vendor=new_vendor))
-        temp     = float(c.get_camera_setting("temp_c",     -70.0,  vendor=new_vendor))
+        device_id = str(c.get("camera.last_used.device_id", "") or "")
+        temp     = float(c.get_camera_setting("temp_c",     -70.0,  vendor=new_vendor, device_id=device_id))
         adc_qual = str(c.get_camera_setting("adc.quality", "", vendor=new_vendor))
         adc_spd  = str(c.get_camera_setting("adc.speed",   "", vendor=new_vendor))
         adc_gain = str(c.get_camera_setting("adc.gain",    "", vendor=new_vendor))
@@ -990,7 +991,8 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         c.set_last_camera(vendor, device_id=getattr(self, "_active_device_id", ""))
         c.set_camera_setting("exposure_ms", float(self.spin_exposure.value()), vendor=vendor)
         c.set_camera_setting("fps",         float(self.spin_fps.value()),      vendor=vendor)
-        c.set_camera_setting("temp_c",      float(self.spin_temp.value()),     vendor=vendor)
+        device_id = str(c.get("camera.last_used.device_id", "") or "")
+        c.set_camera_setting("temp_c",      float(self.spin_temp.value()),     vendor=vendor, device_id=device_id)
         
         c.set("tabs.deepalign.laser_temp_alarm.enabled", self.chk_laser_temp_alarm.isChecked())
         c.set("tabs.deepalign.laser_temp_alarm.min", float(self.spin_laser_temp_alarm_min.value()))
@@ -1057,10 +1059,11 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
             c = self._cfg
             # Camera — last_used vendor 기준으로 그 vendor 의 설정만 로드
             vendor    = str(c.get("camera.last_used.vendor", "Simulation"))
+            device_id = str(c.get("camera.last_used.device_id", "") or "")
             exposure  = float(c.get_camera_setting("exposure_ms", 20.0,  vendor=vendor))
             fps       = float(c.get_camera_setting("fps",         30.0,  vendor=vendor))
             fps_lock  = bool(c.get_camera_setting("fps_lock",     False, vendor=vendor))
-            temp      = float(c.get_camera_setting("temp_c",     -70.0,  vendor=vendor))
+            temp      = float(c.get_camera_setting("temp_c",     -70.0,  vendor=vendor, device_id=device_id))
             
             laser_alarm_en = bool(c.get("tabs.deepalign.laser_temp_alarm.enabled", False))
             laser_alarm_min = float(c.get("tabs.deepalign.laser_temp_alarm.min", -70.0))

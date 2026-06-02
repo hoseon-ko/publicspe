@@ -236,14 +236,11 @@ class DeviceSessionHub(QObject):
             )
 
             try:
-                frames = []
-                for idx in range(count):
-                    if should_stop is not None and should_stop():
-                        break
-                    frame = hal.snap()
-                    frames.append(frame)
-                    if on_frame is not None:
-                        on_frame(idx + 1, count, frame)
+                frames = hal.acquire(
+                    frame_count=count,
+                    progress_cb=on_frame,
+                    should_stop=should_stop,
+                )
 
                 if frames:
                     self._last_frame = frames[-1]

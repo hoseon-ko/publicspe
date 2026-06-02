@@ -159,12 +159,17 @@ class HikvisionCameraAdapter(CameraHal):
             cam_logger.exception("[HikvisionCameraAdapter] snap failed")
             raise HalCommandError(f"Hikvision snap failed: {exc}", cause=exc) from exc
 
-    def acquire(self, frame_count: int) -> list[np.ndarray]:
+    def acquire(self, frame_count: int, progress_cb=None, should_stop=None) -> list[np.ndarray]:
         cam_logger.info(f"[HikvisionCameraAdapter] acquire start frame_count={frame_count}")
         count = max(1, int(frame_count))
         frames: list[np.ndarray] = []
-        for _ in range(count):
-            frames.append(self.snap())
+        for idx in range(count):
+            if should_stop and should_stop():
+                break
+            frame = self.snap()
+            frames.append(frame)
+            if progress_cb is not None:
+                progress_cb(idx + 1, count, frame)
         cam_logger.info(f"[HikvisionCameraAdapter] acquire finished frames={len(frames)}")
         return frames
 

@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import QGraphicsItem, QGraphicsRectItem, QGraphicsLineItem
 from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QObject
 from PyQt6.QtGui import QPen, QColor, QBrush
 from ui.viewer_v2.viewer_state import ViewerState
-from ui.roi_items import LineROI, BoxROI, HistROI
+from ui.roi_items import LineROI, BoxROI, HistROI, _snap_45, _snap_square
 
 class InteractionLayer(QObject):
     """
@@ -212,9 +212,10 @@ class InteractionLayer(QObject):
         self._create_preview(pos)
         return True
 
-    def update_action(self, pos: QPointF):
+    def update_action(self, pos: QPointF, modifiers: Qt.KeyboardModifiers = Qt.KeyboardModifier.NoModifier):
+        shift_pressed = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
         if self._is_drawing:
-            self._update_preview(self._start_pos, pos)
+            self._update_preview(self._start_pos, pos, shift=shift_pressed)
             # 드래그 중에 실시간으로 State를 업데이트하면 렉이 발생하므로 비주얼만 업데이트함
         elif self._is_moving_basic:
             delta = pos - self._start_pos
@@ -228,9 +229,10 @@ class InteractionLayer(QObject):
             delta = pos - self._start_pos
             self._proc_bg_item.setRect(self._start_proc_rect.translated(delta))
 
-    def end_action(self, pos: QPointF):
+    def end_action(self, pos: QPointF, modifiers: Qt.KeyboardModifiers = Qt.KeyboardModifier.NoModifier):
         if self._is_drawing:
             self._is_drawing = False
+            shift = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
 
             if not self._roi_mode:
                 rect = QRectF(self._start_pos, pos).normalized()
@@ -240,7 +242,7 @@ class InteractionLayer(QObject):
                     self._state.update_roi(QRectF())
 
             if self._roi_mode:
-                self._finalize_roi(self._start_pos, pos)
+                self._finalize_roi(self._start_pos, pos, shift=shift)
             self._clear_preview()
 
             dist = np.hypot(pos.x()-self._start_pos.x(), pos.y()-self._start_pos.y())
@@ -287,19 +289,29 @@ class InteractionLayer(QObject):
         self._preview_item.setPen(pen)
         self._scene.addItem(self._preview_item)
 
-    def _update_preview(self, p0: QPointF, p1: QPointF):
+    def _update_preview(self, p0: QPointF, p1: QPointF, shift: bool = False):
         if not self._preview_item: return
         if self._roi_mode == 'line':
-            self._preview_item.setLine(p0.x(), p0.y(), p1.x(), p1.y())
+            x0, y0 = p0.x(), p0.y()
+            x1, y1 = p1.x(), p1.y()
+            if shift:
+                x1, y1 = _snap_45(x0, y0, x1, y1)
+            self._preview_item.setLine(x0, y0, x1, y1)
         else:
-            self._preview_item.setRect(QRectF(p0, p1).normalized())
+            if shift and self._roi_mode == 'box':
+                # 부호 보존 스냅: p0 고정, 드래그 방향(사분면) 유지하며 정사각형 확장
+                # ← normalized() 를 먼저 하면 방향 정보가 소실됨 → 여기서 하면 안 됨
+                sdx, sdy = _snap_square(p1.x() - p0.x(), p1.y() - p0.y())
+                p1 = QPointF(p0.x() + sdx, p0.y() + sdy)
+            rect = QRectF(p0, p1).normalized()
+            self._preview_item.setRect(rect)
 
     def _clear_preview(self):
         if self._preview_item:
             self._scene.removeItem(self._preview_item)
             self._preview_item = None
 
-    def _finalize_roi(self, p0: QPointF, p1: QPointF):
+    def _finalize_roi(self, p0: QPointF, p1: QPointF, shift: bool = False):
         # ── Proc 전용 모드: _rois에 등록 안 함, 전용 아이템만 갱신 ──
         if self._roi_mode in ('proc_signal', 'proc_bg'):
             rect = QRectF(p0, p1).normalized()
@@ -314,6 +326,16 @@ class InteractionLayer(QObject):
                 self._proc_bg_item.show()
                 self.proc_roi_updated.emit('bg', rect)
             return
+
+        # Shift 스냅: preview 와 동일한 스냅을 최종 좌표에도 적용
+        x1, y1 = p1.x(), p1.y()
+        if shift:
+            if self._roi_mode == 'line':
+                x1, y1 = _snap_45(p0.x(), p0.y(), x1, y1)
+            elif self._roi_mode == 'box':
+                dx, dy = _snap_square(x1 - p0.x(), y1 - p0.y())
+                x1, y1 = p0.x() + dx, p0.y() + dy
+        p1 = QPointF(x1, y1)
 
         dist = np.hypot(p1.x()-p0.x(), p1.y()-p0.y())
         if dist < self._min_roi_size: return

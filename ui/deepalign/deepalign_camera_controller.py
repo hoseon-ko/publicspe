@@ -261,7 +261,7 @@ class CameraControllerMixin(CameraHubMixin):
     def _on_acquire_progress(self, cur: int, total: int, raw):
         self._acq.cur = int(cur)
         self._acq.total = max(1, int(total))
-        self._acq.frame_started_at = time.monotonic()
+        # frame_started_at은 _on_acquire_frame_started에서만 설정 (중복 설정 방지)
 
         elapsed = max(0.0, time.monotonic() - self._acq.started_at)
         if self._acq.cur > 0:
@@ -706,7 +706,8 @@ class CameraControllerMixin(CameraHubMixin):
                 try:
                     save_val = float(setpoint) if setpoint is not None else target
                     v = self.cb_vendor.currentText().strip()
-                    self._cfg.set_camera_setting("temp_c", save_val, vendor=v)
+                    device_id = str(self._cfg.get("camera.last_used.device_id", "") or "")
+                    self._cfg.set_camera_setting("temp_c", save_val, vendor=v, device_id=device_id)
                     self._cfg.save()
                 except Exception:
                     dev_logger.exception("[DeepAlign] temperature save failed")

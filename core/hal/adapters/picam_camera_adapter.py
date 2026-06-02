@@ -183,14 +183,19 @@ class PicamCameraAdapter(CameraHal):
             cam_logger.exception("[PicamCameraAdapter] snap failed")
             raise HalCommandError(f"Picam snap failed: {exc}", cause=exc) from exc
 
-    def acquire(self, frame_count: int) -> list[np.ndarray]:
+    def acquire(self, frame_count: int, progress_cb=None, should_stop=None) -> list[np.ndarray]:
         cam_logger.info(f"[PicamCameraAdapter] acquire start frame_count={frame_count}")
-        count = max(1, int(frame_count))
-        frames: list[np.ndarray] = []
-        for _ in range(count):
-            frames.append(self.snap())
-        cam_logger.info(f"[PicamCameraAdapter] acquire finished frames={len(frames)}")
-        return frames
+        cam = self._require_connected()
+        try:
+            frames = cam._wrapper.acquire_images(
+                nframes=frame_count,
+                progress_cb=progress_cb,
+            )
+            cam_logger.info(f"[PicamCameraAdapter] acquire finished frames={len(frames)}")
+            return frames
+        except Exception as exc:
+            cam_logger.exception("[PicamCameraAdapter] acquire failed")
+            raise HalCommandError(f"Picam acquire failed: {exc}", cause=exc) from exc
 
     def set_range(self, vmin: float | None, vmax: float | None) -> None:
         self._range = (vmin, vmax)

@@ -125,7 +125,7 @@ class BaseView(QGraphicsView):
 
         # 2. 인터랙션 처리
         if self._is_selecting:
-            self.interactions.update_action(scene_pos)
+            self.interactions.update_action(scene_pos, event.modifiers())
         elif self._is_panning:
             delta = event.position() - self._last_mouse_pos
             self._last_mouse_pos = event.position()
@@ -137,7 +137,7 @@ class BaseView(QGraphicsView):
     def mouseReleaseEvent(self, event: QMouseEvent):
         if self._is_selecting:
             self._is_selecting = False
-            self.interactions.end_action(self.mapToScene(event.pos()))
+            self.interactions.end_action(self.mapToScene(event.pos()), event.modifiers())
         
         if self._is_panning:
             self._is_panning = False

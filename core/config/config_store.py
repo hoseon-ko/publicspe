@@ -131,21 +131,39 @@ class ConfigStore:
 
     # ── 카메라 vendor-aware 헬퍼 ──────────────────────────
     def get_camera_setting(self, name: str, default: Any = None,
-                           vendor: str | None = None) -> Any:
-        """현재 또는 지정된 vendor 의 카메라 설정을 반환.
+                           vendor: str | None = None, device_id: str | None = None) -> Any:
+        """현재 또는 지정된 vendor/device_id 의 카메라 설정을 반환.
 
-        vendor 미지정 시 `camera.last_used.vendor` 사용.
+        vendor/device_id 미지정 시 `camera.last_used` 사용.
+        device_id별 설정 없으면 vendor 레벨로 폴백.
         """
         if vendor is None:
             vendor = str(self.get("camera.last_used.vendor", "Simulation") or "Simulation")
+        if device_id is None:
+            device_id = str(self.get("camera.last_used.device_id", "") or "")
+
+        # device_id별 설정이 있으면 사용
+        if device_id:
+            path = f"camera.vendors.{vendor}.devices.{device_id}.{name}"
+            val = self.get(path, None)
+            if val is not None:
+                return val
+
+        # 폴백: vendor 레벨
         return self.get(f"camera.vendors.{vendor}.{name}", default)
 
     def set_camera_setting(self, name: str, value: Any,
-                           vendor: str | None = None) -> None:
-        """현재 또는 지정된 vendor 의 카메라 설정을 저장."""
+                           vendor: str | None = None, device_id: str | None = None) -> None:
+        """현재 또는 지정된 vendor/device_id 의 카메라 설정을 저장."""
         if vendor is None:
             vendor = str(self.get("camera.last_used.vendor", "Simulation") or "Simulation")
-        self.set(f"camera.vendors.{vendor}.{name}", value)
+        if device_id is None:
+            device_id = str(self.get("camera.last_used.device_id", "") or "")
+
+        if device_id:
+            self.set(f"camera.vendors.{vendor}.devices.{device_id}.{name}", value)
+        else:
+            self.set(f"camera.vendors.{vendor}.{name}", value)
 
     def set_last_camera(self, vendor: str, device_id: str = "") -> None:
         """마지막 사용 카메라 기록 — 다음 부팅 자동 재연결용."""
