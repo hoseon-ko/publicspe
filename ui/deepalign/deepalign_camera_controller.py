@@ -17,6 +17,7 @@ from pathlib import Path
 import time
 
 from PyQt6.QtCore import QThread, pyqtSlot
+from PyQt6.QtWidgets import QApplication
 
 from core.logger import dev_logger
 from core.session.ownership import OWNER_DEEPALIGN

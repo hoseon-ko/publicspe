@@ -18,7 +18,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget, QSplitter,
     QFileDialog, QListWidgetItem, QMessageBox,
-    QFrame, QLabel, QProgressBar, QPushButton,
+    QFrame, QLabel, QProgressBar, QPushButton, QApplication,
 )
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal, QSize, QEvent, QUrl
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest
