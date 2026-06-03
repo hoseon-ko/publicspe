@@ -402,6 +402,22 @@ class FileListPanel(QWidget):
         )
         self.lbl_filename.setWordWrap(True)
         info_layout.addWidget(self.lbl_filename)
+
+        self.lbl_dirpath = QLabel("")
+        self.lbl_dirpath.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_dirpath.setStyleSheet(
+            "color: #a0a0a0; font-size: 11px; border: none; background: transparent;"
+        )
+        self.lbl_dirpath.setWordWrap(True)
+        info_layout.addWidget(self.lbl_dirpath)
+
+        self.lbl_frames = QLabel("")
+        self.lbl_frames.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_frames.setStyleSheet(
+            "color: #a0a0a0; font-size: 11px; border: none; background: transparent;"
+        )
+        info_layout.addWidget(self.lbl_frames)
+
         layout.addWidget(self.info_box)
 
         # ── 구분선 ──

@@ -286,6 +286,9 @@ class CameraControllerMixin(CameraHubMixin):
             source="acquire",
             skip_calc=not is_last
         )
+        
+        # 찰나의 순간에도 프로그레스 텍스트가 즉시 강제 업데이트 되도록 이벤트 루프 처리
+        QApplication.processEvents()
 
     def _on_acquire_finished(self, frames: list):
         self._acq.running = False

@@ -154,6 +154,9 @@ class _BgProgressOverlay(QWidget):
             elapsed = time.monotonic() - self._start_time
             remaining = (total - cur) * (elapsed / cur)
             self.lbl_eta.setText(f"Est. remaining:  {remaining:.1f} s")
+        
+        # 찰나의 순간에도 UI(프로그레스 바)가 즉시 강제 업데이트 되도록 이벤트 루프 처리
+        QApplication.processEvents()
 
     # ── internals ─────────────────────────────────────────────────────
 
@@ -2117,13 +2120,13 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
     def _on_file_selected(self, spe_item: SpeFileItem, frame_idx: int):
         frame = spe_item.spe_obj.frame(frame_idx)
         if frame is not None:
-            self.cam_viewer.set_source_image(frame)
+            self.cam_viewer.set_image_first(frame)
             self._update_analysis_metrics(frame)
 
     def _on_frame_changed(self, spe_item: SpeFileItem, frame_idx: int):
         frame = spe_item.spe_obj.frame(frame_idx)
         if frame is not None:
-            self.cam_viewer.set_source_image(frame)
+            self.cam_viewer.set_image(frame)
             self._update_analysis_metrics(frame)
 
     def _on_an_roi_range_toggled(self, checked: bool):
