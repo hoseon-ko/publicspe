@@ -28,25 +28,33 @@ from ui.deepalign.deepalign_timing import clamp_frame_elapsed, overall_progress_
 from ui.deepalign.deepalign_workers import _AcquireWorker
 from core.workers import SnapWorker
 
-def _collect_device_snapshot(hub) -> dict:
+def _collect_device_snapshot(self_obj) -> dict:
     snap = {}
-    if hub is None:
-        return snap
-    if hasattr(hub, 'is_acs_connected') and hub.is_acs_connected():
-        try:
-            snap["ACS_mm"] = hub.acs_get_positions()
-        except Exception:
-            pass
-    if hasattr(hub, 'is_kimm_connected') and hub.is_kimm_connected():
-        try:
-            snap["KIMM_Z_um"] = hub.kimm_get_z()
-        except Exception:
-            pass
-    if hasattr(hub, 'is_pico_connected') and hub.is_pico_connected():
-        try:
-            snap["Pico"] = {f"M{i}": hub.pico_get_position(i) for i in range(1, 5)}
-        except Exception:
-            pass
+    hub = getattr(self_obj, '_session_hub', None)
+    if hub is not None:
+        if hasattr(hub, 'is_acs_connected') and hub.is_acs_connected():
+            try:
+                snap["ACS_mm"] = hub.acs_get_positions()
+            except Exception:
+                pass
+        if hasattr(hub, 'is_kimm_connected') and hub.is_kimm_connected():
+            try:
+                snap["KIMM_Z_um"] = hub.kimm_get_z()
+            except Exception:
+                pass
+        if hasattr(hub, 'is_pico_connected') and hub.is_pico_connected():
+            try:
+                snap["Pico"] = {f"M{i}": hub.pico_get_position(i) for i in range(1, 5)}
+            except Exception:
+                pass
+                
+    laser = getattr(self_obj, 'laser_controller', None)
+    if laser is not None and hasattr(laser, 'is_polling') and laser.is_polling():
+        laser_snap = laser.states.copy()
+        if "temp" in laser_snap:
+            laser_snap["disk_temp"] = laser_snap.pop("temp")
+        snap["Laser"] = laser_snap
+        
     return snap
 
 
@@ -429,7 +437,7 @@ class CameraControllerMixin(CameraHubMixin):
             creator="DeepAlign",
             software="SpeAnalyze-DeepAlign",
             extra_metadata=extra,
-            device_snapshot=_collect_device_snapshot(self._session_hub),
+            device_snapshot=_collect_device_snapshot(self),
         )
 
     def _on_save_current_spe(self) -> None:
@@ -458,8 +466,16 @@ class CameraControllerMixin(CameraHubMixin):
             path = self._save_acquire_spe([raw], name_base="SNAP")
             self.spe_saved.emit(str(path))
             dev_logger.info(f"[DeepAlign] Saved current frame → {path}")
+            QMessageBox.information(
+                self, 'Save Complete',
+                f"SPE 파일이 성공적으로 저장되었습니다.\n\n경로:\n{path}"
+            )
         except Exception as e:
             dev_logger.exception(f"[DeepAlign] Save SPE 실패: {e}")
+            QMessageBox.warning(
+                self, 'Save Error',
+                f"저장 중 오류가 발생했습니다:\n{e}"
+            )
 
     def _on_save_as_clicked(self) -> None:
         """viewer toolbar 의 💾 Save As → 현재 표시 raw 1프레임을 SPE 저장."""
@@ -521,9 +537,17 @@ class CameraControllerMixin(CameraHubMixin):
             )
             
             self.spe_saved.emit(str(path))
-            dev_logger.info(f"[DeepAlign] Saved current frame → {path}")
+            dev_logger.info(f"[DeepAlign] Saved current frame as → {path}")
+            QMessageBox.information(
+                self, 'Save Complete',
+                f"SPE 파일이 성공적으로 저장되었습니다.\n\n경로:\n{path}"
+            )
         except Exception as e:
             dev_logger.exception(f"[DeepAlign] Save As 실패: {e}")
+            QMessageBox.warning(
+                self, 'Save Error',
+                f"저장 중 오류가 발생했습니다:\n{e}"
+            )
 
     def _start_hub_live(self) -> None:
         if self._session_hub is None:

@@ -783,47 +783,37 @@ class AcsStagePanel(QWidget):
         self.btn_kin_calc.setEnabled(not locked)
 
     def _on_enable_all(self):
-        if self._session_hub and self._session_hub.is_acs_connected():
+        ctrl = self._ctrl_ref[0]
+        if ctrl:
             try:
-                self._session_hub.acs_enable_all()
-                self._auto_disable_timer.start()
-                self._log("[ACS] ENABLE ALL via hub (5분 후 자동 서보 OFF 예약)")
+                ctrl.enable_all()
+                self._log("[ACS] ENABLE ALL 처리 대기 중...")
+                if not ctrl.wait_for_enabled_all(timeout_ms=10000):
+                    self._log("[ACS] ENABLE ALL 타임아웃 (10초)")
+                else:
+                    self._auto_disable_timer.start()
+                    self._log("[ACS] ENABLE ALL 완료 (5분 후 자동 서보 OFF 예약)")
             except Exception as e:
                 self._log(f"[ACS] ENABLE ALL 오류: {e}")
-            return
-        ctrl = self._ctrl_ref[0]
-        if ctrl:
-            ctrl.enable_all()
-            self._auto_disable_timer.start()
-            self._log("[ACS] ENABLE ALL (5분 후 자동 서보 OFF 예약)")
 
     def _on_disable_all(self):
-        if self._session_hub and self._session_hub.is_acs_connected():
+        ctrl = self._ctrl_ref[0]
+        if ctrl:
             try:
-                self._session_hub.acs_disable_all()
+                ctrl.disable_all()
                 self._auto_disable_timer.stop()
-                self._log("[ACS] DISABLE ALL via hub")
+                self._log("[ACS] DISABLE ALL 완료")
             except Exception as e:
                 self._log(f"[ACS] DISABLE ALL 오류: {e}")
-            return
-        ctrl = self._ctrl_ref[0]
-        if ctrl:
-            ctrl.disable_all()
-            self._auto_disable_timer.stop()
-            self._log("[ACS] DISABLE ALL")
 
     def _on_stop_all(self):
-        if self._session_hub and self._session_hub.is_acs_connected():
-            try:
-                self._session_hub.acs_stop_all()
-                self._log("[ACS] STOP ALL via hub")
-            except Exception as e:
-                self._log(f"[ACS] STOP ALL 오류: {e}")
-            return
         ctrl = self._ctrl_ref[0]
         if ctrl:
-            ctrl.stop_all()
-            self._log("[ACS] STOP ALL 실행")
+            try:
+                ctrl.stop_all()
+                self._log("[ACS] STOP ALL 실행")
+            except Exception as e:
+                self._log(f"[ACS] STOP ALL 오류: {e}")
 
     # ── 키네마틱 계산 / 이동 ──────────────────────────────────────────
 
@@ -967,17 +957,13 @@ class AcsStagePanel(QWidget):
         self._log(f"[KINEMATICS] ❌ KINEMATIC MOVE 오류: {msg}")
 
     def _on_auto_disable(self):
-        if self._session_hub and self._session_hub.is_acs_connected():
-            try:
-                self._session_hub.acs_disable_all()
-                self._log("[ACS] ⏱ 자동 서보 OFF (5분 대기 타임아웃) via hub")
-            except Exception as e:
-                self._log(f"[ACS] 자동 서보 OFF 오류: {e}")
-            return
         ctrl = self._ctrl_ref[0]
         if ctrl and ctrl.is_connected:
-            ctrl.disable_all()
-            self._log("[ACS] ⏱ 자동 서보 OFF (5분 대기 타임아웃)")
+            try:
+                ctrl.disable_all()
+                self._log("[ACS] ⏱ 자동 서보 OFF (5분 대기 타임아웃)")
+            except Exception as e:
+                self._log(f"[ACS] 자동 서보 OFF 오류: {e}")
 
     # ── 설정 ─────────────────────────────────────────────────────────
 

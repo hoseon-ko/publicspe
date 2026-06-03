@@ -585,7 +585,7 @@ class AcsStageController(QObject):
             return self._last_states[axis]["moving"]
         return False
 
-    def wait_for_enabled_all(self, timeout_ms: int = 2000) -> bool:
+    def wait_for_enabled_all(self, timeout_ms: int = 10000) -> bool:
         start = time.time()
         app = QApplication.instance()
         main_thread = app.thread() if app is not None else None

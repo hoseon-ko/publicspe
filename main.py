@@ -102,8 +102,8 @@ def main():
     clear_ui_callbacks()
     sys_logger.info("SpeAnalyze Application Started.")
     app = QApplication(sys.argv)
-    app.setOrganizationName("SpeAnalyze")
-    app.setApplicationName("SpeAnalyze")
+    app.setOrganizationName("DeepAlign")
+    app.setApplicationName("DeepAlign")
     app.setStyle("Fusion")
     app.setStyleSheet(DARK_THEME_QSS)
 

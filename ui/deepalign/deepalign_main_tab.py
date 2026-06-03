@@ -859,7 +859,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         stem   = self.edit_bg_filename.text().strip() or "background"
         fpath  = str(Path(folder) / f"{stem}.spe")
         try:
-            save_spe(fpath, [self._bg_frame], device_snapshot=_collect_device_snapshot(self._session_hub))
+            save_spe(fpath, [self._bg_frame], device_snapshot=_collect_device_snapshot(self))
             self._bg_update_ui(source_name=Path(fpath).name)
         except Exception as e:
             dev_logger.warning(f"[BG] 자동 저장 실패: {e}")
@@ -1527,7 +1527,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
                     **( {"ProcROI": self._get_proc_roi_metadata()}
                         if self._get_proc_roi_metadata() else {} ),
                 },
-                device_snapshot=_collect_device_snapshot(self._session_hub),
+                device_snapshot=_collect_device_snapshot(self),
             )
             scan_widget.set_scan_status(f"💾 SPE 저장: {fname}", "ok")
             dev_logger.info(f"[Scan] SPE 저장 완료: {fpath} ({len(self._scan_frames_buf)} frames)")

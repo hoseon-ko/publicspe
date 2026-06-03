@@ -166,7 +166,7 @@ class MainWindow(QMainWindow):
         self.session_hub.register_camera_hal("picam", PicamCameraAdapter)
         self.session_hub.register_camera_hal("simulated", SimulatedCameraAdapter)
         self.session_hub.select_camera_vendor("simulated")
-        self.setWindowTitle("SpeAnalyze — DeepAlign")
+        self.setWindowTitle("DeepAlign")
         self.setMinimumSize(1300, 850)
         self.resize(1700, 1000)
         self._setup_log_dock()
@@ -211,15 +211,7 @@ class MainWindow(QMainWindow):
         hdr_h.setContentsMargins(8, 0, 8, 0)
         hdr_h.setSpacing(0)
 
-        lbl_app = QLabel("SpeAnalyze")
-        lbl_app.setStyleSheet(
-            f"color: #4ecdc4; font-family: '{_FC}', 'Segoe UI'; font-size: 15px;"
-            " font-weight: bold; letter-spacing: 2px;"
-            " padding: 0 20px 0 10px;"
-            f" border-right: 1px solid {_HDR_BORDER};"
-        )
-        hdr_h.addWidget(lbl_app)
-        hdr_h.addSpacing(8)
+
 
         # ── DeepAlign 단일 탭 라벨 (스타일 유지용) ─────────────────
         _tab_qss = f"""

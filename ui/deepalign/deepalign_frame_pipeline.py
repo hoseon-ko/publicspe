@@ -126,6 +126,7 @@ class FramePipelineMixin:
         """현재 proc ROI / BG 설정을 SPE extra_metadata 호환 dict로 반환.
         save_spe() 의 extra_metadata["ProcROI"] 에 그대로 전달하면 됩니다."""
         meta: dict[str, str] = {}
+        meta["Enabled"] = str(getattr(self, '_proc_enabled', False))
 
         sig = self._get_sig_roi_rect()
         if sig is not None:
