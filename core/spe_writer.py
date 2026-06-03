@@ -76,6 +76,7 @@ def save_spe(
     creator: str = "",
     created: Optional[str] = None,
     extra_metadata: Optional[Dict[str, Any]] = None,
+    device_snapshot: Optional[Dict[str, Any]] = None,
 ) -> Path:
     """
     SPE 3.0 포맷으로 이미지를 저장한다 (LightField / spe_loader 호환).
@@ -95,6 +96,11 @@ def save_spe(
     adc_info          : {adc_quality, adc_speed, adc_analog_gain, bit_depth, readout_ports_used}
     """
     # ── frames 통일 ────────────────────────────────────────────────────
+    if device_snapshot:
+        extra = extra_metadata or {}
+        extra["DeviceSnapshot"] = device_snapshot
+        extra_metadata = extra
+
     if isinstance(frames, np.ndarray):
         frames = [frames[i] for i in range(frames.shape[0])] if frames.ndim == 3 else [frames]
     frames = list(frames)

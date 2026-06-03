@@ -28,6 +28,27 @@ from ui.deepalign.deepalign_timing import clamp_frame_elapsed, overall_progress_
 from ui.deepalign.deepalign_workers import _AcquireWorker
 from core.workers import SnapWorker
 
+def _collect_device_snapshot(hub) -> dict:
+    snap = {}
+    if hub is None:
+        return snap
+    if hasattr(hub, 'is_acs_connected') and hub.is_acs_connected():
+        try:
+            snap["ACS_mm"] = hub.acs_get_positions()
+        except Exception:
+            pass
+    if hasattr(hub, 'is_kimm_connected') and hub.is_kimm_connected():
+        try:
+            snap["KIMM_Z_um"] = hub.kimm_get_z()
+        except Exception:
+            pass
+    if hasattr(hub, 'is_pico_connected') and hub.is_pico_connected():
+        try:
+            snap["Pico"] = {f"M{i}": hub.pico_get_position(i) for i in range(1, 5)}
+        except Exception:
+            pass
+    return snap
+
 
 class CameraControllerMixin(CameraHubMixin):
     def _is_hub_camera_connected(self) -> bool:
@@ -408,6 +429,7 @@ class CameraControllerMixin(CameraHubMixin):
             creator="DeepAlign",
             software="SpeAnalyze-DeepAlign",
             extra_metadata=extra,
+            device_snapshot=_collect_device_snapshot(self._session_hub),
         )
 
     def _on_save_current_spe(self) -> None:
@@ -415,6 +437,16 @@ class CameraControllerMixin(CameraHubMixin):
 
         Acquire 와 동일한 폴더/파일명 규칙 (SAVE FILE 섹션) 사용.
         """
+        from PyQt6.QtWidgets import QMessageBox
+        
+        reply = QMessageBox.question(
+            self, 'Save Confirmation', '저장하시겠습니까?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.No:
+            return
+            
         try:
             raw = self.cam_viewer.get_source_image()
         except Exception:
@@ -428,6 +460,70 @@ class CameraControllerMixin(CameraHubMixin):
             dev_logger.info(f"[DeepAlign] Saved current frame → {path}")
         except Exception as e:
             dev_logger.exception(f"[DeepAlign] Save SPE 실패: {e}")
+
+    def _on_save_as_clicked(self) -> None:
+        """viewer toolbar 의 💾 Save As → 현재 표시 raw 1프레임을 SPE 저장."""
+        from PyQt6.QtWidgets import QFileDialog
+        
+        try:
+            raw = self.cam_viewer.get_source_image()
+        except Exception:
+            raw = None
+        if raw is None:
+            dev_logger.warning("[DeepAlign] Save As: 저장할 frame 없음 (Snap/Live 먼저)")
+            return
+            
+        try:
+            default_path = str(self._build_acquire_save_path(name_base="SNAP"))
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Save SPE As", default_path, "SPE Files (*.spe);;All Files (*)",
+                options=QFileDialog.Option.DontUseNativeDialog
+            )
+            if not path:
+                return
+
+            vendor = self.cb_vendor.currentText().strip() or "DeepAlign"
+            camera_name = vendor
+            camera_model = vendor
+            camera_serial = ""
+
+            if self._session_hub is not None:
+                try:
+                    state = self._session_hub.get_camera_state()
+                    camera_name = getattr(state, "vendor", "") or camera_name
+                    camera_model = getattr(state, "device_id", "") or camera_model
+                except Exception:
+                    pass
+
+            extra: dict = {
+                "DeepAlign": {
+                    "Owner":  "DeepAlign",
+                    "Frames": 1,
+                    "Vendor": vendor,
+                }
+            }
+            proc_roi_meta = {}
+            if callable(getattr(self, '_get_proc_roi_metadata', None)):
+                proc_roi_meta = self._get_proc_roi_metadata()
+            if proc_roi_meta:
+                extra["ProcROI"] = proc_roi_meta
+
+            save_spe(
+                Path(path),
+                [raw],
+                exposure_ms=float(self.spin_exposure.value()),
+                camera_name=camera_name,
+                camera_model=camera_model,
+                camera_serial=camera_serial,
+                creator="DeepAlign",
+                software="SpeAnalyze-DeepAlign",
+                extra_metadata=extra,
+            )
+            
+            self.spe_saved.emit(str(path))
+            dev_logger.info(f"[DeepAlign] Saved current frame → {path}")
+        except Exception as e:
+            dev_logger.exception(f"[DeepAlign] Save As 실패: {e}")
 
     def _start_hub_live(self) -> None:
         if self._session_hub is None:

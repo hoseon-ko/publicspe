@@ -33,7 +33,7 @@ from core.async_worker import SpeLoadWorker
 from ui.deepalign.autofocus_panel import AutoFocusPanel
 from ui.deepalign.wrappers import DeepAlignAcsPanel, DeepAlignMirrorPanel
 from ui.motion.motion_tab import MotionTab
-from ui.deepalign.deepalign_camera_controller import CameraControllerMixin
+from ui.deepalign.deepalign_camera_controller import CameraControllerMixin, _collect_device_snapshot
 from ui.deepalign.deepalign_frame_pipeline import FramePipelineMixin
 from ui.deepalign.deepalign_layout import LayoutBuilderMixin
 from ui.deepalign.deepalign_styles import DeepAlignStylesMixin
@@ -449,6 +449,8 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         # Viewer UI Toggle Requests
         self.cam_viewer.viewer.toggle_analysis_requested.connect(self._on_toggle_analysis_requested)
         self.cam_viewer.viewer.save_spe_requested.connect(self._on_save_current_spe)
+        if hasattr(self.cam_viewer.viewer, 'save_as_requested'):
+            self.cam_viewer.viewer.save_as_requested.connect(self._on_save_as_clicked)
 
         # ── Master bar — Mirror 탭 ────────────────────────────────────
         self.btn_mirror_zero_all.clicked.connect(self.mirror_panel.zero_all)
@@ -857,7 +859,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         stem   = self.edit_bg_filename.text().strip() or "background"
         fpath  = str(Path(folder) / f"{stem}.spe")
         try:
-            save_spe(fpath, [self._bg_frame])
+            save_spe(fpath, [self._bg_frame], device_snapshot=_collect_device_snapshot(self._session_hub))
             self._bg_update_ui(source_name=Path(fpath).name)
         except Exception as e:
             dev_logger.warning(f"[BG] 자동 저장 실패: {e}")
@@ -1525,6 +1527,7 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
                     **( {"ProcROI": self._get_proc_roi_metadata()}
                         if self._get_proc_roi_metadata() else {} ),
                 },
+                device_snapshot=_collect_device_snapshot(self._session_hub),
             )
             scan_widget.set_scan_status(f"💾 SPE 저장: {fname}", "ok")
             dev_logger.info(f"[Scan] SPE 저장 완료: {fpath} ({len(self._scan_frames_buf)} frames)")

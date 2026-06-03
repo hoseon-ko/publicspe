@@ -31,6 +31,7 @@ class SpeImageViewerV2(QWidget):
     # UI Toggle Requests
     toggle_analysis_requested = pyqtSignal(str)     # 'profile' or 'histogram' or 'proc'
     save_spe_requested = pyqtSignal()               # 현재 표시 raw → SPE 저장 요청
+    save_as_requested = pyqtSignal()                # 현재 표시 raw → 이름지정 SPE 저장 요청
 
     def __init__(self, state: ViewerState | None = None, parent=None):
         super().__init__(parent)
@@ -133,6 +134,9 @@ class SpeImageViewerV2(QWidget):
         self.btn_save_spe = make_btn("💾 Save SPE", "현재 표시된 raw 를 SPE 로 저장")
         self.btn_save_spe.clicked.connect(self.save_spe_requested.emit)
 
+        self.btn_save_as = make_btn("💾 Save As", "현재 표시된 raw 를 SPE 로 저장 (경로 지정)")
+        self.btn_save_as.clicked.connect(self.save_as_requested.emit)
+
         # 컬러맵 선택 드롭다운
         self.combo_cmap = QComboBox()
         self.combo_cmap.addItems(["Off", "Gray", "Jet", "Viridis", "Hot", "Plasma"])
@@ -180,6 +184,7 @@ class SpeImageViewerV2(QWidget):
 
         row2.addStretch()
         row2.addWidget(self.btn_save_spe)
+        row2.addWidget(self.btn_save_as)
 
         self.btn_toggle_profile.clicked.connect(lambda: self.toggle_analysis_requested.emit("profile"))
         self.btn_toggle_histogram.clicked.connect(lambda: self.toggle_analysis_requested.emit("histogram"))
