@@ -401,9 +401,6 @@ class LayoutBuilderMixin:
         self.analysis_toolbar.setVisible(False)
 
         # ── Toolbar Actions ───────────────────────────────────────────
-        self.act_an_open = QAction("📂  Open SPE", self)
-        self.analysis_toolbar.addAction(self.act_an_open)
-        self.analysis_toolbar.addSeparator()
         
         self.dock_toggles = {}
         for text, dock in [

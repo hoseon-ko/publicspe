@@ -528,11 +528,11 @@ class DeepAlignMainTab(LayoutBuilderMixin, FramePipelineMixin, DeepAlignStylesMi
         self.btn_reset_dock.clicked.connect(self._on_reset_dock_layout)
 
         # ── Analysis Toolbar Connections ──────────────────────────────
-        self.act_an_open.triggered.connect(self._on_an_open_clicked)
         self.act_an_roi_range.triggered.connect(self._on_an_roi_range_toggled)
         self.act_an_fit.triggered.connect(self._on_an_fit_clicked)
 
         # File List Panel (Global)
+        self.file_list_panel.btn_open.clicked.connect(self._on_an_open_clicked)
         self.file_list_panel.file_selected.connect(self._on_file_selected)
         self.file_list_panel.frame_changed.connect(self._on_frame_changed)
         self.file_list_panel.file_removed.connect(self.frame_grid_panel.remove_file)
